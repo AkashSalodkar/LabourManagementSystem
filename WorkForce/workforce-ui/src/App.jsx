@@ -1,0 +1,1558 @@
+import { useState, useEffect } from 'react';
+import { FaEye, FaEyeSlash } from 'react-icons/fa';
+import lmsLogo from './assets/LMSLogo.jpg';
+
+export default function App() {
+  const API_BASE_URL = 'https://localhost:7036/api/auth';
+
+  // Authentication States
+  const [isLoginView, setIsLoginView] = useState(true);
+  const [isUserAuthenticated, setIsUserAuthenticated] = useState(false);
+  const [loggedInUser, setLoggedInUser] = useState(null);
+
+  // Form Fields State
+  const [mobileNumber, setMobileNumber] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  // Builder Registration Fields
+  const [companyName, setCompanyName] = useState('');
+  const [registeredAddress, setRegisteredAddress] = useState('');
+  const [gstNumber, setGstNumber] = useState('');
+  const [panNumber, setPanNumber] = useState('');
+  const [city, setCity] = useState('');
+  const [registeredMobileNumber, setRegisteredMobileNumber] = useState('');
+  const [supervisorCount, setSupervisorCount] = useState('');
+  const [contractorCount, setContractorCount] = useState('');
+  const [builderType, setBuilderType] = useState('');
+  const [otp, setOtp] = useState('');
+  //Contractor Regstration fields
+  const [specialization, setSpecialization] = useState('');
+  const [address, setAddress] = useState('');
+  //Supervisor Regstration fields.
+  const [supervisorType, setSupervisorType] = useState('');
+  const [builderCompanyName, setBuilderCompanyName] = useState('');
+  const [contractorName, setContractorName] = useState('');
+  //Labor Regstration fields
+  const [skillSet, setSkillSet] = useState('');
+  // Operational App Flags
+  const [otpSent, setOtpSent] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [isPasswordRequired, setIsPasswordRequired] = useState(true);
+
+  // Navigation State
+  const [activePage, setActivePage] = useState('dashboard');
+
+  // Builder Dummy Metrics Data
+  const [projectsList, setProjectsList] = useState([
+    { id: 1, name: 'Metro Station Extension Phase-1', status: 'In Progress', budget: '$45,000' },
+    { id: 2, name: 'Smart City Housing Complex B', status: 'Planning', budget: '$120,000' }
+  ]);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectBudget, setNewProjectBudget] = useState('');
+
+  // Initializer Layer with error catching for empty local storage
+  useEffect(() => {
+    const hasSoftToken = localStorage.getItem('workforce_soft_token');
+    const storedUser = localStorage.getItem('workforce_user');
+
+    if (hasSoftToken === 'true' && storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        if (parsedUser) {
+          setLoggedInUser(parsedUser);
+          setIsUserAuthenticated(true);
+          setIsPasswordRequired(false);
+          return;
+        }
+      } catch (e) {
+        localStorage.clear();
+      }
+    }
+
+    // Default fallback state if token is not found or corrupted
+    setIsUserAuthenticated(false);
+    setLoggedInUser(null);
+    setIsPasswordRequired(true);
+  }, [isLoginView]);
+
+  const toggleView = () => {
+    setIsLoginView(!isLoginView);
+    setOtp('');
+    setOtpSent(false);
+    setFullName('');
+    setPassword('');
+  };
+  const isBuilderFormValid = () => {
+    if (role !== "Builder") return true;
+
+    return (
+        companyName.trim() !== "" &&
+        registeredAddress.trim() !== "" &&
+        gstNumber.trim() !== "" &&
+        panNumber.trim() !== "" &&
+        city.trim() !== "" &&
+        registeredMobileNumber.length === 10 &&
+        supervisorCount !== "" &&
+        contractorCount !== "" &&
+        builderType.trim() !== ""
+    );
+  };
+  const isContractorFormValid = () => {
+    if (role !== "Contractor") return true;
+
+    return (
+        specialization.trim() !== "" &&
+        address.trim() !== ""
+    );
+  };
+  const isLaborFormValid = () => {
+    if (role !== "Labor") return true;
+    return (
+        skillSet.trim() !== ""&&
+        address.trim() !== ""
+    );
+  };
+    const isBuilderSupervisorFormValid = () => {
+       if (role !== "BuilderSupervisor") return true;
+
+    return (
+        supervisorType.trim() !== "" &&
+        companyName.trim() !== "" &&
+        address.trim() !== ""
+    );    
+  };
+  const isContractorSupervisorFormValid = () => {
+       if (role !== "ContractorSupervisor") return true;
+
+    return (
+        supervisorType.trim() !== "" &&
+        contractorName.trim() !== "" &&
+        address.trim() !== ""
+    );    
+  };
+  const handleSendOtp = async () => {
+
+    if (!role) {
+        alert("Please select your role.");
+        return;
+    }
+
+    if (!isLoginView && !fullName.trim()) {
+    alert("Please enter Full Name.");
+    return;
+}
+
+    if (!mobileNumber || mobileNumber.length !== 10) {
+        alert("Please enter a valid mobile number.");
+        return;
+    }
+
+    if (!password.trim()) {
+        alert("Please enter Password.");
+        return;
+    }
+
+    if (!isLoginView && role === "Builder" && !isBuilderFormValid()) {
+        alert("Please fill all Builder details before requesting OTP.");
+        return;
+    }
+    if (!mobileNumber || mobileNumber.length !== 10) {
+      alert('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    setSendingOtp(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: mobileNumber, role: role })
+      });
+
+      const responseText = await response.text();
+      let data = {};
+      if (responseText) {
+        try { data = JSON.parse(responseText); } catch { data = { message: responseText }; }
+      }
+
+      if (response.ok) {
+        setOtpSent(true);
+        alert(data.message || `Verification token generated successfully for +91 ${mobileNumber}`);
+      } else {
+        alert(data.message || 'Failed to dispatch verification code packets.');
+      }
+    } catch (error) {
+      console.error('Network Error:', error);
+      alert('Could not establish contact with backend services.');
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!otpSent) {
+      alert('Please generate and input your verification OTP packet first.');
+      return;
+    }
+
+    setLoading(true);
+    const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
+
+    const payload = isLoginView
+      ? {
+          mobileNumber: mobileNumber.trim(),
+          password: password,
+          otp: otp,
+          IsPasswordRequired: isPasswordRequired
+        }
+      : {
+          mobileNumber: mobileNumber.trim(),
+          passwordHash: password,
+          otp: otp,
+          role: role,
+          fullName: fullName,
+
+          companyName,
+          registeredAddress,
+          gstNumber,
+          panNumber,
+          city,
+          registeredMobileNumber,
+          supervisorCount: Number(supervisorCount),
+          contractorCount: Number(contractorCount),
+          builderType,
+
+          address,
+          specialization,
+          skillSet,
+
+          supervisorType,
+          builderCompanyName,
+          contractorName
+        };
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const responseText = await response.text();
+      let data = {};
+      if (responseText) {
+        try { data = JSON.parse(responseText); } catch { data = { message: responseText }; }
+      }
+
+      if (response.ok) {
+        if (isLoginView) {
+          alert('Login Successful! Welcome to E - Muster Card portal.');
+          localStorage.setItem('workforce_soft_token', 'true');
+
+          const sessionUser = {
+            userId: data.userId,
+            name: data.fullName || data.name,
+            mobileNumber: data.mobileNumber,
+            role: data.role
+          };
+
+          localStorage.setItem('workforce_user', JSON.stringify(sessionUser));
+          setLoggedInUser(sessionUser);
+          setIsUserAuthenticated(true);
+          setActivePage('dashboard');
+        } else {
+          alert(data.message || 'Registration Completed Successfully! Swapping back to login view.');
+          setIsLoginView(true);
+          setOtp('');
+          setOtpSent(false);
+          setPassword('');
+        }
+          setCompanyName('');
+          setRegisteredAddress('');
+          setGstNumber('');
+          setPanNumber('');
+          setCity('');
+          setRegisteredMobileNumber('');
+          setSupervisorCount('');
+          setContractorCount('');
+          setBuilderType('');
+          setAddress('');
+          setSpecialization('');
+          setSkillSet('');
+          setSupervisorType('');
+          setContractorName('');
+          setCompanyName('');
+      } else {
+        alert(data.message || 'Validation failed down at backend services.');
+      }
+    } catch (error) {
+      console.error('Transaction API processing failure:', error);
+      alert('Connection error occurred while processing server tasks.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFullLogout = () => {
+    const confirmLogout = window.confirm(
+    "Are you sure you want to sign out?"
+  );
+
+  if (!confirmLogout) {
+    return;
+  }
+    localStorage.clear();
+    setIsUserAuthenticated(false);
+    setLoggedInUser(null);
+    setIsPasswordRequired(true);
+    setOtp('');
+    setOtpSent(false);
+    setMobileNumber('');
+    setPassword('');
+    window.location.reload();
+  };
+  const renderRoleFields = () => {
+    switch (role) {
+      case "Builder":
+            return (
+                <>
+                    {!isLoginView && role === "Builder" && (
+<>
+    <div>
+        Company Name
+        <input
+            type="text"
+            required
+            value={companyName}
+            onChange={(e)=>setCompanyName(e.target.value)}
+            placeholder="ABC Constructions Pvt Ltd"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        Registered Address
+        <textarea
+            value={registeredAddress}
+            required
+            onChange={(e)=>setRegisteredAddress(e.target.value)}
+            rows={3}
+            placeholder="Registered Office Address"
+            style={{
+                ...inputStyle,
+                resize:"vertical"
+            }}
+        />
+    </div>
+
+    <div>
+        GST Number
+        <input
+            type="text"
+            value={gstNumber}
+            required
+            onChange={(e)=>setGstNumber(e.target.value.toUpperCase())}
+            placeholder="27ABCDE1234F1Z5"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        PAN Number
+        <input
+            type="text"
+            value={panNumber}
+            required
+            onChange={(e)=>setPanNumber(e.target.value.toUpperCase())}
+            placeholder="ABCDE1234F"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        City
+        <input
+            type="text"
+            value={city}
+            required
+            onChange={(e)=>setCity(e.target.value)}
+            placeholder="Mumbai"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        Registered Mobile Number
+        <input
+            type="tel"
+            maxLength={10}
+            value={registeredMobileNumber}
+            required
+            onChange={(e)=>setRegisteredMobileNumber(e.target.value.replace(/\D/g,''))}
+            placeholder="9876543210"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        Supervisor Count
+        <input
+            type="number"
+            required
+            value={supervisorCount}
+            onChange={(e)=>setSupervisorCount(e.target.value)}
+            placeholder="5"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        Contractor Count
+        <input
+            type="number"
+            required
+            value={contractorCount}
+            onChange={(e)=>setContractorCount(e.target.value)}
+            placeholder="15"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        Builder Type
+        <select
+            value={builderType}
+            required
+            onChange={(e)=>setBuilderType(e.target.value)}
+            style={inputStyle}
+        >
+            <option value="">Select Builder Type</option>
+            <option value="Residential">Residential</option>
+            <option value="Commercial">Commercial</option>
+            <option value="Industrial">Industrial</option>
+            <option value="Infrastructure">Infrastructure</option>
+            <option value="Government">Government</option>
+        </select>
+    </div>
+</>
+
+)}
+                </>
+            );
+        case "Contractor":
+            return (
+                <>
+                    {!isLoginView && role === "Contractor" && (
+<>
+    <div>
+        Specialization 
+        <input
+            type="text"
+            value={specialization}
+            required
+            onChange={(e)=>setSpecialization(e.target.value)}
+            placeholder="E.g. Electrical, Plumbing, Carpentry"
+            style={inputStyle}
+        />
+    </div>
+
+    <div>
+        Address
+        <textarea
+            value={address}
+            required
+            onChange={(e)=>setAddress(e.target.value)}
+            rows={3}
+            placeholder="Enter your Address"
+            style={{
+                ...inputStyle,
+                resize:"vertical"
+            }}
+        />
+    </div>
+  </>
+)}
+                </>
+            );
+
+        case "BuilderSupervisor":
+            return (
+                <>
+                    {!isLoginView && role === "BuilderSupervisor" && (
+<>
+    <div>
+        Address
+        <textarea
+            value={address}
+            required
+            onChange={(e)=>setAddress(e.target.value)}
+            rows={3}
+            placeholder="Enter your Address"
+            style={{
+                ...inputStyle,
+                resize:"vertical"
+            }}
+        />
+    </div>
+    <div>
+        Company Name 
+        <input
+            type="text"
+            value={builderCompanyName}
+            required
+            onChange={(e)=>setBuilderCompanyName(e.target.value)}
+            placeholder="Enter your Builder's Company Name"
+            style={inputStyle}
+        />
+    </div>
+  </>
+)}
+                </>
+            );
+            case "ContractorSupervisor":
+            return (
+                <>
+                    {!isLoginView && role === "ContractorSupervisor" && (
+<>
+    <div>
+        Address
+        <textarea
+            value={address}
+            required
+            onChange={(e)=>setAddress(e.target.value)}
+            rows={3}
+            placeholder="Enter your Address"
+            style={{
+                ...inputStyle,
+                resize:"vertical"
+            }}
+        />
+    </div>
+    <div>
+        Contractor Name 
+        <input
+            type="text"
+            value={contractorName}
+            required
+            onChange={(e)=>setContractorName(e.target.value)}
+            placeholder="Enter your Contractor Name"
+            style={inputStyle}
+        />
+    </div>
+  </>
+)}
+                </>
+            );
+        case "Labor":
+            return (
+                <>
+                    {!isLoginView && role === "Labor" && (
+<>
+    <div>
+        Skill Set
+        <select
+            value={skillSet}
+            required
+            placeholder="Enter your Skill"
+            onChange={(e)=>setSkillSet(e.target.value)}
+            style={inputStyle}
+        >
+            <option value="">Select Skill Set</option>
+            <option value="Mason">Mason</option>
+            <option value="Electrician">Electrician</option>
+            <option value="Plumber">Plumber</option>
+            <option value="Carpenter">Carpenter</option>
+            <option value="Painter">Painter</option>
+            <option value="Welder">Welder</option>
+            <option value="Male Worker">Male Worker</option>
+            <option value="Female Worker">Female Worker</option>
+            <option value="PopWorker">PopWorker</option>
+        </select>
+    </div>
+
+    <div>
+        Address
+        <textarea
+            value={address}
+            required
+            onChange={(e)=>setAddress(e.target.value)}
+            rows={3}
+            placeholder="Enter your Address"
+            style={{
+                ...inputStyle,
+                resize:"vertical"
+            }}
+        />
+    </div>
+  </>
+)}
+                </>
+            );
+
+        default:
+            return null;
+    }
+};
+
+  const handleCreateProject = (e) => {
+    e.preventDefault();
+    if (!newProjectName) return;
+    const newProj = {
+      id: projectsList.length + 1,
+      name: newProjectName,
+      status: 'Planning',
+      budget: newProjectBudget ? `$${newProjectBudget}` : '$0'
+    };
+    setProjectsList([...projectsList, newProj]);
+    setNewProjectName('');
+    setNewProjectBudget('');
+    setActivePage('dashboard');
+    alert('Project launched successfully!');
+  };
+
+  if (isUserAuthenticated && loggedInUser) {
+    const userRoleString = (loggedInUser?.role || '').toLowerCase();
+    const isBuilder = userRoleString === 'builder';
+
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          display: 'flex',
+          backgroundColor: '#f8fafc',
+          fontFamily: 'sans-serif',
+          boxSizing: 'border-box',
+          margin: 0,
+          padding: 0,
+          overflow: 'hidden'
+        }}
+      >
+        {/* LEFT SIDEBAR PANEL */}
+        <aside
+          style={{
+            width: '260px',
+            minWidth: '260px',
+            backgroundColor: '#0f172a',
+            color: '#ffffff',
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '24px 16px',
+            boxSizing: 'border-box',
+            height: '100%'
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              marginBottom: '32px',
+              paddingLeft: '8px'
+            }}
+          >
+            <div
+              style={{
+                height: '36px',
+                width: '36px',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                backgroundColor: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <img
+                src={lmsLogo}
+                alt="Logo"
+                style={{
+                  height: '100%',
+                  width: '100%',
+                  objectFit: 'cover'
+                }}
+              />
+            </div>
+            <div>
+              <div
+                style={{
+                  fontSize: '15px',
+                  fontWeight: 'bold',
+                  color: '#ffffff'
+                }}
+              >
+                E - Muster Card
+              </div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: '#94a3b8',
+                  fontWeight: '500',
+                  marginTop: '2px'
+                }}
+              >
+                Role: {loggedInUser?.role}
+              </div>
+            </div>
+          </div>
+
+          <nav
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              flex: 1
+            }}
+          >
+            <button
+              onClick={() => setActivePage('dashboard')}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                padding: '12px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                fontWeight: '600',
+                fontSize: '13px',
+                cursor: 'pointer',
+                backgroundColor: activePage === 'dashboard' ? '#1e293b' : 'transparent',
+                color: activePage === 'dashboard' ? '#38bdf8' : '#94a3b8'
+              }}
+            >
+              📊 Overview Dashboard
+            </button>
+            {isBuilder && (
+              <>
+                <button
+                  onClick={() => setActivePage('add-project')}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontWeight: '600',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    backgroundColor: activePage === 'add-project' ? '#1e293b' : 'transparent',
+                    color: activePage === 'add-project' ? '#38bdf8' : '#94a3b8'
+                  }}
+                >
+                  ➕ Add New Project
+                </button>
+                <button
+                  onClick={() => setActivePage('reports')}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    fontWeight: '600',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    backgroundColor: activePage === 'reports' ? '#1e293b' : 'transparent',
+                    color: activePage === 'reports' ? '#38bdf8' : '#94a3b8'
+                  }}
+                >
+                  📋 Operational Reports
+                </button>
+              </>
+            )}
+          </nav>
+
+          <button
+            onClick={handleFullLogout}
+            style={{
+              width: '100%',
+              padding: '12px',
+              borderRadius: '8px',
+              backgroundColor: '#311212',
+              color: '#f87171',
+              border: '1px solid #7f1d1d',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              fontSize: '13px',
+              textAlign: 'center'
+            }}
+          >
+            🚪 Sign Out Account
+          </button>
+        </aside>
+
+        {/* RIGHT CONTENT DISPLAY PANEL */}
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            overflowY: 'auto',
+            boxSizing: 'border-box'
+          }}
+        >
+          <main
+            style={{
+              padding: '32px',
+              boxSizing: 'border-box'
+            }}
+          >
+            {activePage === 'dashboard' && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '28px'
+                }}
+              >
+                {isBuilder ? (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                      gap: '20px'
+                    }}
+                  >
+                    <div
+                      style={{
+                        backgroundColor: '#ffffff',
+                        padding: '24px',
+                        borderRadius: '14px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.02)'
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        Total Active Projects
+                        <div
+                          style={{
+                            fontSize: '32px',
+                            fontWeight: 'bold',
+                            color: '#0f4c94',
+                            marginTop: '6px'
+                          }}
+                        >
+                          {projectsList.length} Sites
+                        </div>
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        backgroundColor: '#ffffff',
+                        padding: '24px',
+                        borderRadius: '14px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.02)'
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        Contractors Count
+                        <div
+                          style={{
+                            fontSize: '32px',
+                            fontWeight: 'bold',
+                            color: '#047857',
+                            marginTop: '6px'
+                          }}
+                        >
+                          8 Managed
+                        </div>
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        backgroundColor: '#ffffff',
+                        padding: '24px',
+                        borderRadius: '14px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.02)'
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        Supervisors Count
+                        <div
+                          style={{
+                            fontSize: '32px',
+                            fontWeight: 'bold',
+                            color: '#b45309',
+                            marginTop: '6px'
+                          }}
+                        >
+                          14 Active
+                        </div>
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        backgroundColor: '#ffffff',
+                        padding: '24px',
+                        borderRadius: '14px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.02)'
+                      }}
+                    >
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          color: '#94a3b8',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        Payments Summary
+                        <div
+                          style={{
+                            fontSize: '26px',
+                            fontWeight: 'bold',
+                            color: '#0f172a',
+                            marginTop: '10px'
+                          }}
+                        >
+                          $16,450{' '}
+                          <span
+                            style={{
+                              fontSize: '12px',
+                              color: '#64748b',
+                              fontWeight: 'normal'
+                            }}
+                          >
+                            Paid
+                          </span>
+                        </div>
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div>Operational layout overview mapped for role type: {loggedInUser?.role}.</div>
+                )}
+                <div
+                  style={{
+                    backgroundColor: '#ffffff',
+                    borderRadius: '14px',
+                    border: '1px solid #e2e8f0',
+                    padding: '24px'
+                  }}
+                >
+                  <h3
+                    style={{
+                      margin: '0 0 16px 0',
+                      fontSize: '15px',
+                      color: '#1e293b',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    Current Operations Track Registry
+                    <div
+                      style={{
+                        overflowX: 'auto'
+                      }}
+                    >
+                      {/* Add table or other content here */}
+                    </div>
+                  </h3>
+                </div>
+              </div>
+            )}
+            {activePage === 'add-project' && (
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  padding: '32px',
+                  borderRadius: '14px',
+                  border: '1px solid #e2e8f0',
+                  maxWidth: '600px',
+                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.02)'
+                }}
+              >
+                <h3
+                  style={{
+                    margin: '0 0 8px 0',
+                    fontSize: '18px',
+                    color: '#0f4c94',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  Initialize New Infrastructure
+                  <form
+                    onSubmit={handleCreateProject}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '20px',
+                      marginTop: '20px'
+                    }}
+                  >
+                    <div>
+                      Project Name
+                      <input
+                        type="text"
+                        required
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        placeholder="e.g. Commercial Office Tower"
+                        style={{
+                          width: '100%',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                          padding: '12px',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                          fontWeight: '600'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      Funding Budget Allocation (USD)
+                      <input
+                        type="number"
+                        value={newProjectBudget}
+                        onChange={(e) => setNewProjectBudget(e.target.value)}
+                        placeholder="e.g. 75000"
+                        style={{
+                          width: '100%',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                          padding: '12px',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                          fontWeight: '600'
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: '12px',
+                        paddingTop: '8px'
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        style={{
+                          flex: 1,
+                          padding: '14px',
+                          borderRadius: '8px',
+                          backgroundColor: '#004d5a',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          fontSize: '14px'
+                        }}
+                      >
+                        Launch Project Track
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActivePage('dashboard')}
+                        style={{
+                          padding: '14px 20px',
+                          borderRadius: '8px',
+                          backgroundColor: '#f1f5f9',
+                          color: '#475569',
+                          border: 'none',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          fontSize: '14px'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </h3>
+              </div>
+            )}
+            {activePage === 'reports' && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px'
+                }}
+              >
+                <div
+                  style={{
+                    backgroundColor: '#ffffff',
+                    padding: '24px',
+                    borderRadius: '14px',
+                    border: '1px solid #e2e8f0'
+                  }}
+                >
+                  <h4
+                    style={{
+                      margin: '0 0 6px 0',
+                      fontSize: '15px',
+                      color: '#0f4c94',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    📈 Workforce Distribution Report
+                    <p
+                      style={{
+                        color: '#475569',
+                        fontSize: '13px',
+                        margin: '0'
+                      }}
+                    >
+                      System analytical tracking log compiling the deployment percentage ratios across all active contractor channels.
+                    </p>
+                  </h4>
+                </div>
+                <div
+                  style={{
+                    backgroundColor: '#ffffff',
+                    padding: '24px',
+                    borderRadius: '14px',
+                    border: '1px solid #e2e8f0'
+                  }}
+                >
+                  <h4
+                    style={{
+                      margin: '0 0 6px 0',
+                      fontSize: '15px',
+                      color: '#0f4c94',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    💸 Financial Audit Clearance Log
+                    <p
+                      style={{
+                        color: '#475569',
+                        fontSize: '13px',
+                        margin: '0'
+                      }}
+                    >
+                      Weekly summary compiling site worker authentication validations matched with database escrow payments.
+                    </p>
+                  </h4>
+                </div>
+              </div>
+            )}
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // VIEW RENDER LAYER 2: GATEWAY ACCESS LOGIN SCREEN (FALLBACK - MATHEMATICALLY CENTERED)
+  // ==========================================
+  const inputStyle = {
+    width: "100%",
+    borderRadius: "12px",
+    border: "1px solid #e2e8f0",
+    padding: "12px",
+    backgroundColor: "#f8fafc",
+    outline: "none",
+    boxSizing: "border-box",
+    fontSize: "14px",
+    marginTop: "5px"
+};
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#f8fafc',
+        padding: '16px',
+        fontFamily: 'sans-serif',
+        boxSizing: 'border-box',
+        margin: 0
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '400px',
+          borderRadius: '16px',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+          backgroundColor: '#ffffff',
+          padding: '32px',
+          border: '1px solid #f1f5f9',
+          boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)',
+          boxSizing: 'border-box'
+        }}
+      >
+        {/* Branding Area */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            marginBottom: '20px'
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              height: '96px',
+              width: '96px',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '16px',
+              backgroundColor: '#ffffff',
+              border: '1px solid #f1f5f9',
+              marginBottom: '8px',
+              overflow: 'hidden',
+              boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+            }}
+          >
+            <img
+              src={lmsLogo}
+              alt="LMS Logo"
+              style={{
+                height: '100%',
+                width: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          </div>
+          <h1
+            style={{
+              fontSize: '20px',
+              fontWeight: 'bold',
+              letterSpacing: '-0.025em',
+              color: '#0f4c94',
+              margin: 0
+            }}
+          >
+            E - Muster Card
+          </h1>
+        </div>
+        {/* Core Form Element */}
+        <form
+          onSubmit={handleSubmit}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}
+        >
+          {/* REGISTRATION ONLY: Full Name */}
+          {!isLoginView && (
+            <div>
+              Full Name
+              <div
+                style={{
+                  display: 'flex',
+                  borderRadius: '12px',
+                  border: '1px solid #e2e8f0',
+                  padding: '12px',
+                  backgroundColor: '#f8fafc'
+                }}
+              >
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="John Doe"
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    outline: 'none',
+                    color: '#1e293b',
+                    fontWeight: '600',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          {/* SHARED: Mobile Field */}
+          <div>
+            Mobile Number
+            <div
+              style={{
+                display: 'flex',
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                padding: '12px',
+                backgroundColor: '#f8fafc'
+              }}
+            >
+              <span
+                style={{
+                  color: '#94a3b8',
+                  marginRight: '8px',
+                  fontWeight: '600',
+                  fontSize: '14px'
+                }}
+              >
+                +91
+              </span>
+              <input
+                type="tel"
+                required
+                maxLength="10"
+                value={mobileNumber}
+                onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
+                placeholder="98765 43210"
+                style={{
+                  width: '100%',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  color: '#1e293b',
+                  fontWeight: '600',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+          </div>
+          {/* DYNAMIC PASSWORD FIELD */}
+          {(!isLoginView || isPasswordRequired) && (
+            <div>
+              Account Password
+              <div
+                style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  width: '100%',
+                  borderRadius: '12px',
+                  border: '1px solid #e2e8f0',
+                  padding: '12px',
+                  backgroundColor: '#f8fafc'
+                }}
+              >
+                 <input
+    type={showPassword ? 'text' : 'password'}
+    required
+    value={password}
+    onChange={(e) => setPassword(e.target.value)}
+    placeholder="••••••••"
+    style={{
+      width: '100%',
+      backgroundColor: 'transparent',
+      border: 'none',
+      outline: 'none',
+      color: '#1e293b',
+      fontWeight: '600',
+      fontSize: '14px',
+      paddingRight: '40px'
+    }}
+                />
+                <span
+    onClick={() => setShowPassword(!showPassword)}
+    style={{
+      position: 'absolute',
+      right: '10px',
+      cursor: 'pointer',
+      color: '#64748b'
+    }}
+  >{showPassword ? <FaEyeSlash /> : <FaEye />}
+  </span>
+              </div>
+            </div>
+          )}
+          {/* SHARED: Role Selection Field */}
+          <div>
+            Select Role
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              required
+              style={{
+                width: '100%',
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                padding: '12px',
+                backgroundColor: '#f8fafc',
+                color: '#334155',
+                outline: 'none',
+                fontWeight: '600',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              <option value="" disabled>
+                Select your role
+              </option>
+              <option value="Builder">Builder</option>
+              <option value="Contractor">Contractor</option>
+              <option value="BuilderSupervisor">Builder Supervisor</option>
+              <option value="ContractorSupervisor">Contractor Supervisor</option>
+              <option value="Labor">Labor</option>
+            </select>
+          </div>
+          {/* User Details */}
+          {renderRoleFields()}
+
+          {/* SHARED: Send OTP Action Button */}
+          <div
+            style={{
+              paddingTop: '4px'
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleSendOtp}
+              disabled={
+                        sendingOtp ||
+                        !role ||
+                        (!isLoginView && !fullName.trim()) ||
+                        mobileNumber.length !== 10 ||
+                        !password.trim() ||
+                        (!isLoginView && role === "Builder" && !isBuilderFormValid())
+                    }
+              style={{
+                width: '100%',
+                borderRadius: '12px',
+                border: '2px solid #004d5a',
+                backgroundColor: 'transparent',
+                color: '#004d5a',
+                padding: '10px',
+                textAlign: 'center',
+                fontSize: '13px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                opacity:
+                  sendingOtp ||
+                  !role ||
+                  (!isLoginView && !fullName.trim()) ||
+                  mobileNumber.length !== 10 ||
+                  !password.trim() ||
+                  (!isLoginView && role === "Builder" && !isBuilderFormValid())
+                    ? 0.3
+                    : 1,
+                transition: 'all 0.15s'
+              }}
+            >
+              {sendingOtp ? 'Generating Token...' : otpSent ? '🔄 Resend Verification Code' : '🔑 Send OTP Code'}
+            </button>
+          </div>
+          {/* SHARED: OTP Input Field */}
+          <div>
+            Verification OTP
+            <input
+              type="text"
+              required
+              maxLength="6"
+              disabled={!otpSent}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+              placeholder={otpSent ? 'Enter 6-digit code' : 'Unlock by requesting OTP'}
+              style={{
+                width: '100%',
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                padding: '12px',
+                backgroundColor: !otpSent ? '#f1f5f9' : '#f8fafc',
+                color: '#1e293b',
+                outline: 'none',
+                fontWeight: 'bold',
+                fontSize: '14px',
+                letterSpacing: otpSent ? '0.25em' : 'normal',
+                cursor: !otpSent ? 'not-allowed' : 'text'
+              }}
+            />
+          </div>
+          {/* Submit Action Button */}
+          <button
+            type="submit"
+            disabled={!otpSent || otp.length !== 6 || loading}
+            style={{
+              width: '100%',
+              borderRadius: '12px',
+              backgroundColor: '#004d5a',
+              color: '#ffffff',
+              padding: '14px',
+              textAlign: 'center',
+              fontWeight: 'bold',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '14px',
+              opacity: !otpSent || otp.length !== 6 || loading ? 0.4 : 1,
+              transition: 'all 0.15s'
+            }}
+          >
+            {loading ? 'Processing Context...' : isLoginView ? 'Confirm & Login' : 'Complete Registration'}
+          </button>
+          {/* View Transition Toggle Link */}
+          <div
+            style={{
+              marginTop: '24px',
+              textAlign: 'center',
+              fontSize: '13px',
+              borderTop: '1px solid #f1f5f9',
+              paddingTop: '16px'
+            }}
+          >
+            <p
+              style={{
+                color: '#64748b',
+                fontWeight: '500',
+                margin: 0
+              }}
+            >
+              {isLoginView ? "Don't have an account yet?" : 'Already registered with us?'}
+              <button
+                type="button"
+                onClick={toggleView}
+                style={{
+                  color: '#0f4c94',
+                  fontWeight: 'bold',
+                  marginLeft: '6px',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  padding: 0,
+                  fontSize: '13px'
+                }}
+              >
+                {isLoginView ? 'Register Here' : 'Go to Login'}
+              </button>
+            </p>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

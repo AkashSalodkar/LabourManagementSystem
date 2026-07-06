@@ -1,0 +1,6 @@
+@LMPTS_HostAddress = http://localhost:5238
+
+GET {{LMPTS_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
