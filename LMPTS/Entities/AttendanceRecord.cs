@@ -4,9 +4,9 @@ public class AttendanceRecord
 {
     public int AttendanceRecordId { get; set; }
 
-    public int LaborId { get; set; }
+    public int UserId { get; set; }
 
-    public Labor Labor { get; set; } = null!;
+    public User User { get; set; } = null!;
 
     public DateOnly AttendanceDate { get; set; }
 

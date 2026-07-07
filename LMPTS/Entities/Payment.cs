@@ -5,8 +5,8 @@
             public int PaymentId { get; set; }
 
             // Labor who is being paid
-            public int LaborId { get; set; }
-            public Labor Labor { get; set; } = null!;
+            public int UserId { get; set; }
+            public User User { get; set; } = null!;
 
             // Salary period
             public int Month { get; set; }

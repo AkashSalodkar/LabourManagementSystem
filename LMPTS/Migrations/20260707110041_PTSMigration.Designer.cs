@@ -4,6 +4,7 @@ using LMPTS.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LMPTS.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260707110041_PTSMigration")]
+    partial class PTSMigration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -164,17 +167,14 @@ namespace LMPTS.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("CompanyName")
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("Company Name");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("FullName")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("Full Name");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("GSTNumber")
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("GST Number");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Industry")
                         .IsRequired()
@@ -182,21 +182,17 @@ namespace LMPTS.Migrations
 
                     b.Property<string>("MobileNumber")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("Mobile Number");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("PANNumber")
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("PAN Number");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("Password");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<double?>("PinCode")
-                        .HasColumnType("float")
-                        .HasColumnName("Pin Code");
+                        .HasColumnType("float");
 
                     b.Property<string>("State")
                         .HasColumnType("nvarchar(max)");

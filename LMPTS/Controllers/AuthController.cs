@@ -110,93 +110,24 @@ namespace LMPTS.Controllers
                     MobileNumber = request.MobileNumber,
                     PasswordHash = securePasswordHash,
                     FullName = request.FullName,
-                    Role = request.Role ?? "Contractor"
+                    Industry = request.Industry,
+                    CompanyName = request.CompanyName,
+                    Address = request.Address,
+                    GSTNumber = request.GSTNumber,
+                    PANNumber = request.PANNumber,
+                    City = request.City,
+                    PinCode = request.PinCode,
+                    State = request.State,
                 };
 
                 // 4. Stage the object inside EF Core tracking
                 _context.Users.Add(newUser);
                 await _context.SaveChangesAsync();
 
-                //If the User is Builder then add those details in Builders table
-                if (request.Role == "Builder")
-                {
-                    var builder = new Builder
-                    {
-                        UserId = newUser.UserId,
-
-                        CompanyName = request.CompanyName!,
-                        RegisteredAddress = request.RegisteredAddress!,
-                        GSTNumber = request.GSTNumber!,
-                        PANNumber = request.PANNumber!,
-                        City = request.City!,
-                        RegisteredMobileNumber = request.RegisteredMobileNumber!,
-
-                        SupervisorCount = request.SupervisorCount ?? 0,
-                        ContractorCount = request.ContractorCount ?? 0,
-
-                        BuilderType = request.BuilderType!,
-
-                        IsVerified = true
-                    };
-
-                    _context.Builders.Add(builder);
-
-                    await _context.SaveChangesAsync();
-                }
-                if (request.Role == "Contractor")
-                {
-                    var contractor = new Contractor
-                    {
-                        UserId = newUser.UserId,
-                        Address = request.Address,
-                        Specialization = request.Specialization
-                    };
-                    _context.Contractors.Add(contractor);
-
-                    await _context.SaveChangesAsync();
-                }
-                if (request.Role == "BuilderSupervisor")
-                {
-                    var builderSupervisor = new BuilderSupervisor
-                    {
-                        UserId = newUser.UserId,
-                        Address = request.Address
-                    };
-                    _context.BuilderSupervisors.Add(builderSupervisor);
-
-                    await _context.SaveChangesAsync();
-                }
-                if (request.Role == "ContractorSupervisor")
-                {
-                    var contractorSupervisor = new ContractorSupervisor
-                    {
-                        UserId = newUser.UserId,
-                        Address = request.Address
-                    };
-                    _context.ContractorSupervisors.Add(contractorSupervisor);
-
-                    await _context.SaveChangesAsync();
-                }
-                if (request.Role == "Labor")
-                {
-                    var labor = new Labor
-                    {
-                        UserId = newUser.UserId,
-                        Address = request.Address,
-                        Skill = request.Skill
-                    };
-                    _context.Labours.Add(labor);
-
-                    await _context.SaveChangesAsync();
-                }
-
                 // Standard HTTP 201 response with safe metadata
                 return StatusCode(201, new
                 {
-                    message = "Registration successful.",
-                    userId = newUser.UserId,
-                    mobileNumber = newUser.MobileNumber,
-                    role = newUser.Role
+                    message = "Registration successful."
                 });
             }
             catch (Exception ex)
@@ -210,9 +141,6 @@ namespace LMPTS.Controllers
                 return StatusCode(500, new { message = $"Database error: {ex.Message}" });
             }
         }
-
-
-
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
@@ -271,7 +199,7 @@ namespace LMPTS.Controllers
             _context.UserOtps.Remove(validOtp);
             await _context.SaveChangesAsync();
 
-            return Ok(new { userId = user.UserId, name = user.MobileNumber, role = user.Role });
+            return Ok(new { userId = user.UserId, name = user.MobileNumber});
         }
 
 
