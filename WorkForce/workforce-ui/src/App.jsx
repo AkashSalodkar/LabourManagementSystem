@@ -6,9 +6,21 @@ export default function App() {
   const API_BASE_URL = 'https://localhost:7036/api/auth';
 
   // Authentication & Session States
-  const [isLoginView, setIsLoginView] = useState(true);
-  const [isUserAuthenticated, setIsUserAuthenticated] = useState(false);
-  const [loggedInUser, setLoggedInUser] = useState(null);
+  const [isLoginView, setIsLoginView] = useState(false);
+  //const [isUserAuthenticated, setIsUserAuthenticated] = useState(false);
+  //const [loggedInUser, setLoggedInUser] = useState(null);
+  const [isUserAuthenticated, setIsUserAuthenticated] = useState(true);
+
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [userName, setUserName] = useState("Akash");
+  const [profileImg, setProfileImg] = useState(null); // Holds the uploaded image URI string
+
+
+  const [loggedInUser, setLoggedInUser] = useState({
+    userId: 1,
+    fullName: "Akash",
+    industry: "Construction"
+  });
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState('');
 
@@ -241,24 +253,24 @@ const handleSaveAttendanceData = () => {
   const [newEmpRole, setNewEmpRole] = useState('');
   const [newEmpWage, setNewEmpWage] = useState('');
 
-  useEffect(() => {
-    const hasSoftToken = localStorage.getItem('workforce_soft_token');
-    const storedUser = localStorage.getItem('workforce_user');
-    if (hasSoftToken === 'true' && storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        if (parsedUser) {
-          setLoggedInUser(parsedUser);
-          setIsUserAuthenticated(true);
-          return;
-        }
-      } catch (e) {
-        localStorage.clear();
-      }
-    }
-    setIsUserAuthenticated(false);
-    setLoggedInUser(null);
-  }, [isLoginView]);
+  // useEffect(() => {
+  //   const hasSoftToken = localStorage.getItem('workforce_soft_token');
+  //   const storedUser = localStorage.getItem('workforce_user');
+  //   if (hasSoftToken === 'true' && storedUser) {
+  //     try {
+  //       const parsedUser = JSON.parse(storedUser);
+  //       if (parsedUser) {
+  //         setLoggedInUser(parsedUser);
+  //         setIsUserAuthenticated(true);
+  //         return;
+  //       }
+  //     } catch (e) {
+  //       localStorage.clear();
+  //     }
+  //   }
+  //   setIsUserAuthenticated(false);
+  //   setLoggedInUser(null);
+  // }, [isLoginView]);
 
   const toggleView = () => {
     setIsLoginView(!isLoginView);
@@ -1084,20 +1096,29 @@ const handleCreateProjectFinalSubmission = (e) => {
 
     {/* Mobile Number Input */}
     <div>
-      <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
-        Mobile number <span style={{ color: '#94A3B8', fontWeight: '400' }}>(optional)</span>
-      </label>
-      <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0 12px', backgroundColor: '#ffffff' }}>
-        <span style={{ marginRight: '8px' }}>📱</span>
-        <input
-          type="tel"
-          placeholder="For payment SMS / UPI"
-          value={tempWorkerPhone}
-          onChange={(e) => setTempWorkerPhone(e.target.value.replace(/\D/g, ''))}
-          style={{ flex: 1, padding: '12px 0', border: 'none', outline: 'none', backgroundColor: 'transparent' }}
-        />
-      </div>
-    </div>
+  <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+    MOBILE NUMBER
+  </label>
+  <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0 12px', backgroundColor: '#ffffff' }}>
+    📱 
+    {/* Uneditable country starter code segment */}
+    <span style={{ marginLeft: '6px', marginRight: '4px', fontSize: '14px', color: '#64748B', fontWeight: '600', userSelect: 'none' }}>
+      +91
+    </span>
+    <input 
+      type="tel" 
+      placeholder="9876543210" 
+      value={mobileNumber} 
+      /* Enforce strict digit cleanup and 10 character slicing framework lock */
+      onChange={(e) => {
+        const cleanDigits = e.target.value.replace(/\D/g, '');
+        setMobileNumber(cleanDigits.slice(0, 10));
+      }} 
+      style={{ flex: 1, padding: '12px 0', border: 'none', outline: 'none', backgroundColor: 'transparent' }} 
+    />
+  </div>
+</div>
+
 
     {/* Date of Joining Input */}
     <div>
@@ -1249,39 +1270,66 @@ const handleCreateProjectFinalSubmission = (e) => {
         {/* Top Identification Header Profile Section */}
         <div style={themeStyles.authHeader}>
           <div style={themeStyles.profileRow}>
-            <div style={themeStyles.avatarBox}>
-              {loggedInUser.fullName ? loggedInUser.fullName.substring(0, 2).toUpperCase() : 'RS'}
+            <div 
+              onClick={() => setIsProfileModalOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', padding: '16px' }}
+            >
+              {/* Avatar Element Box */}
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', overflow: 'hidden' }}>
+                {profileImg ? (
+                  <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  // Generates modern dynamic dual initials based on what the user types inside the info modal
+                  userName ? userName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : "AK"
+                )}
+              </div>
+              <span style={{ color: '#ffffff', fontWeight: '600', fontSize: '16px' }}>
+                Hi, {userName} 👋
+              </span>
             </div>
-            <h2 style={themeStyles.welcomeText}>
-              Hi, {loggedInUser.fullName || 'Rajesh'} 👋
-            </h2>
           </div>
           <button type="button" onClick={handleFullLogout} style={themeStyles.logoutIconBtn}>
             Sign Out
           </button>
         </div>
 
+
         {/* Core Operations Container Area */}
-        <div style={themeStyles.contentCardBody}>
-            <button 
-    type="button" 
-    onClick={() => setIsAddProjectOpen(true)} 
-    style={themeStyles.actionAddBtn}
-  >
-    + Add Project
-  </button>
+<div style={themeStyles.contentCardBody}>
+  
+  {/* STEP 1: Wrap button and search bar in a sticky header container */}
+  <div style={{
+    position: 'sticky',
+    top: 0,
+    backgroundColor: '#f4f6f9', // Matches your dashboard body background color
+    zIndex: 10,                 // Keeps it layered above scrolling items
+    paddingBottom: '14px',      // Gives spacing below the search bar
+    paddingTop: '4px'           // Clean alignment spacing
+  }}>
+    <button 
+      type="button" 
+      onClick={() => setIsAddProjectOpen(true)} 
+      style={themeStyles.actionAddBtn}
+    >
+      + Add Project
+    </button>
+    
+    <div style={themeStyles.searchBarContainer}>
+      <span style={themeStyles.searchIconMarker}>🔍</span>
+      <input
+        type="text"
+        placeholder="Search project by name..."
+        value={siteSearchQuery}
+        onChange={(e) => setSiteSearchQuery(e.target.value)}
+        style={themeStyles.searchField}
+      />
+    </div>
+  </div>
+
+  {/* STEP 2: Your existing projects list mapping code goes right here */}
+  {/* This list will now scroll smoothly underneath the sticky block above */}
 
 
-          <div style={themeStyles.searchBarContainer}>
-            <span style={themeStyles.searchIconMarker}>🔍</span>
-            <input
-              type="text"
-              placeholder="Search project by name..."
-              value={siteSearchQuery}
-              onChange={(e) => setSiteSearchQuery(e.target.value)}
-              style={themeStyles.searchField}
-            />
-          </div>
 
           <div style={themeStyles.sectionMetaRow}>
             <h3 style={themeStyles.sectionLabel}>Your worksites</h3>
@@ -1353,6 +1401,127 @@ const handleCreateProjectFinalSubmission = (e) => {
       <span style={themeStyles.navTabLabel}>History</span>
     </button>
   </div>
+  {/* PROFILE CONFIGURATION AND IMAGE UPLOAD POP-UP MODAL VIEW */}
+{isProfileModalOpen && (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100vw',
+    height: '100vh',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999, // Placed on a high stack layer so it stays visible above all panels
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+  }}>
+    <div style={{
+      backgroundColor: '#ffffff',
+      padding: '24px',
+      borderRadius: '16px',
+      width: '90%',
+      maxWidth: '340px',
+      boxSizing: 'border-box',
+      boxShadow: '0 12px 40px rgba(0,0,0,0.25)'
+    }}>
+      {/* Modal Title Line */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: '#1E293B' }}>Update Profile</h3>
+        <button 
+          onClick={() => setIsProfileModalOpen(false)} 
+          style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94A3B8', padding: 0, lineHeight: 1 }}
+        >
+          &times;
+        </button>
+      </div>
+
+      {/* Picture Upload Selector Circle */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '22px' }}>
+        <label htmlFor="user-avatar-file-input" style={{ position: 'relative', cursor: 'pointer' }}>
+          <div style={{
+            width: '84px',
+            height: '84px',
+            borderRadius: '50%',
+            backgroundColor: '#F8FAFC',
+            border: '2px dashed #CBD5E1',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden'
+          }}>
+            {profileImg ? (
+              <img src={profileImg} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <span style={{ fontSize: '26px' }}>📸</span>
+            )}
+          </div>
+          <div style={{ position: 'absolute', bottom: '2px', right: '2px', backgroundColor: '#0B3C9B', color: '#ffffff', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', border: '2px solid #ffffff' }}>
+            +
+          </div>
+        </label>
+        <input 
+          id="user-avatar-file-input" 
+          type="file" 
+          accept="image/*" 
+          style={{ display: 'none' }} 
+          onChange={(e) => {
+            if (e.target.files && e.target.files[0]) {
+              setProfileImg(URL.createObjectURL(e.target.files[0]));
+            }
+          }}
+        />
+        <span style={{ fontSize: '11px', color: '#64748B', marginTop: '8px', fontWeight: '500' }}>Tap circle to choose photo</span>
+      </div>
+
+      {/* User Full Name Input Field Form Group */}
+      <div style={{ marginBottom: '24px' }}>
+        <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>
+          Your Name
+        </label>
+        <input 
+          type="text" 
+          value={userName} 
+          onChange={(e) => setUserName(e.target.value)} 
+          style={{
+            width: '100%',
+            padding: '12px',
+            borderRadius: '8px',
+            border: '1px solid #CBD5E1',
+            fontSize: '14px',
+            color: '#1E293B',
+            outline: 'none',
+            boxSizing: 'border-box',
+            backgroundColor: '#F8FAFC'
+          }}
+        />
+      </div>
+
+      {/* Primary Modal Confirmation Save Actions Wrapper */}
+      <button 
+        onClick={() => {
+          // If you have your loggedInUser state active, keep it synchronized with the new name
+          setLoggedInUser(prev => ({ ...prev, fullName: userName }));
+          setIsProfileModalOpen(false);
+        }} 
+        style={{
+          width: '100%',
+          padding: '14px',
+          backgroundColor: '#0B3C9B',
+          color: '#ffffff',
+          border: 'none',
+          borderRadius: '10px',
+          fontSize: '14px',
+          fontWeight: '600',
+          cursor: 'pointer',
+          textAlign: 'center'
+        }}
+      >
+        Save Changes
+      </button>
+    </div>
+  </div>
+)}
 </div>
 );
 }
@@ -1428,21 +1597,30 @@ return (
       )}
 
       {/* Primary Mobile Registration Field Element */}
-      <div style={themeStyles.inputGroup}>
-        <label style={themeStyles.fieldLabel}>Mobile number *</label>
-        <div style={themeStyles.phoneInputContainer}>
-          <span style={themeStyles.countryCode}>+91</span>
-          <input
-            type="tel"
-            required
-            maxLength="10"
-            value={mobileNumber}
-            onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, ''))}
-            placeholder="98765 43210"
-            style={themeStyles.phoneField}
-          />
-        </div>
-      </div>
+      <div>
+  <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+    MOBILE NUMBER
+  </label>
+  <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0 12px', backgroundColor: '#ffffff' }}>
+    📱 
+    {/* Uneditable country starter code segment */}
+    <span style={{ marginLeft: '6px', marginRight: '4px', fontSize: '14px', color: '#64748B', fontWeight: '600', userSelect: 'none' }}>
+      +91
+    </span>
+    <input 
+      type="tel" 
+      placeholder="9876543210" 
+      value={mobileNumber} 
+      /* Enforce strict digit cleanup and 10 character slicing framework lock */
+      onChange={(e) => {
+        const cleanDigits = e.target.value.replace(/\D/g, '');
+        setMobileNumber(cleanDigits.slice(0, 10));
+      }} 
+      style={{ flex: 1, padding: '12px 0', border: 'none', outline: 'none', backgroundColor: 'transparent' }} 
+    />
+  </div>
+</div>
+
 
       {/* Verification Code Dispatch Handler Switch */}
       <button
@@ -1684,13 +1862,14 @@ secondaryBtn: {
     overflow: 'hidden'
   },
   authHeader: {
-    backgroundColor: '#0B3C9B',
-    padding: '24px 20px 60px 20px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    position: 'relative'
-  },
+  backgroundColor: '#0B3C9B', // Your primary blue header color
+  padding: '16px 20px',
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  width: '100%',
+  boxSizing: 'border-box'
+},
   profileRow: {
     display: 'flex',
     alignItems: 'center',
@@ -1726,15 +1905,12 @@ secondaryBtn: {
     marginLeft: 'auto'
   },
   contentCardBody: {
-    flex: 1,
-    backgroundColor: '#f4f6f9',
-    borderTopLeftRadius: '24px',
-    borderTopRightRadius: '24px',
-    marginTop: '-40px',
-    padding: '20px',
-    overflowY: 'auto',
-    paddingBottom: '100px'
-  },
+  backgroundColor: '#f4f6f9', // Change from dark blue to a light gray canvas background
+  padding: '16px',
+  borderRadius: '16px 16px 0 0', // Keeps the rounded top corners if desired
+  marginTop: '20px', // Creates a physical gap separation between the blocks
+  overflowY: 'auto'
+},
   actionAddBtn: {
     width: '100%',
     backgroundColor: '#0B3C9B',
