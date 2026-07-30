@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="LMPTS.API/LMPTS.API.csproj" />
+  <Project Path="LMPTS.Application/LMPTS.Application.csproj" />
+  <Project Path="LMPTS.Domain/LMPTS.Domain.csproj" />
+  <Project Path="LMPTS.Infrastructure/LMPTS.Infrastructure.csproj" />
+  <Project Path="LMPTS.Shared/LMPTS.Shared.csproj" />
+</Solution>

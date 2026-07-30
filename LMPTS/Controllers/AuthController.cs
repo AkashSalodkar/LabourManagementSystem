@@ -19,10 +19,11 @@ namespace LMPTS.Controllers
             _configuration = configuration;
         }
 
+        // AuthController.cs - Updated methods
+
         [HttpPost("send-otp")]
         public async Task<IActionResult> SendOtp([FromBody] OtpRequestDto request)
         {
-            // 1. Core input parameter validation
             if (request == null || string.IsNullOrWhiteSpace(request.MobileNumber))
             {
                 return BadRequest(new { message = "Invalid parameters: Mobile number is required." });
@@ -30,55 +31,43 @@ namespace LMPTS.Controllers
 
             try
             {
-                // 2. Generate a secure random 6-digit verification code packet
                 string generatedOtp = new Random().Next(100000, 999999).ToString();
-
-                // Set an operational expiration window (e.g., Token valid for 5 minutes)
                 DateTime expiry = DateTime.UtcNow.AddMinutes(5);
 
-                // 3. Query your UserOtps context to check if an OTP record exists for this mobile number
-                var existingOtpRecord = await _context.UserOtps
-                    .FirstOrDefaultAsync(u => u.MobileNumber == request.MobileNumber);
+                // Remove existing OTP for this mobile number (if any)
+                var existingOtps = await _context.UserOtps
+                    .Where(u => u.MobileNumber == request.MobileNumber)
+                    .ToListAsync();
 
-                if (existingOtpRecord != null)
+                if (existingOtps.Any())
                 {
-                    // Update existing instance database fields cleanly
-                    existingOtpRecord.OtpCode = generatedOtp;
-                    existingOtpRecord.Role = request.Role;
-                    existingOtpRecord.ExpiryTime = expiry;
-                    _context.UserOtps.Update(existingOtpRecord);
-                }
-                else
-                {
-                    // Create an entirely new data table trace log tracking metrics row
-                    var newOtpRecord = new UserOtp
-                    {
-                        MobileNumber = request.MobileNumber,
-                        Role = request.Role,
-                        OtpCode = generatedOtp,
-                        ExpiryTime = expiry
-                    };
-                    await _context.UserOtps.AddAsync(newOtpRecord);
+                    _context.UserOtps.RemoveRange(existingOtps);
                 }
 
-                // 4. Commit changes synchronously down to SQL Server (SSMS)
+                // Create new OTP
+                var newOtpRecord = new UserOtp
+                {
+                    MobileNumber = request.MobileNumber,
+                    Role = request.Role,
+                    OtpCode = generatedOtp,
+                    ExpiryTime = expiry
+                };
+
+                await _context.UserOtps.AddAsync(newOtpRecord);
                 await _context.SaveChangesAsync();
 
-                // For development, print code value to console logger screen:
                 Console.WriteLine($"[SMS GATEWAY SIMULATION] -> Sent OTP {generatedOtp} to user {request.MobileNumber}");
 
-                // 5. Return an explicit JSON configuration object to prevent browser fetch crashes
                 return Ok(new
                 {
                     message = "OTP verification token generated successfully.",
-                    // Tip: In production, remove this debug line. Keep it for testing without checking logs!
-                    debugOtp = generatedOtp
+                    debugOtp = generatedOtp // Remove this in production
                 });
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Database processing crash error trace: {ex.Message}");
-                return StatusCode(500, new { message = "An internal server framework error occurred while updating SSMS context metrics." });
+                return StatusCode(500, new { message = "An internal server framework error occurred." });
             }
         }
 
@@ -102,22 +91,10 @@ namespace LMPTS.Controllers
                     return BadRequest(new { message = "This mobile number is already registered." });
                 }
 
-                // 3. Hash the password text
-                string securePasswordHash = BCrypt.Net.BCrypt.HashPassword(request.PasswordHash);
-
                 var newUser = new User
                 {
-                    MobileNumber = request.MobileNumber,
-                    PasswordHash = securePasswordHash,
                     FullName = request.FullName,
-                    Industry = request.Industry,
-                    CompanyName = request.CompanyName,
-                    Address = request.Address,
-                    GSTNumber = request.GSTNumber,
-                    PANNumber = request.PANNumber,
-                    City = request.City,
-                    PinCode = request.PinCode,
-                    State = request.State,
+                    MobileNumber = request.MobileNumber
                 };
 
                 // 4. Stage the object inside EF Core tracking
@@ -144,7 +121,6 @@ namespace LMPTS.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            // --- FIXED LINE: Query using request.Otp instead of request.Password ---
             var validOtp = await _context.UserOtps
                 .FirstOrDefaultAsync(o => o.MobileNumber == request.MobileNumber && o.OtpCode == request.Otp);
 
@@ -153,7 +129,6 @@ namespace LMPTS.Controllers
                 return BadRequest(new { message = "Invalid OTP verification code. Please check and try again." });
             }
 
-            // 2. FIXED EXPIRY CHECK: Flexible DateTime buffer comparison
             var currentUtcTime = DateTime.UtcNow;
             var expiryTime = validOtp.ExpiryTime.Kind == DateTimeKind.Unspecified
                 ? DateTime.SpecifyKind(validOtp.ExpiryTime, DateTimeKind.Utc)
@@ -164,10 +139,7 @@ namespace LMPTS.Controllers
                 return BadRequest(new { message = "The OTP code has expired. Please request a fresh token code." });
             }
 
-            // 3. FIXED LOOKUP: Use Trim, case-insensitive, and normalization checks to match strings safely
             string sanitizedUsername = request.MobileNumber.Trim();
-
-            // If the front-end accidentally passed a "+91" header, trim it off to match the DB format shown in your screenshot
             if (sanitizedUsername.StartsWith("+91"))
             {
                 sanitizedUsername = sanitizedUsername.Substring(3);
@@ -178,30 +150,23 @@ namespace LMPTS.Controllers
 
             if (user == null)
             {
-                // Debug logger printing what your code was actually looking for vs what failed
                 Console.WriteLine($"[AUTH BREAK] -> SQL was looking for Name matching: '{sanitizedUsername}' but found nothing.");
                 return Unauthorized(new { message = "Account record not found. Please register first." });
             }
 
-
-            // 4. CONDITIONAL CHECK: Validate password only if explicit logout occurred
-            if (request.IsPasswordRequired)
-            {
-                // Now request.Password correctly contains the typed account password text string
-                if (string.IsNullOrWhiteSpace(request.Password) ||
-                    !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-                {
-                    return Unauthorized(new { message = "Invalid account password. Access Denied." });
-                }
-            }
-
-            // 5. Clean up used transient record upon validation completion
+            // Remove used OTP
             _context.UserOtps.Remove(validOtp);
             await _context.SaveChangesAsync();
 
-            return Ok(new { userId = user.UserId, name = user.MobileNumber});
+            return Ok(new
+            {
+                userId = user.UserId,
+                fullName = user.FullName,
+                mobileNumber = user.MobileNumber,
+                industry = user.Industry,
+                role = user.Role
+            });
         }
-
 
     }
 }
