@@ -425,7 +425,7 @@ export default function App1() {
   // Auth endpoints live under /api/auth, so we keep that as a derived constant
   // instead of baking "/auth" into the shared root (that was the bug that made
   // every non-auth request 404, since it was calling /api/auth/projects/... etc).
-const API_ROOT = 'https://localhost:7029/api';
+const API_ROOT = 'https://ptsapi.azurewebsites.net';
 const API_BASE_URL = `${API_ROOT}/auth`;
 // ===== API SERVICES =====
 const api = {
