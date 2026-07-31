@@ -2098,6 +2098,22 @@ const paymentService = {
   const otpInputRefs = useRef([]);
   const [resendSeconds, setResendSeconds] = useState(0);
 
+  // ✅ Azure SQL Serverless auto-pauses after inactivity, so the very first request
+  // of the day can take 30-60s to "wake up" the DB instead of failing instantly.
+  // The backend already retries through this (see Program.cs EnableRetryOnFailure),
+  // but a bare spinner for that long makes users think the app has frozen. If a
+  // send-otp/login/register call is still in flight after a few seconds, switch the
+  // plain "Sending OTP.../Verifying..." label to an explanatory message instead.
+  const [showWakingMessage, setShowWakingMessage] = useState(false);
+  useEffect(() => {
+    if (!sendingOtp && !loading) {
+      setShowWakingMessage(false);
+      return;
+    }
+    const wakingTimer = setTimeout(() => setShowWakingMessage(true), 4000);
+    return () => clearTimeout(wakingTimer);
+  }, [sendingOtp, loading]);
+
   const toggleView = () => {
     setIsLoginView(!isLoginView);
     setOtp('');
@@ -2119,6 +2135,7 @@ const paymentService = {
       const response = await fetch(`${API_BASE_URL}/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ mobileNumber, industry, isLoginView })
       });
       const responseText = await response.text();
@@ -2137,7 +2154,7 @@ const paymentService = {
     const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
     const payload = isLoginView ? { mobileNumber: mobileNumber.trim(), otp } : { mobileNumber: mobileNumber.trim(), otp, fullName, industry };
     try {
-      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
       const responseText = await response.text();
       let data = {};
       if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
@@ -4345,6 +4362,15 @@ useEffect(() => {
               <p style={authStyles.otpInfoText}>We'll send you a One Time Password (OTP) to verify your mobile number</p>
             </div>
 
+            {/* ---- Slow-request notice: shown once a send-otp/verify call has been ---- */}
+            {/* running for a few seconds, most likely an Azure SQL Serverless cold start ---- */}
+            {showWakingMessage && (
+              <div style={authStyles.otpInfoCard}>
+                <span style={authStyles.otpInfoIcon}><HiOutlineShieldCheck size={22} color="#B45309" /></span>
+                <p style={authStyles.otpInfoText}>Connecting to server, this can take up to a minute on first use today. Please hold on...</p>
+              </div>
+            )}
+
             {/* ---- Send OTP button (only before the first send) ---- */}
             {!otpSent && (
               <button
@@ -4353,7 +4379,7 @@ useEffect(() => {
                 disabled={otpButtonDisabled}
                 style={{ ...authStyles.sendOtpBtn, opacity: otpButtonDisabled ? 0.45 : 1 }}
               >
-                {sendingOtp ? 'Sending OTP...' : 'Send OTP'}
+                {sendingOtp ? (showWakingMessage ? 'Waking up server...' : 'Sending OTP...') : 'Send OTP'}
               </button>
             )}
 
@@ -4411,7 +4437,7 @@ useEffect(() => {
 
             {/* ---- Primary CTA ---- */}
             <button type="submit" disabled={!canVerify} style={{ ...authStyles.primaryCta, opacity: canVerify ? 1 : 0.5 }}>
-              <span>{loading ? 'Verifying...' : 'Verify & Continue'}</span>
+              <span>{loading ? (showWakingMessage ? 'Waking up server...' : 'Verifying...') : 'Verify & Continue'}</span>
               {!loading && <FiArrowRight size={19} color="#ffffff" />}
             </button>
 
