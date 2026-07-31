@@ -612,7 +612,7 @@ const paymentService = {
   // ===== LOCAL TESTING ONLY =====
   // Set to true to skip the OTP login screen and land straight on the dashboard
   // with a mock user. Set back to false before building for real use.
-  const DEV_SKIP_LOGIN = true;
+  const DEV_SKIP_LOGIN = false;
   const DEV_MOCK_USER = { userId: "1", fullName: "Rajesh", industry: "Construction" };
 
   const [isLoginView, setIsLoginView] = useState(!DEV_SKIP_LOGIN);
