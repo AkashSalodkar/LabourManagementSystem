@@ -615,10 +615,27 @@ const paymentService = {
   const DEV_SKIP_LOGIN = false;
   const DEV_MOCK_USER = { userId: "1", fullName: "Rajesh", industry: "Construction" };
 
-  const [isLoginView, setIsLoginView] = useState(!DEV_SKIP_LOGIN);
-  const [isUserAuthenticated, setIsUserAuthenticated] = useState(DEV_SKIP_LOGIN);
-  const [loggedInUser, setLoggedInUser] = useState(DEV_SKIP_LOGIN ? DEV_MOCK_USER : null);
-  const [userName, setUserName] = useState(DEV_SKIP_LOGIN ? DEV_MOCK_USER.fullName : undefined);
+  // ✅ Restore a saved session from localStorage on load, so a logged-in user
+  // stays logged in across page reloads / reopening the app - until they
+  // explicitly sign out via handleFullLogout (which clears localStorage).
+  const getPersistedSession = () => {
+    try {
+      const hasSoftToken = localStorage.getItem('workforce_soft_token') === 'true';
+      const savedUser = localStorage.getItem('workforce_user');
+      if (hasSoftToken && savedUser) {
+        return JSON.parse(savedUser);
+      }
+    } catch {
+      // Corrupted/unreadable localStorage entry - treat as no session.
+    }
+    return null;
+  };
+  const persistedUser = DEV_SKIP_LOGIN ? DEV_MOCK_USER : getPersistedSession();
+
+  const [isLoginView, setIsLoginView] = useState(!DEV_SKIP_LOGIN && !persistedUser);
+  const [isUserAuthenticated, setIsUserAuthenticated] = useState(DEV_SKIP_LOGIN || !!persistedUser);
+  const [loggedInUser, setLoggedInUser] = useState(persistedUser);
+  const [userName, setUserName] = useState(persistedUser?.fullName || undefined);
   
   const [profileImg, setProfileImg] = useState(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
