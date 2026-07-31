@@ -693,7 +693,7 @@ const paymentService = {
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
-  const [industry, setIndustry] = useState('');
+  const [industry, setIndustry] = useState('General');
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
   const [tempWorkersList, setTempWorkersList] = useState([]);
@@ -2119,12 +2119,12 @@ const paymentService = {
     setOtp('');
     setOtpSent(false);
     setFullName('');
-    setIndustry('');
+    setIndustry('General');
     setOtpDigits(['', '', '', '', '', '']);
     setResendSeconds(0);
   };
 
-  const isRegistrationFormValid = () => industry.trim() !== '' && fullName.trim() !== '' && mobileNumber.length === 10;
+  const isRegistrationFormValid = () => fullName.trim() !== '' && mobileNumber.length === 10;
 
   const handleSendOtp = async () => {
     if (!isLoginView && !isRegistrationFormValid()) { alert('Please fill all registration details accurately.'); return; }
@@ -4324,16 +4324,6 @@ useEffect(() => {
                     style={authStyles.inputField}
                   />
                 </div>
-
-                <div style={{ ...authStyles.inputShell, marginTop: '10px' }}>
-                  <select required value={industry} onChange={(e) => setIndustry(e.target.value)} style={{ ...authStyles.inputField, paddingLeft: '2px', color: industry ? '#1E293B' : '#94A3B8' }}>
-                    <option value="">Select your industry segment</option>
-                    <option value="Construction & Real Estate">Construction & Real Estate</option>
-                    <option value="Information Technology">Information Technology</option>
-                    <option value="Retail & Commerce">Retail & Commerce</option>
-                    <option value="Manufacturing & Logistics">Manufacturing & Logistics</option>
-                  </select>
-                </div>
               </div>
             )}
 
@@ -4442,13 +4432,15 @@ useEffect(() => {
             </button>
 
             <p style={authStyles.switchViewText}>
-              {isLoginView ? "Don't have an employer account yet?" : 'Already registered corporate manager?'}
+              {isLoginView ? "Don't have an account yet?" : 'Already registered corporate manager?'}
               <button type="button" onClick={toggleView} style={authStyles.toggleLink}>{isLoginView ? 'Register here' : 'Login here'}</button>
             </p>
           </form>
         </div>
 
-        {/* ---- Bottom feature highlights (informational only) ---- */}
+        {/* ---- Bottom feature highlights (informational only) - hidden once the form ---- */}
+        {/* grows taller (register view or OTP entry) so the page always fits one screen ---- */}
+        {isLoginView && !otpSent && (
         <div style={authStyles.featureRow}>
           <div style={authStyles.featureItem}>
             <span style={authStyles.featureIconWrap}><HiOutlineUserGroup size={20} color="#2563EB" /></span>
@@ -4465,6 +4457,7 @@ useEffect(() => {
             <span style={authStyles.featureLabel}>Handle Payments</span>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -4475,36 +4468,36 @@ const authStyles = {
     width: '100vw', minHeight: '100vh', boxSizing: 'border-box',
     backgroundColor: '#EDF1FC',
     display: 'flex', justifyContent: 'center',
-    padding: '36px 18px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    padding: '18px 18px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     overflowY: 'auto',
   },
   pageInner: { width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
 
-  brandBlock: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', marginBottom: '26px' },
-  logoImg: { width: '92px', height: '92px', borderRadius: '22px', objectFit: 'cover' },
-  brandName: { margin: '10px 0 0 0', fontSize: '30px', fontWeight: '800', color: '#2554EB', letterSpacing: '-0.02em' },
-  brandTagline: { margin: 0, fontSize: '14px', color: '#64748B', fontWeight: '500' },
+  brandBlock: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', marginBottom: '12px' },
+  logoImg: { width: '60px', height: '60px', borderRadius: '16px', objectFit: 'cover' },
+  brandName: { margin: '6px 0 0 0', fontSize: '24px', fontWeight: '800', color: '#2554EB', letterSpacing: '-0.02em' },
+  brandTagline: { margin: 0, fontSize: '13px', color: '#64748B', fontWeight: '500' },
 
   card: {
     width: '100%', backgroundColor: '#ffffff',
-    borderRadius: '28px', padding: '30px 24px', boxSizing: 'border-box',
+    borderRadius: '24px', padding: '20px 20px', boxSizing: 'border-box',
     boxShadow: '0 20px 45px rgba(15, 23, 42, 0.07), 0 2px 8px rgba(15, 23, 42, 0.04)',
     display: 'flex', flexDirection: 'column',
   },
 
-  welcomeBlock: { textAlign: 'center', marginBottom: '24px' },
-  welcomeTitle: { margin: '0 0 6px 0', fontSize: '24px', fontWeight: '800', color: '#0F172A' },
-  welcomeSubtitle: { margin: 0, fontSize: '14px', color: '#64748B' },
+  welcomeBlock: { textAlign: 'center', marginBottom: '14px' },
+  welcomeTitle: { margin: '0 0 4px 0', fontSize: '20px', fontWeight: '800', color: '#0F172A' },
+  welcomeSubtitle: { margin: 0, fontSize: '13px', color: '#64748B' },
 
-  form: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  form: { display: 'flex', flexDirection: 'column', gap: '12px' },
   fieldGroup: { display: 'flex', flexDirection: 'column' },
-  fieldLabel: { fontSize: '13.5px', fontWeight: '700', color: '#0F172A', marginBottom: '8px' },
+  fieldLabel: { fontSize: '13px', fontWeight: '700', color: '#0F172A', marginBottom: '6px' },
   requiredMark: { color: '#EF4444' },
 
   inputShell: {
     display: 'flex', alignItems: 'center', gap: '10px',
     border: '1.5px solid #E2E8F0', borderRadius: '14px',
-    padding: '0 14px', backgroundColor: '#ffffff', height: '54px',
+    padding: '0 14px', backgroundColor: '#ffffff', height: '46px',
     boxSizing: 'border-box',
   },
   inputIcon: { display: 'flex', alignItems: 'center', flexShrink: 0 },
@@ -4516,56 +4509,56 @@ const authStyles = {
   },
 
   otpInfoCard: {
-    display: 'flex', alignItems: 'flex-start', gap: '12px',
+    display: 'flex', alignItems: 'flex-start', gap: '10px',
     backgroundColor: '#EBF1FE', border: 'none',
-    borderRadius: '16px', padding: '14px 16px',
+    borderRadius: '14px', padding: '10px 14px',
   },
   otpInfoIcon: { flexShrink: 0, marginTop: '1px' },
-  otpInfoText: { margin: 0, fontSize: '13px', color: '#1E3A8A', lineHeight: '1.5', fontWeight: '500' },
+  otpInfoText: { margin: 0, fontSize: '12.5px', color: '#1E3A8A', lineHeight: '1.4', fontWeight: '500' },
 
   sendOtpBtn: {
-    width: '100%', height: '52px', borderRadius: '16px', border: 'none',
+    width: '100%', height: '46px', borderRadius: '14px', border: 'none',
     backgroundColor: '#2554EB', color: '#ffffff',
     fontSize: '15px', fontWeight: '700', cursor: 'pointer',
     boxShadow: '0 10px 22px rgba(37, 84, 235, 0.22)', transition: 'opacity 0.2s',
   },
 
-  otpHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' },
+  otpHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' },
   resendTimerText: { fontSize: '12.5px', color: '#64748B', fontWeight: '500' },
   resendTimerBold: { color: '#2554EB', fontWeight: '700' },
   resendLinkBtn: { background: 'none', border: 'none', padding: 0, color: '#2554EB', fontSize: '12.5px', fontWeight: '700', cursor: 'pointer' },
   otpBoxRow: { display: 'flex', gap: '8px', justifyContent: 'space-between' },
   otpBox: {
-    width: '15%', aspectRatio: '1 / 1', maxWidth: '52px', borderRadius: '14px',
+    width: '15%', aspectRatio: '1 / 1', maxWidth: '46px', borderRadius: '12px',
     border: '1.5px solid #E2E8F0', backgroundColor: '#ffffff',
-    textAlign: 'center', fontSize: '20px', fontWeight: '700', color: '#1E293B',
+    textAlign: 'center', fontSize: '18px', fontWeight: '700', color: '#1E293B',
     outline: 'none', boxSizing: 'border-box',
   },
   otpBoxFilled: { borderColor: '#2554EB' },
 
   primaryCta: {
-    width: '100%', height: '54px', borderRadius: '16px', border: 'none',
+    width: '100%', height: '48px', borderRadius: '14px', border: 'none',
     backgroundColor: '#2554EB', color: '#ffffff',
-    fontSize: '15.5px', fontWeight: '700', cursor: 'pointer',
+    fontSize: '15px', fontWeight: '700', cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
     boxShadow: '0 12px 26px rgba(37, 84, 235, 0.25)', transition: 'opacity 0.2s',
-    marginTop: '4px',
+    marginTop: '2px',
   },
 
-  switchViewText: { textAlign: 'center', fontSize: '13px', color: '#64748B', margin: '4px 0 0 0' },
+  switchViewText: { textAlign: 'center', fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' },
   toggleLink: { color: '#2554EB', fontWeight: '700', background: 'none', border: 'none', padding: 0, marginLeft: '5px', cursor: 'pointer' },
 
   featureRow: {
     display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-    marginTop: '22px', width: '100%',
+    marginTop: '14px', width: '100%',
   },
-  featureItem: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' },
+  featureItem: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' },
   featureIconWrap: {
-    width: '44px', height: '44px', borderRadius: '14px', backgroundColor: '#E4EAFC',
+    width: '38px', height: '38px', borderRadius: '12px', backgroundColor: '#E4EAFC',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
-  featureLabel: { fontSize: '11.5px', fontWeight: '600', color: '#475569', textAlign: 'center', lineHeight: '1.3' },
-  featureDivider: { width: '1px', alignSelf: 'stretch', backgroundColor: '#E2E8F0', margin: '10px 4px 0 4px' },
+  featureLabel: { fontSize: '11px', fontWeight: '600', color: '#475569', textAlign: 'center', lineHeight: '1.3' },
+  featureDivider: { width: '1px', alignSelf: 'stretch', backgroundColor: '#E2E8F0', margin: '8px 4px 0 4px' },
 };
 
 const themeStyles = {
