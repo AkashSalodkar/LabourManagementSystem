@@ -425,7 +425,7 @@ export default function App1() {
   // Auth endpoints live under /api/auth, so we keep that as a derived constant
   // instead of baking "/auth" into the shared root (that was the bug that made
   // every non-auth request 404, since it was calling /api/auth/projects/... etc).
-const API_ROOT = 'https://localhost:7029/api';
+const API_ROOT = 'https://pts-api-e0fhhua9a9fnbtcc.centralindia-01.azurewebsites.net/api';
 const API_BASE_URL = `${API_ROOT}/auth`;
 // ===== API SERVICES =====
 const api = {
@@ -609,17 +609,16 @@ const paymentService = {
   deleteAdvance: (id) => api.delete(`/payments/advance/${id}`),
   deleteBonus: (id) => api.delete(`/payments/bonus/${id}`),
 };
-   //To skip the login
-  // const [isLoginView, setIsLoginView] = useState(false);
-  // const [isUserAuthenticated, setIsUserAuthenticated] = useState(true);
-  // const [userName, setUserName] = useState("Akash");
-  // const [loggedInUser, setLoggedInUser] = useState({ userId: "1", fullName: "Rajesh", industry: "Construction" });
+  // ===== LOCAL TESTING ONLY =====
+  // Set to true to skip the OTP login screen and land straight on the dashboard
+  // with a mock user. Set back to false before building for real use.
+  const DEV_SKIP_LOGIN = true;
+  const DEV_MOCK_USER = { userId: "1", fullName: "Rajesh", industry: "Construction" };
 
-  //With Login
-  const [isLoginView, setIsLoginView] = useState(true);
-  const [isUserAuthenticated, setIsUserAuthenticated] = useState(false);
-  const [loggedInUser, setLoggedInUser] = useState(null);
-  const [userName, setUserName] = useState();
+  const [isLoginView, setIsLoginView] = useState(!DEV_SKIP_LOGIN);
+  const [isUserAuthenticated, setIsUserAuthenticated] = useState(DEV_SKIP_LOGIN);
+  const [loggedInUser, setLoggedInUser] = useState(DEV_SKIP_LOGIN ? DEV_MOCK_USER : null);
+  const [userName, setUserName] = useState(DEV_SKIP_LOGIN ? DEV_MOCK_USER.fullName : undefined);
   
   const [profileImg, setProfileImg] = useState(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
