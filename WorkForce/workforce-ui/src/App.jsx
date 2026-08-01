@@ -87,6 +87,8 @@ const translations = {
     wageUpdatedSuccess: 'Wage updated successfully.',
     sameWageError: 'The new wage must be different from the current wage.',
     removeBalancePendingError: 'Employee can be removed only after the balance is \u20B90.',
+    selectDateForAdvanceError: 'Select a date from the calendar to add an advance.',
+    projectRemoveBalancePendingError: 'Project can be removed only when all employee balances are \u20B90.',
     selectDateFromCalendar: 'Select date from the calendar to mark attendance.',
     pleaseMarkAttendance: 'Please mark attendance for',
     
@@ -288,6 +290,8 @@ const translations = {
     wageUpdatedSuccess: 'वेतन सफलतापूर्वक अपडेट किया गया।',
     sameWageError: 'नई मजदूरी वर्तमान मजदूरी से अलग होनी चाहिए।',
     removeBalancePendingError: 'कर्मचारी को तभी हटाया जा सकता है जब शेष राशि \u20B90 हो।',
+    selectDateForAdvanceError: 'अग्रिम राशि जोड़ने के लिए कैलेंडर से एक तारीख चुनें।',
+    projectRemoveBalancePendingError: 'प्रोजेक्ट को तभी हटाया जा सकता है जब सभी कर्मचारियों की शेष राशि \u20B90 हो।',
     selectDateFromCalendar: 'उपस्थिति दर्ज करने के लिए कैलेंडर से तारीख चुनें।',
     pleaseMarkAttendance: 'कृपया के लिए उपस्थिति दर्ज करें',
     
@@ -737,6 +741,8 @@ const paymentService = {
   const [editWageNote, setEditWageNote] = useState('');
   const [isSameWagePopupOpen, setIsSameWagePopupOpen] = useState(false);
   const [isRemoveBalancePendingPopupOpen, setIsRemoveBalancePendingPopupOpen] = useState(false);
+  const [isSelectDateForAdvancePopupOpen, setIsSelectDateForAdvancePopupOpen] = useState(false);
+  const [isProjectRemoveBalancePendingPopupOpen, setIsProjectRemoveBalancePendingPopupOpen] = useState(false);
   const [isSavingWage, setIsSavingWage] = useState(false);
 
   const [isPaymentsPageOpen, setIsPaymentsPageOpen] = useState(false);
@@ -970,6 +976,12 @@ const paymentService = {
   };
 
   const handleDeleteProject = async (projectId) => {
+    const projectToDelete = projects.find(p => p.id === projectId);
+    const hasUnsettledEmployee = (projectToDelete?.employees || []).some(w => calcTotalDue(w) > 0);
+    if (hasUnsettledEmployee) {
+      setIsProjectRemoveBalancePendingPopupOpen(true);
+      return;
+    }
     if (!window.confirm(t('deleteProject'))) return;
     setProjects(prevProjects => prevProjects.filter(p => p.id !== projectId));
     setActiveSiteViewId(null);
@@ -1205,10 +1217,13 @@ const paymentService = {
   };
 
   const handleIndividualAdvanceChange = (workerId, rawValue) => {
-    if (selectedAttendanceDates.length === 0) return;
+    const digitsOnly = rawValue.replace(/[^0-9]/g, '');
+    if (selectedAttendanceDates.length === 0) {
+      if (digitsOnly.length > 0) setIsSelectDateForAdvancePopupOpen(true);
+      return;
+    }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
     const dateStr = selectedAttendanceDates[safeIndex];
-    const digitsOnly = rawValue.replace(/[^0-9]/g, '');
     setPendingAdvanceByDate(prev => ({
       ...prev,
       [dateStr]: { ...(prev[dateStr] || {}), [workerId]: digitsOnly }
@@ -2901,6 +2916,21 @@ useEffect(() => {
                         </div>
                       )}
 
+                      {isSelectDateForAdvancePopupOpen && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
+                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('selectDateForAdvanceError')}</h3>
+                            <button
+                              onClick={() => setIsSelectDateForAdvancePopupOpen(false)}
+                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                            >
+                              {t('ok')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* ============ MULTI-SELECT ATTENDANCE CALENDAR ============ */}
                       {isCalendarPickerOpen && (() => {
                         const year = calendarViewMonth.getFullYear();
@@ -3323,6 +3353,21 @@ useEffect(() => {
                     <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('removeBalancePendingError')}</h3>
                     <button
                       onClick={() => setIsRemoveBalancePendingPopupOpen(false)}
+                      style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                    >
+                      {t('ok')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {isProjectRemoveBalancePendingPopupOpen && (
+                <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                  <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                    <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
+                    <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('projectRemoveBalancePendingError')}</h3>
+                    <button
+                      onClick={() => setIsProjectRemoveBalancePendingPopupOpen(false)}
                       style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
                     >
                       {t('ok')}
