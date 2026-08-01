@@ -733,7 +733,9 @@ const paymentService = {
   const [editWageTargetWorkerId, setEditWageTargetWorkerId] = useState(null);
   const [editWageApplyTo, setEditWageApplyTo] = useState('');
   const [editWageTodayDate, setEditWageTodayDate] = useState('');
-  const [editWagePastEndDate, setEditWagePastEndDate] = useState('');
+  const [editWagePastDates, setEditWagePastDates] = useState([]);
+  const [editWagePastCalendarMonth, setEditWagePastCalendarMonth] = useState(() => new Date());
+  const EDIT_WAGE_PAST_DAYS_MAX = 15;
   const [editWageSpecificStart, setEditWageSpecificStart] = useState('');
   const [editWageSpecificEnd, setEditWageSpecificEnd] = useState('');
   const [editWageFutureStart, setEditWageFutureStart] = useState('');
@@ -1502,7 +1504,8 @@ const paymentService = {
     setEditWageTargetWorkerId(worker.id);
     setEditWageApplyTo('');
     setEditWageTodayDate(toLocalISODate(new Date()));
-    setEditWagePastEndDate('');
+    setEditWagePastDates([]);
+    setEditWagePastCalendarMonth(new Date());
     setEditWageSpecificStart('');
     setEditWageSpecificEnd('');
     setEditWageFutureStart('');
@@ -1525,12 +1528,68 @@ const paymentService = {
     const joinDateStrForWage = wageTargetWorker?.joiningDate || '2026-07-01';
     const clampToJoinDate = (dateStr) => (dateStr && dateStr < joinDateStrForWage) ? joinDateStrForWage : dateStr;
 
+    // 'past' applies the new wage to a set of individually-picked dates (up to
+    // EDIT_WAGE_PAST_DAYS_MAX) rather than a single contiguous range. Every other
+    // Apply-To option keeps its existing single-range behavior untouched.
+    if (editWageApplyTo === 'past') {
+      if (!editWagePastDates || editWagePastDates.length === 0) {
+        alert('Please select at least one date.');
+        return;
+      }
+      if (editWagePastDates.length > EDIT_WAGE_PAST_DAYS_MAX) {
+        alert(`You can select up to ${EDIT_WAGE_PAST_DAYS_MAX} dates.`);
+        return;
+      }
+
+      if (wageTargetWorker) {
+        const alreadyAtAmount = editWagePastDates.every(d => getEffectiveWage(wageTargetWorker, d) === amount);
+        if (alreadyAtAmount) {
+          setIsSameWagePopupOpen(true);
+          return;
+        }
+      }
+
+      setIsSavingWage(true);
+      try {
+        for (const d of editWagePastDates) {
+          await workerService.updateWage(editWageTargetWorkerId, {
+            effectiveFrom: d,
+            effectiveTo: d,
+            dailyWageAmount: amount,
+            note: editWageNote.trim(),
+          });
+        }
+      } catch (err) {
+        console.error('Failed to save wage override', err);
+        setIsSavingWage(false);
+        alert(err.message || 'Failed to save wage change. Please try again.');
+        return;
+      }
+      setIsSavingWage(false);
+
+      setProjects(prevProjects =>
+        prevProjects.map(project => {
+          if (project.id !== activeSiteViewId) return project;
+          return {
+            ...project,
+            lastModifiedAt: Date.now(),
+            employees: project.employees.map(emp => {
+              if (emp.id !== editWageTargetWorkerId) return emp;
+              const newOverrides = editWagePastDates.map(d => ({ from: d, to: d, amount, note: editWageNote.trim() }));
+              return { ...emp, wageOverrides: [...(emp.wageOverrides || []), ...newOverrides], lastUpdatedAt: Date.now() };
+            })
+          };
+        })
+      );
+      handleCloseEditWage();
+      alert(t('wageUpdatedSuccess'));
+      return;
+    }
+
     let range = { from: selectedDate, to: selectedDate };
     if (editWageApplyTo === 'only') {
       const todayApplyDate = editWageTodayDate || selectedDate;
       range = { from: todayApplyDate, to: todayApplyDate };
-    } else if (editWageApplyTo === 'past') {
-      range = { from: null, to: editWagePastEndDate || selectedDate };
     } else if (editWageApplyTo === 'specific') {
       if (!editWageSpecificStart || !editWageSpecificEnd) { alert("Please select both dates for the specific duration."); return; }
       range = { from: clampToJoinDate(editWageSpecificStart), to: editWageSpecificEnd };
@@ -2768,6 +2827,11 @@ useEffect(() => {
                         const joinMonth = parseInt(joiningDateStr.slice(5, 7), 10) - 1;
                         const isAtEarliestMonth = trackerYear === joinYear && trackerMonth === joinMonth;
 
+                        // E-Muster: future dates (beyond today) must be disabled/greyed out,
+                        // matching the existing "before DOJ" disabled styling. Scoped to this
+                        // calendar only -- does not affect any other calendar in the app.
+                        const trackerTodayStr = toLocalISODate(new Date());
+
                         const statusColors = {
                           P: { bg: '#DCFCE7', text: '#15803D' },
                           A: { bg: '#FEE2E2', text: '#DC2626' },
@@ -2834,11 +2898,13 @@ useEffect(() => {
                                       if (!dayNum) return <div key={ci} />;
                                       const dateStr = `${trackerYear}-${String(trackerMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
                                       const beforeJoining = dateStr < joiningDateStr;
+                                      const afterToday = dateStr > trackerTodayStr;
+                                      const isDisabledDay = beforeJoining || afterToday;
                                       const record = trackerWorker.attendance?.[dateStr];
                                       const status = record?.status;
-                                      const colors = !beforeJoining && status ? statusColors[status] : null;
-                                      const dayWage = (!beforeJoining && status) ? calculateNetDaily(getEffectiveWage(trackerWorker, dateStr), status) : null;
-                                      const dayAdvance = (!beforeJoining && status)
+                                      const colors = !isDisabledDay && status ? statusColors[status] : null;
+                                      const dayWage = (!isDisabledDay && status) ? calculateNetDaily(getEffectiveWage(trackerWorker, dateStr), status) : null;
+                                      const dayAdvance = (!isDisabledDay && status)
                                         ? (trackerWorker.advancePayments || []).filter(p => p.date === dateStr).reduce((sum, p) => sum + (p.amount || 0), 0)
                                         : 0;
                                       return (
@@ -2847,7 +2913,7 @@ useEffect(() => {
                                           style={{
                                             textAlign: 'center', padding: '6px 0', margin: '2px 0', borderRadius: '8px',
                                             fontSize: '13px', fontWeight: colors ? '700' : '500',
-                                            color: beforeJoining ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
+                                            color: isDisabledDay ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
                                             backgroundColor: colors ? colors.bg : 'transparent'
                                           }}
                                         >
@@ -3063,20 +3129,21 @@ useEffect(() => {
                         const isEditWageAmountValid = !!editWageNewAmount && parseFloat(editWageNewAmount) > 0;
                         const isEditWageDateValid =
                           editWageApplyTo === 'only' ? !!editWageTodayDate :
-                          editWageApplyTo === 'past' ? !!editWagePastEndDate :
+                          editWageApplyTo === 'past' ? (editWagePastDates.length > 0 && editWagePastDates.length <= EDIT_WAGE_PAST_DAYS_MAX) :
                           editWageApplyTo === 'specific' ? (!!editWageSpecificStart && !!editWageSpecificEnd) :
                           editWageApplyTo === 'future' ? !!editWageFutureStart :
                           false;
                         const editWageEffectiveRangeForCheck =
                           editWageApplyTo === 'only' ? { from: (editWageTodayDate || selectedDate), to: (editWageTodayDate || selectedDate) } :
-                          editWageApplyTo === 'past' ? { from: null, to: (editWagePastEndDate || selectedDate) } :
                           editWageApplyTo === 'specific' ? { from: editWageSpecificStart, to: editWageSpecificEnd } :
                           editWageApplyTo === 'future' ? { from: (editWageFutureStart || selectedDate), to: null } :
                           { from: selectedDate, to: selectedDate };
                         const isEditWageSameAsCurrent =
                           isEditWageAmountValid &&
                           isEditWageDateValid &&
-                          isWageRangeAlreadyAtAmount(targetWorker, editWageEffectiveRangeForCheck, parseFloat(editWageNewAmount));
+                          (editWageApplyTo === 'past'
+                            ? editWagePastDates.every(d => getEffectiveWage(targetWorker, d) === parseFloat(editWageNewAmount))
+                            : isWageRangeAlreadyAtAmount(targetWorker, editWageEffectiveRangeForCheck, parseFloat(editWageNewAmount)));
                         const isEditWageSaveEnabled = isEditWageAmountValid && isEditWageDateValid && !isEditWageSameAsCurrent;
                         return (
                           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1900, padding: '16px', boxSizing: 'border-box' }}>
@@ -3124,12 +3191,93 @@ useEffect(() => {
                                     <input type="date" value={editWageTodayDate} min={laterOfDates(toLocalISODate(new Date()), editWageJoinDateStr)} max={selectedDate} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWageTodayDate(e.target.value)} style={themeStyles.textInput} />
                                   </div>
                                 )}
-                                {editWageApplyTo === 'past' && (
-                                  <div style={{ marginBottom: '16px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('appliesUpTo')}</label>
-                                    <input type="date" value={editWagePastEndDate} min={editWageJoinDateStr} max={selectedDate} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWagePastEndDate(e.target.value)} style={themeStyles.textInput} />
-                                  </div>
-                                )}
+                                {editWageApplyTo === 'past' && (() => {
+                                  const pastTodayStr = toLocalISODate(new Date());
+                                  const pastYear = editWagePastCalendarMonth.getFullYear();
+                                  const pastMonth = editWagePastCalendarMonth.getMonth();
+                                  const pastFirstWeekday = new Date(pastYear, pastMonth, 1).getDay();
+                                  const pastDaysInMonth = new Date(pastYear, pastMonth + 1, 0).getDate();
+                                  const pastCells = [];
+                                  for (let i = 0; i < pastFirstWeekday; i++) pastCells.push(null);
+                                  for (let d = 1; d <= pastDaysInMonth; d++) pastCells.push(d);
+                                  const pastRows = [];
+                                  for (let i = 0; i < pastCells.length; i += 7) pastRows.push(pastCells.slice(i, i + 7));
+
+                                  const joinYear = parseInt(editWageJoinDateStr.slice(0, 4), 10);
+                                  const joinMonth = parseInt(editWageJoinDateStr.slice(5, 7), 10) - 1;
+                                  const isAtEarliestMonth = pastYear === joinYear && pastMonth === joinMonth;
+                                  const todayYear = parseInt(pastTodayStr.slice(0, 4), 10);
+                                  const todayMonthIdx = parseInt(pastTodayStr.slice(5, 7), 10) - 1;
+                                  const isAtLatestMonth = pastYear === todayYear && pastMonth === todayMonthIdx;
+
+                                  const toggleDate = (dateStr) => {
+                                    setEditWagePastDates(prev => {
+                                      if (prev.includes(dateStr)) return prev.filter(d => d !== dateStr);
+                                      if (prev.length >= EDIT_WAGE_PAST_DAYS_MAX) return prev;
+                                      return [...prev, dateStr].sort();
+                                    });
+                                  };
+
+                                  return (
+                                    <div style={{ marginBottom: '16px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                        <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569' }}>{t('selectDates')}</label>
+                                        <span style={{ fontSize: '11px', fontWeight: '700', color: editWagePastDates.length >= EDIT_WAGE_PAST_DAYS_MAX ? '#DC2626' : '#64748B' }}>
+                                          {editWagePastDates.length}/{EDIT_WAGE_PAST_DAYS_MAX}
+                                        </span>
+                                      </div>
+                                      <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', padding: '10px', backgroundColor: '#F8FAFC' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWagePastCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                                            disabled={isAtEarliestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtEarliestMonth ? 'default' : 'pointer', color: isAtEarliestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&lsaquo;</button>
+                                          <span style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>{editWagePastCalendarMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWagePastCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                                            disabled={isAtLatestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtLatestMonth ? 'default' : 'pointer', color: isAtLatestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&rsaquo;</button>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '2px' }}>
+                                          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                                            <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: '#94A3B8', fontWeight: '600', padding: '3px 0' }}>{d}</div>
+                                          ))}
+                                        </div>
+                                        {pastRows.map((row, ri) => (
+                                          <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                                            {row.map((dayNum, ci) => {
+                                              if (!dayNum) return <div key={ci} />;
+                                              const dateStr = `${pastYear}-${String(pastMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                              const isDisabled = dateStr < editWageJoinDateStr || dateStr > pastTodayStr;
+                                              const isSelected = editWagePastDates.includes(dateStr);
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  key={ci}
+                                                  disabled={isDisabled}
+                                                  onClick={() => toggleDate(dateStr)}
+                                                  style={{
+                                                    textAlign: 'center', padding: '6px 0', margin: '2px 0', borderRadius: '8px',
+                                                    fontSize: '12px', fontWeight: isSelected ? '700' : '500',
+                                                    border: 'none', cursor: isDisabled ? 'default' : 'pointer',
+                                                    color: isDisabled ? '#CBD5E1' : (isSelected ? '#ffffff' : '#1E293B'),
+                                                    backgroundColor: isSelected ? '#0B3C9B' : 'transparent',
+                                                  }}
+                                                >
+                                                  {dayNum}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 {editWageApplyTo === 'specific' && (
                                   (() => {
                                     const specificDateInputStyle = { ...themeStyles.textInput, width: '100%', boxSizing: 'border-box', fontSize: '12.5px', padding: '12px 8px' };
@@ -4360,6 +4508,9 @@ useEffect(() => {
 
   return (
     <div style={authStyles.page}>
+      {/* ---- App version (hardcoded; update manually on each release) ---- */}
+      <span style={authStyles.versionBadge}>Version 1.0</span>
+
       <div style={authStyles.pageInner}>
 
         {/* ---- Branding (sits on the page background, above the card) ---- */}
@@ -4534,6 +4685,7 @@ useEffect(() => {
 
 const authStyles = {
   page: {
+    position: 'relative',
     width: '100vw', minHeight: '100vh', boxSizing: 'border-box',
     backgroundColor: '#EDF1FC',
     display: 'flex', justifyContent: 'center',
@@ -4541,6 +4693,11 @@ const authStyles = {
     overflowY: 'auto',
   },
   pageInner: { width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  versionBadge: {
+    position: 'absolute', top: '10px', right: '14px',
+    fontSize: '11px', fontWeight: '500', color: '#94A3B8',
+    letterSpacing: '0.01em', userSelect: 'none', zIndex: 1,
+  },
 
   brandBlock: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', marginBottom: '12px' },
   logoImg: { width: '60px', height: '60px', borderRadius: '16px', objectFit: 'cover' },
