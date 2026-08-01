@@ -643,7 +643,7 @@ const paymentService = {
   const [loggedInUser, setLoggedInUser] = useState(persistedUser);
   const [userName, setUserName] = useState(persistedUser?.fullName || undefined);
   
-  const [profileImg, setProfileImg] = useState(null);
+  const [profileImg, setProfileImg] = useState(persistedUser?.profileImg || null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   // ===== Language =====
   const [language, setLanguage] = useState(() => {
@@ -4454,7 +4454,13 @@ useEffect(() => {
                   </div>
                   <div style={{ position: 'absolute', bottom: '2px', right: '2px', backgroundColor: '#0B3C9B', color: '#ffffff', borderRadius: '50%', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', border: '2.5px solid #ffffff', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}>&#128247;</div>
                 </label>
-                <input id="user-avatar-file-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => { if (e.target.files && e.target.files[0]) { setProfileImg(URL.createObjectURL(e.target.files[0])); } }} />
+                <input id="user-avatar-file-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setProfileImg(reader.result); // base64 data URL - safe to persist
+                  reader.readAsDataURL(file);
+                }} />
                 <span style={{ fontSize: '12px', color: '#64748B', marginTop: '10px', fontWeight: '500' }}>{t('tapToChangePhoto')}</span>
               </div>
 
@@ -4466,7 +4472,14 @@ useEffect(() => {
                 </div>
               </div>
 
-              <button onClick={() => { setLoggedInUser(prev => ({ ...prev, fullName: userName })); setIsProfileModalOpen(false); }} style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)' }}>
+              <button onClick={() => {
+                setLoggedInUser(prev => {
+                  const updatedUser = { ...prev, fullName: userName, profileImg };
+                  try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                  return updatedUser;
+                });
+                setIsProfileModalOpen(false);
+              }} style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)' }}>
                 <span>&#128190;</span>{t('saveChanges')}
               </button>
 
