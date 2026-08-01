@@ -56,6 +56,29 @@ const translations = {
     dateOfJoining: 'Date of Joining',
     dailyWage: 'Daily Wage',
     saveEmployee: 'Save Employee',
+
+    // Employee Active / Deactivated management
+    activeEmployees: 'Active Employees',
+    deactivatedEmployees: 'Deactivated Employees',
+    noActiveEmployees: 'No active employees yet.',
+    noDeactivatedEmployees: 'No deactivated employees.',
+    deactivate: 'Deactivate',
+    activate: 'Activate',
+    deactivateEmployee: 'Deactivate Employee',
+    activateEmployee: 'Activate Employee',
+    deactivateEmployeeSubtitle: 'This employee will move to Deactivated Employees. All history is preserved.',
+    activateEmployeeSubtitle: 'This employee will move back to Active Employees.',
+    deactivationDate: 'Deactivation Date',
+    activationDate: 'Activation Date',
+    selectDeactivationDate: 'Select the date this employee stops being eligible for attendance.',
+    selectActivationDate: 'Select the date this employee becomes eligible for attendance again.',
+    confirmDeactivate: 'Confirm Deactivation',
+    confirmActivate: 'Confirm Activation',
+    employeeDeactivatedSuccess: 'Employee deactivated successfully.',
+    employeeActivatedSuccess: 'Employee activated successfully.',
+    deactivatedSince: 'Deactivated since',
+    statusActive: 'Active',
+    statusDeactivated: 'Deactivated',
     
     // Attendance
     attendance: 'Attendance',
@@ -256,6 +279,29 @@ const translations = {
     dateOfJoining: 'शामिल होने की तारीख',
     dailyWage: 'दैनिक मजदूरी',
     saveEmployee: 'कर्मचारी सहेजें',
+
+    // Employee Active / Deactivated management
+    activeEmployees: 'सक्रिय कर्मचारी',
+    deactivatedEmployees: 'निष्क्रिय कर्मचारी',
+    noActiveEmployees: 'अभी तक कोई सक्रिय कर्मचारी नहीं है।',
+    noDeactivatedEmployees: 'कोई निष्क्रिय कर्मचारी नहीं है।',
+    deactivate: 'निष्क्रिय करें',
+    activate: 'सक्रिय करें',
+    deactivateEmployee: 'कर्मचारी निष्क्रिय करें',
+    activateEmployee: 'कर्मचारी सक्रिय करें',
+    deactivateEmployeeSubtitle: 'यह कर्मचारी निष्क्रिय कर्मचारी सूची में चला जाएगा। सारा इतिहास सुरक्षित रहेगा।',
+    activateEmployeeSubtitle: 'यह कर्मचारी वापस सक्रिय कर्मचारी सूची में चला जाएगा।',
+    deactivationDate: 'निष्क्रिय करने की तारीख',
+    activationDate: 'सक्रिय करने की तारीख',
+    selectDeactivationDate: 'वह तारीख चुनें जिससे इस कर्मचारी की उपस्थिति दर्ज नहीं होगी।',
+    selectActivationDate: 'वह तारीख चुनें जिससे इस कर्मचारी की उपस्थिति फिर से दर्ज होगी।',
+    confirmDeactivate: 'निष्क्रिय करने की पुष्टि करें',
+    confirmActivate: 'सक्रिय करने की पुष्टि करें',
+    employeeDeactivatedSuccess: 'कर्मचारी सफलतापूर्वक निष्क्रिय किया गया।',
+    employeeActivatedSuccess: 'कर्मचारी सफलतापूर्वक सक्रिय किया गया।',
+    deactivatedSince: 'से निष्क्रिय',
+    statusActive: 'सक्रिय',
+    statusDeactivated: 'निष्क्रिय',
     
     // Attendance
     attendance: 'उपस्थिति',
@@ -493,7 +539,13 @@ const mapWorkerFromApi = (w) => ({
   advance: w.advance || 0,
   bonus: w.bonus || 0,
   lastUpdatedAt: w.lastUpdatedAt,
-  isActive: w.isActive,
+  isActive: w.isActive !== undefined && w.isActive !== null ? w.isActive : true,
+  // History of deactivate/reactivate cycles: [{ deactivatedOn, reactivatedOn }]
+  // reactivatedOn is null while the employee is still deactivated.
+  inactivePeriods: (w.inactivePeriods || []).map(ip => ({
+    deactivatedOn: ip.deactivatedOn,
+    reactivatedOn: ip.reactivatedOn || null,
+  })),
   projectId: w.projectId,
   attendance: Object.fromEntries(
     Object.entries(w.attendance || {}).map(([dateStr, rec]) => [dateStr, { status: rec.status }])
@@ -555,6 +607,9 @@ const workerService = {
   updateWorker: (id, data) => api.put(`/workers/${id}`, data),
   deleteWorker: (id) => api.delete(`/workers/${id}`),
   updateWage: (id, data) => api.put(`/workers/${id}/wage`, data),
+  // Soft-status changes: employee record and all history are preserved server-side.
+  deactivateWorker: (id, data) => api.put(`/workers/${id}/deactivate`, data), // data: { deactivationDate }
+  activateWorker: (id, data) => api.put(`/workers/${id}/activate`, data), // data: { activationDate }
 };
 
 // ===== ATTENDANCE SERVICES =====
@@ -690,6 +745,17 @@ const paymentService = {
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState('');
   const [workerSortMode, setWorkerSortMode] = useState('az');
 
+  // Deactivate / Activate employee flow
+  const [isDeactivateEmployeeModalOpen, setIsDeactivateEmployeeModalOpen] = useState(false);
+  const [deactivateTargetWorkerId, setDeactivateTargetWorkerId] = useState(null);
+  const [deactivationDateInput, setDeactivationDateInput] = useState('');
+  const [isActivateEmployeeModalOpen, setIsActivateEmployeeModalOpen] = useState(false);
+  const [activateTargetWorkerId, setActivateTargetWorkerId] = useState(null);
+  const [activationDateInput, setActivationDateInput] = useState('');
+  const [isDeactivatedSectionExpanded, setIsDeactivatedSectionExpanded] = useState(false);
+  const [isActiveSectionExpanded, setIsActiveSectionExpanded] = useState(true);
+  const [employeeActionToast, setEmployeeActionToast] = useState('');
+
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
@@ -725,7 +791,7 @@ const paymentService = {
 
   const [isEditWageModalOpen, setIsEditWageModalOpen] = useState(false);
   const [editWageTargetWorkerId, setEditWageTargetWorkerId] = useState(null);
-  const [editWageApplyTo, setEditWageApplyTo] = useState('only');
+  const [editWageApplyTo, setEditWageApplyTo] = useState(null);
   const [editWageTodayDate, setEditWageTodayDate] = useState('');
   const [editWagePastEndDate, setEditWagePastEndDate] = useState('');
   const [editWageSpecificStart, setEditWageSpecificStart] = useState('');
@@ -772,6 +838,8 @@ const paymentService = {
   const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
   
   const closeTopmostScreen = () => {
+    if (isDeactivateEmployeeModalOpen) { handleCloseDeactivateModal(); return true; }
+    if (isActivateEmployeeModalOpen) { handleCloseActivateModal(); return true; }
     if (isEditWageModalOpen) { setIsEditWageModalOpen(false); return true; }
     if (trackerWorkerId) { setTrackerWorkerId(null); return true; }
     if (isCustomWeekPickerOpen) { setIsCustomWeekPickerOpen(false); return true; }
@@ -818,6 +886,12 @@ const paymentService = {
     }
   };
 
+  useEffect(() => {
+    if (!employeeActionToast) return;
+    const timerId = setTimeout(() => setEmployeeActionToast(''), 2500);
+    return () => clearTimeout(timerId);
+  }, [employeeActionToast]);
+
   const closeTopmostScreenRef = useRef(() => false);
   closeTopmostScreenRef.current = closeTopmostScreen;
 
@@ -843,7 +917,9 @@ const paymentService = {
   useEffect(() => {
     if (!isUserAuthenticated) return;
 
-    const hasOpenScreens = isEditWageModalOpen || 
+    const hasOpenScreens = isDeactivateEmployeeModalOpen ||
+                          isActivateEmployeeModalOpen ||
+                          isEditWageModalOpen || 
                           trackerWorkerId || 
                           isCustomWeekPickerOpen || 
                           isEditProjectModalOpen || 
@@ -861,6 +937,8 @@ const paymentService = {
       window.history.pushState({ appGuard: true, timestamp: Date.now() }, '');
     }
   }, [isUserAuthenticated, 
+      isDeactivateEmployeeModalOpen,
+      isActivateEmployeeModalOpen,
       isEditWageModalOpen, 
       trackerWorkerId, 
       isCustomWeekPickerOpen, 
@@ -905,27 +983,107 @@ const paymentService = {
     setIsWorkerSubFormOpen(false);
   };
 
-  const handleDeleteWorkerInline = async (projectId, workerId) => {
-    if (!window.confirm("Are you sure you want to remove this employee from this worksite?")) return;
-    // Optimistic update so the UI feels instant...
+  // ===== Deactivate Employee (replaces permanent delete) =====
+  const handleOpenDeactivateModal = (worker) => {
+    setDeactivateTargetWorkerId(worker.id);
+    setDeactivationDateInput(toLocalISODate(new Date()));
+    setIsDeactivateEmployeeModalOpen(true);
+  };
+
+  const handleCloseDeactivateModal = () => {
+    setIsDeactivateEmployeeModalOpen(false);
+    setDeactivateTargetWorkerId(null);
+    setDeactivationDateInput('');
+  };
+
+  const handleConfirmDeactivate = async () => {
+    if (!deactivationDateInput) { alert(t('selectDeactivationDate')); return; }
+    if (!window.confirm(t('confirmDeactivate') + '?')) return;
+    const projectId = activeSiteViewId;
+    const workerId = deactivateTargetWorkerId;
+    const deactivationDate = deactivationDateInput;
+
+    // Optimistic update — the employee moves to Deactivated Employees, nothing is deleted.
     setProjects(prevProjects =>
       prevProjects.map(project => {
-        if (project.id === projectId) {
-          const updatedEmployees = (project.employees || []).filter(emp => emp.id !== workerId);
-          return { ...project, workersCount: updatedEmployees.length, employees: updatedEmployees, lastModifiedAt: Date.now() };
-        }
-        return project;
+        if (project.id !== projectId) return project;
+        const updatedEmployees = (project.employees || []).map(emp => {
+          if (emp.id !== workerId) return emp;
+          const updatedPeriods = [...(emp.inactivePeriods || []), { deactivatedOn: deactivationDate, reactivatedOn: null }];
+          return { ...emp, isActive: false, inactivePeriods: updatedPeriods, lastUpdatedAt: Date.now() };
+        });
+        return { ...project, employees: updatedEmployees, lastModifiedAt: Date.now() };
       })
     );
+    handleCloseDeactivateModal();
+    setEmployeeActionToast(t('employeeDeactivatedSuccess'));
     try {
-      await workerService.deleteWorker(workerId);
+      await workerService.deactivateWorker(workerId, { deactivationDate });
     } catch (error) {
-      console.error('Error deleting worker:', error);
-      alert('Could not delete employee on the server. Reloading latest data.');
-    } finally {
-      // ...then reconcile with the server either way (soft-delete flips IsActive).
+      console.error('Error deactivating worker:', error);
+      alert('Could not deactivate employee on the server. Reloading latest data.');
       await refreshProject(projectId);
     }
+  };
+
+  // ===== Reactivate Employee =====
+  const handleOpenActivateModal = (worker) => {
+    setActivateTargetWorkerId(worker.id);
+    setActivationDateInput(toLocalISODate(new Date()));
+    setIsActivateEmployeeModalOpen(true);
+  };
+
+  const handleCloseActivateModal = () => {
+    setIsActivateEmployeeModalOpen(false);
+    setActivateTargetWorkerId(null);
+    setActivationDateInput('');
+  };
+
+  const handleConfirmActivate = async () => {
+    if (!activationDateInput) { alert(t('selectActivationDate')); return; }
+    if (!window.confirm(t('confirmActivate') + '?')) return;
+    const projectId = activeSiteViewId;
+    const workerId = activateTargetWorkerId;
+    const activationDate = activationDateInput;
+
+    setProjects(prevProjects =>
+      prevProjects.map(project => {
+        if (project.id !== projectId) return project;
+        const updatedEmployees = (project.employees || []).map(emp => {
+          if (emp.id !== workerId) return emp;
+          const periods = emp.inactivePeriods || [];
+          const lastOpenIndex = [...periods].map(p => p.reactivatedOn).lastIndexOf(null);
+          const updatedPeriods = lastOpenIndex === -1
+            ? periods
+            : periods.map((p, idx) => idx === lastOpenIndex ? { ...p, reactivatedOn: activationDate } : p);
+          return { ...emp, isActive: true, inactivePeriods: updatedPeriods, lastUpdatedAt: Date.now() };
+        });
+        return { ...project, employees: updatedEmployees, lastModifiedAt: Date.now() };
+      })
+    );
+    handleCloseActivateModal();
+    setEmployeeActionToast(t('employeeActivatedSuccess'));
+    try {
+      await workerService.activateWorker(workerId, { activationDate });
+    } catch (error) {
+      console.error('Error activating worker:', error);
+      alert('Could not activate employee on the server. Reloading latest data.');
+      await refreshProject(projectId);
+    }
+  };
+
+  // Whether a worker is eligible to have attendance marked/viewed on a given date:
+  // must have joined by that date, and the date must not fall within a deactivated period.
+  const isWorkerEligibleForAttendanceOnDate = (worker, dateStr) => {
+    const joinDate = worker.joiningDate || '2026-07-01';
+    if (dateStr < joinDate) return false;
+    const periods = worker.inactivePeriods || [];
+    for (const period of periods) {
+      const from = period.deactivatedOn;
+      const to = period.reactivatedOn;
+      if (from && dateStr >= from && (!to || dateStr < to)) return false;
+    }
+    return true;
   };
 
   const handleOpenEditProjectModal = (project) => {
@@ -1168,8 +1326,7 @@ const paymentService = {
     setPendingAttendanceByDate(prev => {
       const updatedMap = { ...(prev[dateStr] || {}) };
       targets.forEach(worker => {
-        const joinDateStr = worker.joiningDate || '2026-07-01';
-        if (dateStr >= joinDateStr) {
+        if (isWorkerEligibleForAttendanceOnDate(worker, dateStr)) {
           updatedMap[worker.id] = { status: statusValue };
         }
       });
@@ -1187,8 +1344,7 @@ const paymentService = {
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
     const dateStr = selectedAttendanceDates[safeIndex];
     const worker = currentProject.employees.find(w => w.id === workerId);
-    const joinDateStr = worker?.joiningDate || '2026-07-01';
-    if (dateStr < joinDateStr) return;
+    if (!worker || !isWorkerEligibleForAttendanceOnDate(worker, dateStr)) return;
     setPendingAttendanceByDate(prev => ({
       ...prev,
       [dateStr]: { ...(prev[dateStr] || {}), [workerId]: { status: statusValue } }
@@ -1476,7 +1632,7 @@ const paymentService = {
 
   const handleOpenEditWage = (worker) => {
     setEditWageTargetWorkerId(worker.id);
-    setEditWageApplyTo('only');
+    setEditWageApplyTo(null);
     setEditWageTodayDate(toLocalISODate(new Date()));
     setEditWagePastEndDate('');
     setEditWageSpecificStart('');
@@ -2467,6 +2623,8 @@ useEffect(() => {
             if (workerSortMode === 'lastUpdated') return (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
             return 0;
           });
+          const activeSortedWorkers = sortedWorkers.filter(w => w.isActive !== false);
+          const deactivatedSortedWorkers = sortedWorkers.filter(w => w.isActive === false);
 
           return (
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1650, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
@@ -2521,7 +2679,7 @@ useEffect(() => {
                   const sortedByName = [...(currentProject2.employees || [])].sort((a, b) => a.name.localeCompare(b.name));
                   const filteredAttendanceEmployees = sortedByName
                     .filter(worker => worker.name.toLowerCase().includes(attendanceWorkerSearchQuery.toLowerCase()))
-                    .filter(worker => eligibilityFilterDate >= (worker.joiningDate || '2026-07-01'));
+                    .filter(worker => isWorkerEligibleForAttendanceOnDate(worker, eligibilityFilterDate));
 
                   const primaryDateAttendance = currentDisplayedDate
                     ? (pendingAttendanceByDate[currentDisplayedDate] || {})
@@ -3054,9 +3212,9 @@ useEffect(() => {
                                 <label style={{ fontSize: '11px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>{t('applyTo')}</label>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
                                   {[
-                                    { key: 'only', label: t('today') },
                                     { key: 'past', label: t('pastDays') },
                                     { key: 'specific', label: t('specificDuration') },
+                                    { key: 'only', label: t('today') },
                                     { key: 'future', label: t('onwardsThisDay') }
                                   ].map(opt => (
                                     <button
@@ -3207,35 +3365,163 @@ useEffect(() => {
                   </select>
                 </div>
 
-                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {sortedWorkers.length > 0 ? (
-                    sortedWorkers.map((worker) => {
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {(() => {
+                    const renderWorkerCard = (worker) => {
                       const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
                       const bgColors = ['#0070F3', '#10B981', '#7C3AED', '#F59E0B', '#EF4444'];
                       const assignedBg = bgColors[worker.id % bgColors.length];
+                      const isWorkerActive = worker.isActive !== false;
+                      const openInactivePeriod = (worker.inactivePeriods || []).find(p => !p.reactivatedOn);
                       return (
-                        <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #F1F5F9', flexShrink: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: assignedBg, color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700' }}>{initials}</div>
-                            <div>
-                              <h5 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>{worker.name}</h5>
+                        <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: isWorkerActive ? '1px solid #F1F5F9' : '1px solid #FEE2E2', opacity: isWorkerActive ? 1 : 0.85, flexShrink: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                            <div style={{ position: 'relative', flexShrink: 0 }}>
+                              <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: assignedBg, color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', filter: isWorkerActive ? 'none' : 'grayscale(0.6)' }}>{initials}</div>
+                              <span style={{ position: 'absolute', bottom: '-1px', right: '-1px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: isWorkerActive ? '#10B981' : '#EF4444', border: '2px solid #ffffff' }} />
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <h5 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{worker.name}</h5>
                               <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748B' }}>{worker.role || t('labor')} &bull; <span style={{ color: '#94A3B8' }}>{t('joined')} {worker.joiningDate ? new Date(worker.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '01 Jul'}</span></p>
+                              {!isWorkerActive && openInactivePeriod && (
+                                <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#DC2626', fontWeight: '600' }}>{t('deactivatedSince')} {new Date(openInactivePeriod.deactivatedOn).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                              )}
                             </div>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                             <span onClick={() => handleEditWorkerInline(currentProject, worker)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px', filter: 'grayscale(1)' }} title={t('edit')}>&#9999;&#65039;</span>
-                            <span onClick={() => handleDeleteWorkerInline(currentProject.id, worker.id)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px', filter: 'grayscale(1)' }} title={t('delete')}>&#128465;&#65039;</span>
+                            {isWorkerActive ? (
+                              <span onClick={() => handleOpenDeactivateModal(worker)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px' }} title={t('deactivate')}>&#128683;</span>
+                            ) : (
+                              <span onClick={() => handleOpenActivateModal(worker)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px' }} title={t('activate')}>&#9989;</span>
+                            )}
                           </div>
                         </div>
                       );
-                    })
-                  ) : (
-                    <p style={{ fontSize: '13px', color: '#64748B', textAlign: 'center', marginTop: '20px' }}>{t('noEmployeesMatch')}</p>
-                  )}
+                    };
+
+                    return (
+                      <>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div
+                            onClick={() => setIsActiveSectionExpanded(v => !v)}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10B981' }} />
+                              <h4 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>{t('activeEmployees')} ({activeSortedWorkers.length})</h4>
+                            </div>
+                            <span style={{ fontSize: '12px', color: '#94A3B8', transform: isActiveSectionExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.15s' }}>&#9660;</span>
+                          </div>
+                          {isActiveSectionExpanded && (
+                            activeSortedWorkers.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {activeSortedWorkers.map(renderWorkerCard)}
+                              </div>
+                            ) : (
+                              <p style={{ fontSize: '13px', color: '#64748B', textAlign: 'center', margin: '4px 0' }}>{t('noActiveEmployees')}</p>
+                            )
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div
+                            onClick={() => setIsDeactivatedSectionExpanded(v => !v)}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#94A3B8' }} />
+                              <h4 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>{t('deactivatedEmployees')} ({deactivatedSortedWorkers.length})</h4>
+                            </div>
+                            <span style={{ fontSize: '12px', color: '#94A3B8', transform: isDeactivatedSectionExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 0.15s' }}>&#9660;</span>
+                          </div>
+                          {isDeactivatedSectionExpanded && (
+                            deactivatedSortedWorkers.length > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {deactivatedSortedWorkers.map(renderWorkerCard)}
+                              </div>
+                            ) : (
+                              <p style={{ fontSize: '13px', color: '#64748B', textAlign: 'center', margin: '4px 0' }}>{t('noDeactivatedEmployees')}</p>
+                            )
+                          )}
+                        </div>
+
+                        {activeSortedWorkers.length === 0 && deactivatedSortedWorkers.length === 0 && (
+                          <p style={{ fontSize: '13px', color: '#64748B', textAlign: 'center', marginTop: '20px' }}>{t('noEmployeesMatch')}</p>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
-              {/* Add / Edit worker sub-form (existing project) */}
+              {/* Deactivate Employee modal */}
+              {isDeactivateEmployeeModalOpen && (() => {
+                const targetWorker = (currentProject.employees || []).find(w => w.id === deactivateTargetWorkerId);
+                if (!targetWorker) return null;
+                const minDeactivateDate = targetWorker.joiningDate || '2026-07-01';
+                return (
+                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1950, padding: '16px', boxSizing: 'border-box' }}>
+                    <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '20px', boxSizing: 'border-box', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
+                      <h3 style={{ margin: '0 0 4px 0', fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{t('deactivateEmployee')} &middot; {targetWorker.name}</h3>
+                      <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: '#64748B' }}>{t('deactivateEmployeeSubtitle')}</p>
+                      <label style={{ fontSize: '11px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>{t('deactivationDate')}</label>
+                      <input
+                        type="date"
+                        value={deactivationDateInput}
+                        min={minDeactivateDate}
+                        onKeyDown={(e) => e.preventDefault()}
+                        onClick={(e) => { try { if (typeof e.target.showPicker === 'function') { e.target.showPicker(); } } catch (err) { console.error('Picker not supported or blocked:', err); } }}
+                        onChange={(e) => setDeactivationDateInput(e.target.value)}
+                        style={themeStyles.textInput}
+                      />
+                      <p style={{ margin: '8px 0 18px 0', fontSize: '11px', color: '#94A3B8' }}>{t('selectDeactivationDate')}</p>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button type="button" onClick={handleCloseDeactivateModal} style={{ flex: 1, padding: '13px', borderRadius: '12px', backgroundColor: '#F1F5F9', color: '#475569', fontSize: '14px', fontWeight: '600', border: 'none', cursor: 'pointer' }}>{t('cancel')}</button>
+                        <button type="button" onClick={handleConfirmDeactivate} disabled={!deactivationDateInput} style={{ flex: 1, padding: '13px', borderRadius: '12px', backgroundColor: '#DC2626', color: '#ffffff', fontSize: '14px', fontWeight: '600', border: 'none', cursor: 'pointer', opacity: !deactivationDateInput ? 0.5 : 1 }}>{t('confirmDeactivate')}</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Activate Employee modal */}
+              {isActivateEmployeeModalOpen && (() => {
+                const targetWorker = (currentProject.employees || []).find(w => w.id === activateTargetWorkerId);
+                if (!targetWorker) return null;
+                const openPeriod = (targetWorker.inactivePeriods || []).find(p => !p.reactivatedOn);
+                const minActivateDate = openPeriod?.deactivatedOn || targetWorker.joiningDate || '2026-07-01';
+                return (
+                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1950, padding: '16px', boxSizing: 'border-box' }}>
+                    <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '20px', boxSizing: 'border-box', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
+                      <h3 style={{ margin: '0 0 4px 0', fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{t('activateEmployee')} &middot; {targetWorker.name}</h3>
+                      <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: '#64748B' }}>{t('activateEmployeeSubtitle')}</p>
+                      <label style={{ fontSize: '11px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>{t('activationDate')}</label>
+                      <input
+                        type="date"
+                        value={activationDateInput}
+                        min={minActivateDate}
+                        onKeyDown={(e) => e.preventDefault()}
+                        onClick={(e) => { try { if (typeof e.target.showPicker === 'function') { e.target.showPicker(); } } catch (err) { console.error('Picker not supported or blocked:', err); } }}
+                        onChange={(e) => setActivationDateInput(e.target.value)}
+                        style={themeStyles.textInput}
+                      />
+                      <p style={{ margin: '8px 0 18px 0', fontSize: '11px', color: '#94A3B8' }}>{t('selectActivationDate')}</p>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button type="button" onClick={handleCloseActivateModal} style={{ flex: 1, padding: '13px', borderRadius: '12px', backgroundColor: '#F1F5F9', color: '#475569', fontSize: '14px', fontWeight: '600', border: 'none', cursor: 'pointer' }}>{t('cancel')}</button>
+                        <button type="button" onClick={handleConfirmActivate} disabled={!activationDateInput} style={{ flex: 1, padding: '13px', borderRadius: '12px', backgroundColor: '#10B981', color: '#ffffff', fontSize: '14px', fontWeight: '600', border: 'none', cursor: 'pointer', opacity: !activationDateInput ? 0.5 : 1 }}>{t('confirmActivate')}</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Deactivate / Activate success toast */}
+              {employeeActionToast && (
+                <div style={{ position: 'fixed', bottom: '84px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#1E293B', color: '#ffffff', padding: '10px 18px', borderRadius: '10px', fontSize: '13px', fontWeight: '600', zIndex: 2000, boxShadow: '0 6px 16px rgba(0,0,0,0.2)', whiteSpace: 'nowrap' }}>
+                  {employeeActionToast}
+                </div>
+              )}
               {isWorkerSubFormOpen && (
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#ffffff', zIndex: 999, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ padding: '24px 20px', display: 'flex', alignItems: 'center', gap: '16px', borderBottom: '1px solid #F1F5F9' }}>
@@ -3420,9 +3706,14 @@ useEffect(() => {
                               {initials}
                             </div>
                             <div style={{ minWidth: 0 }}>
-                              <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {worker.name}
-                              </h4>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {worker.name}
+                                </h4>
+                                {worker.isActive === false && (
+                                  <span style={{ fontSize: '9px', fontWeight: '700', color: '#DC2626', backgroundColor: '#FEE2E2', borderRadius: '6px', padding: '2px 6px', flexShrink: 0, textTransform: 'uppercase' }}>{t('statusDeactivated')}</span>
+                                )}
+                              </div>
                               <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748B' }}>
                                 ₹{getEffectiveWage ? getEffectiveWage(worker, selectedDate) : worker.dailyWage || 400}/day
                               </p>
