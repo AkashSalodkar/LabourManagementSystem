@@ -645,6 +645,7 @@ const paymentService = {
   
   const [profileImg, setProfileImg] = useState(persistedUser?.profileImg || null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   // ===== Language =====
   const [language, setLanguage] = useState(() => {
     try {
@@ -2247,11 +2248,13 @@ const paymentService = {
           const sessionUser = { 
             userId: data.userId, 
             fullName: data.fullName, 
-            industry: data.industry || industry 
+            industry: data.industry || industry,
+            profileImg: data.profileImage || null
           };
           localStorage.setItem('workforce_user', JSON.stringify(sessionUser));
           setLoggedInUser(sessionUser);
           setUserName(sessionUser.fullName || '');
+          setProfileImg(sessionUser.profileImg);
           setIsUserAuthenticated(true);
           setActivePage('dashboard');
           loadUserProjects(data.userId); 
@@ -4472,15 +4475,54 @@ useEffect(() => {
                 </div>
               </div>
 
-              <button onClick={() => {
-                setLoggedInUser(prev => {
-                  const updatedUser = { ...prev, fullName: userName, profileImg };
-                  try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
-                  return updatedUser;
-                });
-                setIsProfileModalOpen(false);
-              }} style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)' }}>
-                <span>&#128190;</span>{t('saveChanges')}
+              <button
+                disabled={isSavingProfile}
+                onClick={async () => {
+                  const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
+                  if (!trimmedName) { alert(t('yourName') + ' is required.'); return; }
+
+                  // No server-side user (e.g. dev/mock session) - fall back to local-only save.
+                  if (!loggedInUser?.userId) {
+                    setLoggedInUser(prev => {
+                      const updatedUser = { ...prev, fullName: trimmedName, profileImg };
+                      try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                      return updatedUser;
+                    });
+                    setIsProfileModalOpen(false);
+                    return;
+                  }
+
+                  setIsSavingProfile(true);
+                  try {
+                    const response = await fetch(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ fullName: trimmedName, profileImage: profileImg }),
+                    });
+                    const responseText = await response.text();
+                    let data = {};
+                    if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
+
+                    if (!response.ok) {
+                      alert(data.message || 'Failed to update profile. Please try again.');
+                      return;
+                    }
+
+                    const updatedUser = { ...loggedInUser, fullName: data.fullName, industry: data.industry, profileImg: data.profileImage };
+                    try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                    setLoggedInUser(updatedUser);
+                    setUserName(data.fullName);
+                    setProfileImg(data.profileImage || null);
+                    setIsProfileModalOpen(false);
+                  } catch (err) {
+                    alert('Could not reach the server. Please check your connection and try again.');
+                  } finally {
+                    setIsSavingProfile(false);
+                  }
+                }}
+                style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
+                <span>&#128190;</span>{isSavingProfile ? t('loading') || 'Saving...' : t('saveChanges')}
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '18px 0' }}>
