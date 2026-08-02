@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import { FiUser, FiPhone, FiChevronDown, FiArrowRight } from 'react-icons/fi';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
@@ -645,7 +646,6 @@ const paymentService = {
   
   const [profileImg, setProfileImg] = useState(persistedUser?.profileImg || null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
   // ===== Language =====
   const [language, setLanguage] = useState(() => {
     try {
@@ -700,6 +700,7 @@ const paymentService = {
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
+  const [firebaseVerificationId, setFirebaseVerificationId] = useState(null);
   const [industry, setIndustry] = useState('General');
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
@@ -2210,34 +2211,58 @@ const paymentService = {
 
   const isRegistrationFormValid = () => fullName.trim() !== '' && mobileNumber.length === 10;
 
+  // Firebase phone-auth listeners: 'phoneCodeSent' fires once the SMS is dispatched and
+  // gives us the verificationId we need later to confirm the code the user types in.
+  useEffect(() => {
+    const codeSentListener = FirebaseAuthentication.addListener('phoneCodeSent', (event) => {
+      setFirebaseVerificationId(event.verificationId);
+      setOtpSent(true);
+      setSendingOtp(false);
+    });
+    const verificationFailedListener = FirebaseAuthentication.addListener('phoneVerificationFailed', (event) => {
+      alert(event?.message || 'Could not send verification code. Please try again.');
+      setSendingOtp(false);
+    });
+    return () => {
+      codeSentListener.then((l) => l.remove());
+      verificationFailedListener.then((l) => l.remove());
+    };
+  }, []);
+
   const handleSendOtp = async () => {
     if (!isLoginView && !isRegistrationFormValid()) { alert('Please fill all registration details accurately.'); return; }
     if (!mobileNumber || mobileNumber.length !== 10) { alert('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
-// Inside handleSendOtp function:
-      const response = await fetch(`${API_BASE_URL}/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ mobileNumber, industry, isLoginView })
-      });
-      const responseText = await response.text();
-      let data = {};
-      if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
-      if (response.ok) { setOtpSent(true); alert(data.message || `OTP verification code dispatched to +91 ${mobileNumber}`); }
-      else { alert(data.message || 'Failed to dispatch verification code.'); }
-    } catch (error) { console.error('Network Error:', error); alert('Could not establish contact with backend services.'); }
-    finally { setSendingOtp(false); }
+      await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
+      // otpSent / firebaseVerificationId are set by the 'phoneCodeSent' listener above once Firebase dispatches the SMS.
+    } catch (error) {
+      console.error('Firebase OTP Error:', error);
+      alert(error?.message || 'Could not send verification code. Please try again.');
+      setSendingOtp(false);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!otpSent) { alert('Please generate and input your verification OTP first.'); return; }
+    if (!otpSent || !firebaseVerificationId) { alert('Please generate and input your verification OTP first.'); return; }
     setLoading(true);
-    const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
-    const payload = isLoginView ? { mobileNumber: mobileNumber.trim(), otp } : { mobileNumber: mobileNumber.trim(), otp, fullName, industry };
     try {
+      // 1. Confirm the code with Firebase - this is what actually verifies the phone number now.
+      const confirmResult = await FirebaseAuthentication.confirmVerificationCode({
+        verificationId: firebaseVerificationId,
+        verificationCode: otp,
+      });
+      if (!confirmResult?.user) { throw new Error('Verification did not return a signed-in user.'); }
+      const idToken = (await FirebaseAuthentication.getIdToken())?.token;
+      if (!idToken) { throw new Error('Could not obtain a verified session from Firebase.'); }
+
+      // 2. Send the verified Firebase ID token to our backend instead of a raw OTP code.
+      const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
+      const payload = isLoginView
+        ? { mobileNumber: mobileNumber.trim(), idToken }
+        : { mobileNumber: mobileNumber.trim(), idToken, fullName, industry };
+
       const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
       const responseText = await response.text();
       let data = {};
@@ -2248,13 +2273,11 @@ const paymentService = {
           const sessionUser = { 
             userId: data.userId, 
             fullName: data.fullName, 
-            industry: data.industry || industry,
-            profileImg: data.profileImage || null
+            industry: data.industry || industry 
           };
           localStorage.setItem('workforce_user', JSON.stringify(sessionUser));
           setLoggedInUser(sessionUser);
           setUserName(sessionUser.fullName || '');
-          setProfileImg(sessionUser.profileImg);
           setIsUserAuthenticated(true);
           setActivePage('dashboard');
           loadUserProjects(data.userId); 
@@ -2263,10 +2286,13 @@ const paymentService = {
           setIsLoginView(true);
           setOtp('');
           setOtpSent(false);
+          setFirebaseVerificationId(null);
         }
       } else { alert(data.message || 'Validation failed down at backend services.'); }
-    } catch (error) { console.error('API Error:', error); alert('Connection error occurred while processing server tasks.'); }
-    finally { setLoading(false); }
+    } catch (error) {
+      console.error('Verification Error:', error);
+      alert(error?.message || 'Invalid or expired OTP. Please try again.');
+    } finally { setLoading(false); }
   };
 
   // Keep the 6 OTP boxes in sync with the existing `otp` string used by handleSubmit
@@ -4475,54 +4501,15 @@ useEffect(() => {
                 </div>
               </div>
 
-              <button
-                disabled={isSavingProfile}
-                onClick={async () => {
-                  const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
-                  if (!trimmedName) { alert(t('yourName') + ' is required.'); return; }
-
-                  // No server-side user (e.g. dev/mock session) - fall back to local-only save.
-                  if (!loggedInUser?.userId) {
-                    setLoggedInUser(prev => {
-                      const updatedUser = { ...prev, fullName: trimmedName, profileImg };
-                      try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
-                      return updatedUser;
-                    });
-                    setIsProfileModalOpen(false);
-                    return;
-                  }
-
-                  setIsSavingProfile(true);
-                  try {
-                    const response = await fetch(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify({ fullName: trimmedName, profileImage: profileImg }),
-                    });
-                    const responseText = await response.text();
-                    let data = {};
-                    if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
-
-                    if (!response.ok) {
-                      alert(data.message || 'Failed to update profile. Please try again.');
-                      return;
-                    }
-
-                    const updatedUser = { ...loggedInUser, fullName: data.fullName, industry: data.industry, profileImg: data.profileImage };
-                    try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
-                    setLoggedInUser(updatedUser);
-                    setUserName(data.fullName);
-                    setProfileImg(data.profileImage || null);
-                    setIsProfileModalOpen(false);
-                  } catch (err) {
-                    alert('Could not reach the server. Please check your connection and try again.');
-                  } finally {
-                    setIsSavingProfile(false);
-                  }
-                }}
-                style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
-                <span>&#128190;</span>{isSavingProfile ? t('loading') || 'Saving...' : t('saveChanges')}
+              <button onClick={() => {
+                setLoggedInUser(prev => {
+                  const updatedUser = { ...prev, fullName: userName, profileImg };
+                  try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                  return updatedUser;
+                });
+                setIsProfileModalOpen(false);
+              }} style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)' }}>
+                <span>&#128190;</span>{t('saveChanges')}
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '18px 0' }}>
@@ -4570,8 +4557,8 @@ useEffect(() => {
 
         {/* ---- Branding (sits on the page background, above the card) ---- */}
         <div style={authStyles.brandBlock}>
-          <img src={smartpayLogo} alt="SmartManage" style={authStyles.logoImg} />
-          <h1 style={authStyles.brandName}>SmartManage</h1>
+          <img src={smartpayLogo} alt="SmartPay" style={authStyles.logoImg} />
+          <h1 style={authStyles.brandName}>SmartPay</h1>
           <p style={authStyles.brandTagline}>Track Wages. Pay on Time.</p>
         </div>
 
