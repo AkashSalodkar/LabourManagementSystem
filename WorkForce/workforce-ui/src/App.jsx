@@ -4570,8 +4570,8 @@ useEffect(() => {
 
         {/* ---- Branding (sits on the page background, above the card) ---- */}
         <div style={authStyles.brandBlock}>
-          <img src={smartpayLogo} alt="SmartPay" style={authStyles.logoImg} />
-          <h1 style={authStyles.brandName}>SmartPay</h1>
+          <img src={smartpayLogo} alt="SmartManage" style={authStyles.logoImg} />
+          <h1 style={authStyles.brandName}>SmartManage</h1>
           <p style={authStyles.brandTagline}>Track Wages. Pay on Time.</p>
         </div>
 
