@@ -2444,7 +2444,7 @@ useEffect(() => {
     window.location.reload();
   };
 
-  const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/watch?v=6rRRAVSilss';
+  const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/watch?v=WQPjQam78-Q&t=2s';
   const handleWatchTutorialVideo = async () => {
     try {
       await Browser.open({ url: TUTORIAL_VIDEO_URL });
