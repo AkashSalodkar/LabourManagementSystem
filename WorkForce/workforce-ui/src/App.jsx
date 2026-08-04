@@ -2320,6 +2320,17 @@ const paymentService = {
     setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
   };
 
+  // Lets the user go back and correct the mobile number if the OTP was sent to a wrong/mistyped
+  // number - without this they'd be stuck staring at an uneditable field waiting for an OTP
+  // that will never arrive at their own phone.
+  const handleChangeNumber = () => {
+    setOtpSent(false);
+    setOtp('');
+    setOtpDigits(['', '', '', '', '', '']);
+    setFirebaseVerificationId(null);
+    setResendSeconds(0);
+  };
+
 useEffect(() => {
   if (isUserAuthenticated && loggedInUser?.userId) {
     loadUserProjects(loggedInUser.userId);
@@ -4798,6 +4809,18 @@ useEffect(() => {
                       {sendingOtp ? 'Resending...' : 'Resend OTP'}
                     </button>
                   )}
+                </div>
+                <div style={{ marginBottom: '10px' }}>
+                  <span style={{ fontSize: '13px', color: '#6B7280' }}>
+                    OTP sent to +91 {mobileNumber}.{' '}
+                    <button
+                      type="button"
+                      onClick={handleChangeNumber}
+                      style={{ background: 'none', border: 'none', padding: 0, color: '#0B3C9B', fontWeight: '700', fontSize: '13px', cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      Wrong number? Change it
+                    </button>
+                  </span>
                 </div>
                 <div style={authStyles.otpBoxRow}>
                   {otpDigits.map((digit, i) => (
