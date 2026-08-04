@@ -4812,7 +4812,7 @@ useEffect(() => {
                 </div>
                 <div style={{ marginBottom: '10px' }}>
                   <span style={{ fontSize: '13px', color: '#6B7280' }}>
-                    OTP sent to +91 {mobileNumber}.{' '}
+                    OTP sent to <b style={{ color: '#D97706' }}>+91 {mobileNumber}</b>.{' '}
                     <button
                       type="button"
                       onClick={handleChangeNumber}
