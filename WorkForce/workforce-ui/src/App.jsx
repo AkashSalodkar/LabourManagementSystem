@@ -4145,8 +4145,10 @@ useEffect(() => {
                           </div>
                         );
                       })()}
+                    </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 16px 64px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', paddingTop: '10px', marginBottom: '10px' }}>
                         <h3 style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('paymentHistory')}</h3>
                         <button
                           type="button"
@@ -4167,9 +4169,6 @@ useEffect(() => {
                           {t('downloadStatement')}
                         </button>
                       </div>
-                    </div>
-
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 16px 64px 16px' }}>
                       {allTransactionsInRange.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '2px' }}>
                           {allTransactionsInRange.map(txn => {
