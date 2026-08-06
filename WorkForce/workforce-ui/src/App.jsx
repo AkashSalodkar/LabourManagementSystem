@@ -1,3 +1,6 @@
+import './firebase';
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber as firebaseSignInWithPhoneNumber } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 import { useState, useEffect, useRef } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
@@ -2287,7 +2290,10 @@ const paymentService = {
 
   // Firebase phone-auth listeners: 'phoneCodeSent' fires once the SMS is dispatched and
   // gives us the verificationId we need later to confirm the code the user types in.
+  // NOTE: these native-plugin listeners only fire on Android/iOS. On web we handle the
+  // send/confirm flow directly with the Firebase JS SDK below (see handleSendOtp / handleSubmit).
   useEffect(() => {
+    if (Capacitor.getPlatform() === 'web') return;
     const codeSentListener = FirebaseAuthentication.addListener('phoneCodeSent', (event) => {
       setFirebaseVerificationId(event.verificationId);
       setOtpSent(true);
@@ -2308,27 +2314,62 @@ const paymentService = {
     if (!mobileNumber || mobileNumber.length !== 10) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
-      await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
-      // otpSent / firebaseVerificationId are set by the 'phoneCodeSent' listener above once Firebase dispatches the SMS.
+      if (Capacitor.getPlatform() === 'web') {
+        // @capacitor-firebase/authentication's signInWithPhoneNumber only supports
+        // Android/iOS - on web we talk to the Firebase JS SDK directly instead.
+        const auth = getAuth();
+        if (!window.recaptchaVerifier) {
+          window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+            size: 'invisible',
+          });
+        }
+        const confirmationResult = await firebaseSignInWithPhoneNumber(
+          auth,
+          `+91${mobileNumber}`,
+          window.recaptchaVerifier,
+        );
+        window.confirmationResult = confirmationResult;
+        setOtpSent(true);
+        setSendingOtp(false);
+      } else {
+        await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
+        // otpSent / firebaseVerificationId are set by the 'phoneCodeSent' listener above once Firebase dispatches the SMS.
+      }
     } catch (error) {
       console.error('Firebase OTP Error:', error);
       showAlert(error?.message || 'Could not send verification code. Please try again.');
       setSendingOtp(false);
+      // Reset the verifier on failure so a retry gets a fresh challenge.
+      if (window.recaptchaVerifier) {
+        window.recaptchaVerifier.clear();
+        window.recaptchaVerifier = null;
+      }
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!otpSent || !firebaseVerificationId) { showAlert('Please generate and input your verification OTP first.'); return; }
+    const isWeb = Capacitor.getPlatform() === 'web';
+    if (!otpSent || (isWeb ? !window.confirmationResult : !firebaseVerificationId)) {
+      showAlert('Please generate and input your verification OTP first.');
+      return;
+    }
     setLoading(true);
     try {
       // 1. Confirm the code with Firebase - this is what actually verifies the phone number now.
-      const confirmResult = await FirebaseAuthentication.confirmVerificationCode({
-        verificationId: firebaseVerificationId,
-        verificationCode: otp,
-      });
-      if (!confirmResult?.user) { throw new Error('Verification did not return a signed-in user.'); }
-      const idToken = (await FirebaseAuthentication.getIdToken())?.token;
+      let idToken;
+      if (isWeb) {
+        const result = await window.confirmationResult.confirm(otp);
+        if (!result?.user) { throw new Error('Verification did not return a signed-in user.'); }
+        idToken = await result.user.getIdToken();
+      } else {
+        const confirmResult = await FirebaseAuthentication.confirmVerificationCode({
+          verificationId: firebaseVerificationId,
+          verificationCode: otp,
+        });
+        if (!confirmResult?.user) { throw new Error('Verification did not return a signed-in user.'); }
+        idToken = (await FirebaseAuthentication.getIdToken())?.token;
+      }
       if (!idToken) { throw new Error('Could not obtain a verified session from Firebase.'); }
 
       // 2. Send the verified Firebase ID token to our backend instead of a raw OTP code.
@@ -2363,6 +2404,7 @@ const paymentService = {
           setOtp('');
           setOtpSent(false);
           setFirebaseVerificationId(null);
+          window.confirmationResult = null;
         }
       } else { showAlert(data.message || 'Validation failed down at backend services.'); }
     } catch (error) {
@@ -2400,6 +2442,7 @@ const paymentService = {
     setOtp('');
     setOtpDigits(['', '', '', '', '', '']);
     setFirebaseVerificationId(null);
+    window.confirmationResult = null;
     setResendSeconds(0);
   };
 
@@ -4301,7 +4344,7 @@ useEffect(() => {
               )}
             </div>
             <span style={{ color: '#ffffff', fontWeight: '600', fontSize: '15px' }}>
-              {t('greetingHi')}, {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'} 👋
+              {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -4821,6 +4864,9 @@ useEffect(() => {
                 <p style={authStyles.otpInfoText}>Connecting to server, this can take up to a minute on first use today. Please hold on...</p>
               </div>
             )}
+
+            {/* ---- Invisible reCAPTCHA container (required for web phone-auth) ---- */}
+            <div id="recaptcha-container"></div>
 
             {/* ---- Send OTP button (only before the first send) ---- */}
             {!otpSent && (
