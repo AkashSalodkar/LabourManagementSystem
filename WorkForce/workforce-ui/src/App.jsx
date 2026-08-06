@@ -94,7 +94,7 @@ const translations = {
     removeBalancePendingError: 'Employee can be removed only after the balance is \u20B90.',
     selectDateForAdvanceError: 'Please select the Date to Add Advance.',
     projectRemoveBalancePendingError: 'Project can be removed only when all employee balances are \u20B90.',
-    selectDateFromCalendar: 'Select date from the calendar to mark attendance.',
+    selectDateFromCalendar: 'Select a date from the calendar to mark attendance.',
     pleaseMarkAttendance: 'Please mark attendance for',
     
     // Tracker
@@ -2306,6 +2306,13 @@ const paymentService = {
   const otpInputRefs = useRef([]);
   const [resendSeconds, setResendSeconds] = useState(0);
 
+  // ===== On-screen keyboard detection (used to hide the bottom nav bar while typing) =====
+  // Whenever a numeric/text input is focused, mobile browsers/WebViews shrink the visible
+  // viewport by roughly the keyboard's height. We watch window.visualViewport (falling back
+  // to window.innerHeight) and treat a meaningful shrink as "keyboard open". This works
+  // app-wide with no per-screen wiring needed.
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
   // ✅ Azure SQL Serverless auto-pauses after inactivity, so the very first request
   // of the day can take 30-60s to "wake up" the DB instead of failing instantly.
   // The backend already retries through this (see Program.cs EnableRetryOnFailure),
@@ -2470,6 +2477,58 @@ const paymentService = {
     const id = setInterval(() => setResendSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(id);
   }, [resendSeconds]);
+
+  // On-screen keyboard show/hide detection (app-wide).
+  // Uses the visualViewport API where available (accurate on modern mobile
+  // browsers/WebViews, including Capacitor's Android/iOS webview) and falls
+  // back to comparing window.innerHeight against the layout viewport height.
+  // A shrink of more than ~120px is treated as the keyboard opening; this
+  // threshold comfortably clears normal address-bar / status-bar changes
+  // while still catching every keyboard height in practice.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const layoutHeight = window.innerHeight;
+    const KEYBOARD_HEIGHT_THRESHOLD = 120;
+
+    const handleViewportChange = () => {
+      if (!viewport) return;
+      const heightDiff = layoutHeight - viewport.height;
+      setIsKeyboardOpen(heightDiff > KEYBOARD_HEIGHT_THRESHOLD);
+    };
+
+    if (viewport) {
+      viewport.addEventListener('resize', handleViewportChange);
+      viewport.addEventListener('scroll', handleViewportChange);
+    }
+
+    // Fallback for environments without visualViewport support: track focus
+    // on text/number inputs directly, since window.innerHeight doesn't
+    // reliably shrink when the keyboard opens in every WebView.
+    const isTextEntryField = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+    const handleFocusIn = (e) => {
+      if (!viewport && isTextEntryField(e.target)) setIsKeyboardOpen(true);
+    };
+    const handleFocusOut = (e) => {
+      if (!viewport && isTextEntryField(e.target)) {
+        // Defer so a focus move to another input doesn't cause a flicker.
+        setTimeout(() => {
+          const active = document.activeElement;
+          if (!isTextEntryField(active)) setIsKeyboardOpen(false);
+        }, 50);
+      }
+    };
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+
+    return () => {
+      if (viewport) {
+        viewport.removeEventListener('resize', handleViewportChange);
+        viewport.removeEventListener('scroll', handleViewportChange);
+      }
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+    };
+  }, []);
 
   // Thin UI wrapper: calls the existing, unchanged handleSendOtp for both the initial
   // send and the resend action, then resets the boxes / starts the 30s countdown.
@@ -4631,7 +4690,18 @@ useEffect(() => {
           };
 
           return (
-            <div style={themeStyles.bottomDockNavBar}>
+            <div
+              style={{
+                ...themeStyles.bottomDockNavBar,
+                // Slide the bar out of view (rather than unmounting it) while the
+                // keyboard is open, so it reappears instantly and smoothly the
+                // moment the keyboard is dismissed, with no layout jump/flicker.
+                transform: isKeyboardOpen ? 'translateY(100%)' : 'translateY(0)',
+                opacity: isKeyboardOpen ? 0 : 1,
+                pointerEvents: isKeyboardOpen ? 'none' : 'auto',
+                transition: 'transform 0.2s ease, opacity 0.2s ease',
+              }}
+            >
               <button style={isHomeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={goHome}>
                 <span style={themeStyles.navTabIcon}>&#127968;</span>
                 <span style={themeStyles.navTabLabel}>{t('navHome')}</span>
