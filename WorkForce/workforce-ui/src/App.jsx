@@ -1,6 +1,11 @@
+import './firebase';
+import { getAuth, RecaptchaVerifier, signInWithPhoneNumber as firebaseSignInWithPhoneNumber } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
 import { useState, useEffect, useRef } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
+import { Network } from '@capacitor/network';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import { FiUser, FiPhone, FiChevronDown, FiArrowRight } from 'react-icons/fi';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
@@ -86,6 +91,9 @@ const translations = {
     saveWage: 'Save wage',
     wageUpdatedSuccess: 'Wage updated successfully.',
     sameWageError: 'The new wage must be different from the current wage.',
+    removeBalancePendingError: 'Employee can be removed only after the balance is \u20B90.',
+    selectDateForAdvanceError: 'Select a date from the calendar to add an advance.',
+    projectRemoveBalancePendingError: 'Project can be removed only when all employee balances are \u20B90.',
     selectDateFromCalendar: 'Select date from the calendar to mark attendance.',
     pleaseMarkAttendance: 'Please mark attendance for',
     
@@ -203,6 +211,7 @@ const translations = {
     addAtLeastOneEmployee: 'Add at least one employee to create this project.',
     validationError: 'Validation Error: Please register at least one employee before saving project context.',
     pleaseProvideValidProject: 'Please provide a valid project or worksite title.',
+    projectAlreadyExists: 'A project named "{name}" already exists.',
     
     // Miscellaneous
     labor: 'Labor',
@@ -286,6 +295,9 @@ const translations = {
     saveWage: 'वेतन सहेजें',
     wageUpdatedSuccess: 'वेतन सफलतापूर्वक अपडेट किया गया।',
     sameWageError: 'नई मजदूरी वर्तमान मजदूरी से अलग होनी चाहिए।',
+    removeBalancePendingError: 'कर्मचारी को तभी हटाया जा सकता है जब शेष राशि \u20B90 हो।',
+    selectDateForAdvanceError: 'अग्रिम राशि जोड़ने के लिए कैलेंडर से एक तारीख चुनें।',
+    projectRemoveBalancePendingError: 'प्रोजेक्ट को तभी हटाया जा सकता है जब सभी कर्मचारियों की शेष राशि \u20B90 हो।',
     selectDateFromCalendar: 'उपस्थिति दर्ज करने के लिए कैलेंडर से तारीख चुनें।',
     pleaseMarkAttendance: 'कृपया के लिए उपस्थिति दर्ज करें',
     
@@ -403,6 +415,7 @@ const translations = {
     addAtLeastOneEmployee: 'यह प्रोजेक्ट बनाने के लिए कम से कम एक कर्मचारी जोड़ें।',
     validationError: 'सत्यापन त्रुटि: प्रोजेक्ट सहेजने से पहले कृपया कम से कम एक कर्मचारी पंजीकृत करें।',
     pleaseProvideValidProject: 'कृपया एक मान्य प्रोजेक्ट या वर्कसाइट शीर्षक प्रदान करें।',
+    projectAlreadyExists: '"{name}" नाम का एक प्रोजेक्ट पहले से मौजूद है।',
     
     // Miscellaneous
     labor: 'मजदूर',
@@ -419,13 +432,62 @@ const translations = {
   },
 };
 
+// ===== Common popup used everywhere in the app (success / error / warning / confirm) =====
+// Same visual language as the original "Attendance Saved Successfully" popup:
+// icon circle, title, optional message, blue primary button, soft scale-in animation.
+const POPUP_ICONS = {
+  success: { glyph: '\u2713', bg: '#DCFCE7', color: '#10B981' },
+  warning: { glyph: '\u26A0', bg: '#FEE2E2', color: '#EF4444' },
+  error: { glyph: '\u26A0', bg: '#FEE2E2', color: '#EF4444' },
+  info: { glyph: '\u2139', bg: '#DBEAFE', color: '#2554EB' },
+};
+
+function AppPopup({ open, tone = 'info', title, message, confirmLabel, cancelLabel, onConfirm, onCancel, onClose }) {
+  if (!open) return null;
+  const icon = POPUP_ICONS[tone] || POPUP_ICONS.info;
+  const isConfirm = !!cancelLabel;
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}>
+      <style>{'@keyframes appPopupIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }'}</style>
+      <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', animation: 'appPopupIn 0.18s ease-out' }}>
+        <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: icon.bg, color: icon.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>{icon.glyph}</div>
+        {title && <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{title}</h3>}
+        {message && <p style={{ fontSize: title ? '13px' : '15px', fontWeight: title ? '400' : '700', color: title ? '#64748B' : '#1E293B', margin: 0, lineHeight: '1.4' }}>{message}</p>}
+        {isConfirm ? (
+          <div style={{ display: 'flex', gap: '10px', marginTop: '18px' }}>
+            <button
+              onClick={onCancel || onClose}
+              style={{ flex: 1, padding: '12px', backgroundColor: '#F1F5F9', color: '#334155', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+            >
+              {cancelLabel}
+            </button>
+            <button
+              onClick={onConfirm}
+              style={{ flex: 1, padding: '12px', backgroundColor: '#2554EB', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onConfirm || onClose}
+            style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#2554EB', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+          >
+            {confirmLabel || 'OK'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App1() {
   // Root of the API - controllers live directly under /api/<Controller>
   // (e.g. /api/projects, /api/workers, /api/attendance, /api/payments).
   // Auth endpoints live under /api/auth, so we keep that as a derived constant
   // instead of baking "/auth" into the shared root (that was the bug that made
   // every non-auth request 404, since it was calling /api/auth/projects/... etc).
-const API_ROOT = 'https://localhost:7029/api';
+const API_ROOT = 'https://pts-api-e0fhhua9a9fnbtcc.centralindia-01.azurewebsites.net/api';
 const API_BASE_URL = `${API_ROOT}/auth`;
 // ===== API SERVICES =====
 const api = {
@@ -612,16 +674,34 @@ const paymentService = {
   // ===== LOCAL TESTING ONLY =====
   // Set to true to skip the OTP login screen and land straight on the dashboard
   // with a mock user. Set back to false before building for real use.
-  const DEV_SKIP_LOGIN = true;
+  const DEV_SKIP_LOGIN = false;
   const DEV_MOCK_USER = { userId: "1", fullName: "Rajesh", industry: "Construction" };
 
-  const [isLoginView, setIsLoginView] = useState(!DEV_SKIP_LOGIN);
-  const [isUserAuthenticated, setIsUserAuthenticated] = useState(DEV_SKIP_LOGIN);
-  const [loggedInUser, setLoggedInUser] = useState(DEV_SKIP_LOGIN ? DEV_MOCK_USER : null);
-  const [userName, setUserName] = useState(DEV_SKIP_LOGIN ? DEV_MOCK_USER.fullName : undefined);
+  // ✅ Restore a saved session from localStorage on load, so a logged-in user
+  // stays logged in across page reloads / reopening the app - until they
+  // explicitly sign out via handleFullLogout (which clears localStorage).
+  const getPersistedSession = () => {
+    try {
+      const hasSoftToken = localStorage.getItem('workforce_soft_token') === 'true';
+      const savedUser = localStorage.getItem('workforce_user');
+      if (hasSoftToken && savedUser) {
+        return JSON.parse(savedUser);
+      }
+    } catch {
+      // Corrupted/unreadable localStorage entry - treat as no session.
+    }
+    return null;
+  };
+  const persistedUser = DEV_SKIP_LOGIN ? DEV_MOCK_USER : getPersistedSession();
+
+  const [isLoginView, setIsLoginView] = useState(!DEV_SKIP_LOGIN && !persistedUser);
+  const [isUserAuthenticated, setIsUserAuthenticated] = useState(DEV_SKIP_LOGIN || !!persistedUser);
+  const [loggedInUser, setLoggedInUser] = useState(persistedUser);
+  const [userName, setUserName] = useState(persistedUser?.fullName || undefined);
   
-  const [profileImg, setProfileImg] = useState(null);
+  const [profileImg, setProfileImg] = useState(persistedUser?.profileImg || null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   // ===== Language =====
   const [language, setLanguage] = useState(() => {
     try {
@@ -676,11 +756,13 @@ const paymentService = {
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
-  const [industry, setIndustry] = useState('');
+  const [firebaseVerificationId, setFirebaseVerificationId] = useState(null);
+  const [industry, setIndustry] = useState('General');
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
   const [tempWorkersList, setTempWorkersList] = useState([]);
   const [isWorkerSubFormOpen, setIsWorkerSubFormOpen] = useState(false);
+  const [isSavingWorker, setIsSavingWorker] = useState(false);
   const [tempWorkerName, setTempWorkerName] = useState('');
   const [tempWorkerPhone, setTempWorkerPhone] = useState('');
   const [tempWorkerJoiningDate, setTempWorkerJoiningDate] = useState('');
@@ -708,15 +790,20 @@ const paymentService = {
 
   const [isEditWageModalOpen, setIsEditWageModalOpen] = useState(false);
   const [editWageTargetWorkerId, setEditWageTargetWorkerId] = useState(null);
-  const [editWageApplyTo, setEditWageApplyTo] = useState('only');
+  const [editWageApplyTo, setEditWageApplyTo] = useState('');
   const [editWageTodayDate, setEditWageTodayDate] = useState('');
-  const [editWagePastEndDate, setEditWagePastEndDate] = useState('');
+  const [editWagePastDates, setEditWagePastDates] = useState([]);
+  const [editWagePastCalendarMonth, setEditWagePastCalendarMonth] = useState(() => new Date());
+  const EDIT_WAGE_PAST_DAYS_MAX = 15;
   const [editWageSpecificStart, setEditWageSpecificStart] = useState('');
   const [editWageSpecificEnd, setEditWageSpecificEnd] = useState('');
   const [editWageFutureStart, setEditWageFutureStart] = useState('');
   const [editWageNewAmount, setEditWageNewAmount] = useState('');
   const [editWageNote, setEditWageNote] = useState('');
   const [isSameWagePopupOpen, setIsSameWagePopupOpen] = useState(false);
+  const [isRemoveBalancePendingPopupOpen, setIsRemoveBalancePendingPopupOpen] = useState(false);
+  const [isSelectDateForAdvancePopupOpen, setIsSelectDateForAdvancePopupOpen] = useState(false);
+  const [isProjectRemoveBalancePendingPopupOpen, setIsProjectRemoveBalancePendingPopupOpen] = useState(false);
   const [isSavingWage, setIsSavingWage] = useState(false);
 
   const [isPaymentsPageOpen, setIsPaymentsPageOpen] = useState(false);
@@ -753,7 +840,28 @@ const paymentService = {
   const [editProjectNameInput, setEditProjectNameInput] = useState('');
 
   const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
-  
+
+  // ===== Common popup (replaces window.alert / window.confirm everywhere) =====
+  const [appPopup, setAppPopup] = useState(null);
+  const closeAppPopup = () => setAppPopup(null);
+  const showAlert = (message, tone = 'warning', title) => {
+    setAppPopup({ open: true, tone, title, message, confirmLabel: t('ok') });
+  };
+  const showSuccess = (message, title) => {
+    setAppPopup({ open: true, tone: 'success', title, message, confirmLabel: t('ok') });
+  };
+  const showConfirm = (message, onConfirm, opts = {}) => {
+    setAppPopup({
+      open: true,
+      tone: opts.tone || 'warning',
+      title: opts.title,
+      message,
+      confirmLabel: opts.confirmLabel || t('yes'),
+      cancelLabel: opts.cancelLabel || t('no'),
+      onConfirm: () => { closeAppPopup(); onConfirm(); },
+    });
+  };
+
   const closeTopmostScreen = () => {
     if (isEditWageModalOpen) { setIsEditWageModalOpen(false); return true; }
     if (trackerWorkerId) { setTrackerWorkerId(null); return true; }
@@ -889,26 +997,33 @@ const paymentService = {
   };
 
   const handleDeleteWorkerInline = async (projectId, workerId) => {
-    if (!window.confirm("Are you sure you want to remove this employee from this worksite?")) return;
-    // Optimistic update so the UI feels instant...
-    setProjects(prevProjects =>
-      prevProjects.map(project => {
-        if (project.id === projectId) {
-          const updatedEmployees = (project.employees || []).filter(emp => emp.id !== workerId);
-          return { ...project, workersCount: updatedEmployees.length, employees: updatedEmployees, lastModifiedAt: Date.now() };
-        }
-        return project;
-      })
-    );
-    try {
-      await workerService.deleteWorker(workerId);
-    } catch (error) {
-      console.error('Error deleting worker:', error);
-      alert('Could not delete employee on the server. Reloading latest data.');
-    } finally {
-      // ...then reconcile with the server either way (soft-delete flips IsActive).
-      await refreshProject(projectId);
+    const wageTargetProjectForDelete = projects.find(p => p.id === projectId);
+    const workerToDelete = wageTargetProjectForDelete?.employees.find(w => w.id === workerId);
+    if (workerToDelete && calcTotalDue(workerToDelete) > 0) {
+      setIsRemoveBalancePendingPopupOpen(true);
+      return;
     }
+    showConfirm("Are you sure you want to remove this employee from this worksite?", async () => {
+      // Optimistic update so the UI feels instant...
+      setProjects(prevProjects =>
+        prevProjects.map(project => {
+          if (project.id === projectId) {
+            const updatedEmployees = (project.employees || []).filter(emp => emp.id !== workerId);
+            return { ...project, workersCount: updatedEmployees.length, employees: updatedEmployees, lastModifiedAt: Date.now() };
+          }
+          return project;
+        })
+      );
+      try {
+        await workerService.deleteWorker(workerId);
+      } catch (error) {
+        console.error('Error deleting worker:', error);
+        showAlert('Could not delete employee on the server. Reloading latest data.');
+      } finally {
+        // ...then reconcile with the server either way (soft-delete flips IsActive).
+        await refreshProject(projectId);
+      }
+    }, { confirmLabel: t('remove'), tone: 'warning' });
   };
 
   const handleOpenEditProjectModal = (project) => {
@@ -922,9 +1037,14 @@ const paymentService = {
   };
 
   const handleSaveEditedProjectName = async () => {
-    if (!editProjectNameInput.trim()) { alert(t('pleaseProvideValidProject')); return; }
-    const targetProject = projects.find(p => p.id === activeSiteViewId);
+    if (!editProjectNameInput.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
     const trimmedName = editProjectNameInput.trim();
+    const isDuplicateProjectName = projects.some(p => p.id !== activeSiteViewId && p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    if (isDuplicateProjectName) {
+      showAlert(t('projectAlreadyExists').replace('{name}', trimmedName));
+      return;
+    }
+    const targetProject = projects.find(p => p.id === activeSiteViewId);
     setProjects(prevProjects =>
       prevProjects.map(project =>
         project.id === activeSiteViewId ? { ...project, name: trimmedName, lastModifiedAt: Date.now() } : project
@@ -938,26 +1058,33 @@ const paymentService = {
       });
     } catch (error) {
       console.error('Error updating project:', error);
-      alert('Could not save the project name on the server.');
+      showAlert('Could not save the project name on the server.');
       await refreshProject(activeSiteViewId);
     }
   };
 
   const handleDeleteProject = async (projectId) => {
-    if (!window.confirm(t('deleteProject'))) return;
-    setProjects(prevProjects => prevProjects.filter(p => p.id !== projectId));
-    setActiveSiteViewId(null);
-    setIsAttendanceModalOpen(false);
-    setIsPaymentsPageOpen(false);
-    setIsWorkerSubFormOpen(false);
-    setIsEditProjectModalOpen(false);
-    try {
-      await projectService.deleteProject(projectId);
-    } catch (error) {
-      console.error('Error deleting project:', error);
-      alert('Could not delete the project on the server. Reloading your projects.');
-      if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
+    const projectToDelete = projects.find(p => p.id === projectId);
+    const hasUnsettledEmployee = (projectToDelete?.employees || []).some(w => calcTotalDue(w) > 0);
+    if (hasUnsettledEmployee) {
+      setIsProjectRemoveBalancePendingPopupOpen(true);
+      return;
     }
+    showConfirm(t('deleteProject'), async () => {
+      setProjects(prevProjects => prevProjects.filter(p => p.id !== projectId));
+      setActiveSiteViewId(null);
+      setIsAttendanceModalOpen(false);
+      setIsPaymentsPageOpen(false);
+      setIsWorkerSubFormOpen(false);
+      setIsEditProjectModalOpen(false);
+      try {
+        await projectService.deleteProject(projectId);
+      } catch (error) {
+        console.error('Error deleting project:', error);
+        showAlert('Could not delete the project on the server. Reloading your projects.');
+        if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
+      }
+    }, { confirmLabel: t('remove'), tone: 'warning' });
   };
 
   const handleOpenAttendanceScreen = (project) => {
@@ -1139,7 +1266,7 @@ const paymentService = {
     const currentProject = projects.find(p => p.id === activeSiteViewId);
     if (!currentProject) return;
     if (selectedAttendanceDates.length === 0) {
-      alert(t('selectDateFromCalendar'));
+      showAlert(t('selectDateFromCalendar'));
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1164,7 +1291,7 @@ const paymentService = {
     const currentProject = projects.find(p => p.id === activeSiteViewId);
     if (!currentProject) return;
     if (selectedAttendanceDates.length === 0) {
-      alert(t('selectDateFromCalendar'));
+      showAlert(t('selectDateFromCalendar'));
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1179,14 +1306,23 @@ const paymentService = {
   };
 
   const handleIndividualAdvanceChange = (workerId, rawValue) => {
-    if (selectedAttendanceDates.length === 0) return;
+    const digitsOnly = rawValue.replace(/[^0-9]/g, '');
+    if (selectedAttendanceDates.length === 0) {
+      return;
+    }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
     const dateStr = selectedAttendanceDates[safeIndex];
-    const digitsOnly = rawValue.replace(/[^0-9]/g, '');
     setPendingAdvanceByDate(prev => ({
       ...prev,
       [dateStr]: { ...(prev[dateStr] || {}), [workerId]: digitsOnly }
     }));
+  };
+
+  const handleAdvanceInputFocus = (e) => {
+    if (selectedAttendanceDates.length === 0) {
+      e.target.blur(); // dismiss the keyboard immediately instead of letting the user type first
+      setIsSelectDateForAdvancePopupOpen(true);
+    }
   };
 
   const getEffectiveWage = (worker, dateStr) => {
@@ -1334,7 +1470,7 @@ const paymentService = {
     if (!currentProject) return;
 
     if (selectedAttendanceDates.length === 0) {
-      alert(t('selectDateFromCalendar'));
+      showAlert(t('selectDateFromCalendar'));
       return;
     }
 
@@ -1350,7 +1486,7 @@ const paymentService = {
     });
 
     if (firstMissingDate) {
-      alert(`${t('pleaseMarkAttendance')} ${formatLargeDateHeader(firstMissingDate)}.`);
+      showAlert(`${t('pleaseMarkAttendance')} ${formatLargeDateHeader(firstMissingDate)}.`);
       return;
     }
 
@@ -1403,7 +1539,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to save attendance', err);
       setIsSavingAttendance(false);
-      alert(err.message || 'Failed to save attendance. Please try again.');
+      showAlert(err.message || 'Failed to save attendance. Please try again.');
       return; // don't touch local state if the server rejected the save
     }
     setIsSavingAttendance(false);
@@ -1459,9 +1595,10 @@ const paymentService = {
 
   const handleOpenEditWage = (worker) => {
     setEditWageTargetWorkerId(worker.id);
-    setEditWageApplyTo('only');
+    setEditWageApplyTo('');
     setEditWageTodayDate(toLocalISODate(new Date()));
-    setEditWagePastEndDate('');
+    setEditWagePastDates([]);
+    setEditWagePastCalendarMonth(new Date());
     setEditWageSpecificStart('');
     setEditWageSpecificEnd('');
     setEditWageFutureStart('');
@@ -1477,21 +1614,77 @@ const paymentService = {
 
   const handleSaveEditWage = async () => {
     const amount = parseFloat(editWageNewAmount);
-    if (!amount || amount <= 0) { alert("Please enter a valid wage amount."); return; }
+    if (!amount || amount <= 0) { showAlert("Please enter a valid wage amount."); return; }
 
     const wageTargetProject = projects.find(p => p.id === activeSiteViewId);
     const wageTargetWorker = wageTargetProject?.employees.find(w => w.id === editWageTargetWorkerId);
     const joinDateStrForWage = wageTargetWorker?.joiningDate || '2026-07-01';
     const clampToJoinDate = (dateStr) => (dateStr && dateStr < joinDateStrForWage) ? joinDateStrForWage : dateStr;
 
+    // 'past' applies the new wage to a set of individually-picked dates (up to
+    // EDIT_WAGE_PAST_DAYS_MAX) rather than a single contiguous range. Every other
+    // Apply-To option keeps its existing single-range behavior untouched.
+    if (editWageApplyTo === 'past') {
+      if (!editWagePastDates || editWagePastDates.length === 0) {
+        showAlert('Please select at least one date.');
+        return;
+      }
+      if (editWagePastDates.length > EDIT_WAGE_PAST_DAYS_MAX) {
+        showAlert(`You can select up to ${EDIT_WAGE_PAST_DAYS_MAX} dates.`);
+        return;
+      }
+
+      if (wageTargetWorker) {
+        const alreadyAtAmount = editWagePastDates.every(d => getEffectiveWage(wageTargetWorker, d) === amount);
+        if (alreadyAtAmount) {
+          setIsSameWagePopupOpen(true);
+          return;
+        }
+      }
+
+      setIsSavingWage(true);
+      try {
+        for (const d of editWagePastDates) {
+          await workerService.updateWage(editWageTargetWorkerId, {
+            effectiveFrom: d,
+            effectiveTo: d,
+            dailyWageAmount: amount,
+            note: editWageNote.trim(),
+          });
+        }
+      } catch (err) {
+        console.error('Failed to save wage override', err);
+        setIsSavingWage(false);
+        showAlert(err.message || 'Failed to save wage change. Please try again.');
+        return;
+      }
+      setIsSavingWage(false);
+
+      setProjects(prevProjects =>
+        prevProjects.map(project => {
+          if (project.id !== activeSiteViewId) return project;
+          return {
+            ...project,
+            lastModifiedAt: Date.now(),
+            employees: project.employees.map(emp => {
+              if (emp.id !== editWageTargetWorkerId) return emp;
+              const newOverrides = editWagePastDates.map(d => ({ from: d, to: d, amount, note: editWageNote.trim() }));
+              return { ...emp, wageOverrides: [...(emp.wageOverrides || []), ...newOverrides], lastUpdatedAt: Date.now() };
+            })
+          };
+        })
+      );
+      handleCloseEditWage();
+      showSuccess(t('wageUpdatedSuccess'));
+      return;
+    }
+
     let range = { from: selectedDate, to: selectedDate };
     if (editWageApplyTo === 'only') {
       const todayApplyDate = editWageTodayDate || selectedDate;
       range = { from: todayApplyDate, to: todayApplyDate };
-    } else if (editWageApplyTo === 'past') {
-      range = { from: null, to: editWagePastEndDate || selectedDate };
     } else if (editWageApplyTo === 'specific') {
-      if (!editWageSpecificStart || !editWageSpecificEnd) { alert("Please select both dates for the specific duration."); return; }
+      if (!editWageSpecificStart || !editWageSpecificEnd) { showAlert("Please select both dates for the specific duration."); return; }
       range = { from: clampToJoinDate(editWageSpecificStart), to: editWageSpecificEnd };
     } else if (editWageApplyTo === 'future') {
       range = { from: clampToJoinDate(editWageFutureStart || selectedDate), to: null };
@@ -1519,7 +1712,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to save wage override', err);
       setIsSavingWage(false);
-      alert(err.message || 'Failed to save wage change. Please try again.');
+      showAlert(err.message || 'Failed to save wage change. Please try again.');
       return;
     }
     setIsSavingWage(false);
@@ -1539,7 +1732,7 @@ const paymentService = {
       })
     );
     handleCloseEditWage();
-    alert(t('wageUpdatedSuccess'));
+    showSuccess(t('wageUpdatedSuccess'));
   };
 
   const handleOpenPaymentsPage = () => {
@@ -1646,9 +1839,9 @@ const paymentService = {
     setRecordPaymentDate('');
     setActivePaymentForm(null);
     if (type === 'bonus') {
-      alert(t('bonusSavedMsg'));
+      showSuccess(t('bonusSavedMsg'));
     } else if (type === 'payment') {
-      alert(t('paymentSavedMsg'));
+      showSuccess(t('paymentSavedMsg'));
     }
   };
 
@@ -1660,7 +1853,7 @@ const paymentService = {
 
   const handleSaveEditedTransaction = async (projectId, workerId) => {
     const amount = parseFloat(editPaymentAmount);
-    if (!amount || amount <= 0) { alert("Please enter a valid amount."); return; }
+    if (!amount || amount <= 0) { showAlert("Please enter a valid amount."); return; }
 
     const project = projects.find(p => p.id === projectId);
     const emp = project?.employees.find(e => e.id === workerId);
@@ -1707,7 +1900,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to update transaction', err);
       setIsSavingTransaction(false);
-      alert(err.message || 'Failed to save changes. Please try again.');
+      showAlert(err.message || 'Failed to save changes. Please try again.');
       return;
     }
     setIsSavingTransaction(false);
@@ -1740,43 +1933,43 @@ const paymentService = {
   };
 
   const handleDeleteTransaction = async (projectId, workerId, type, transactionId) => {
-    if (!window.confirm("Remove this recorded transaction?")) return;
-
-    try {
-      if (type === 'advance') {
-        await paymentService.deleteAdvance(transactionId);
-      } else if (type === 'bonus') {
-        await paymentService.deleteBonus(transactionId);
-      } else {
-        await paymentService.deletePayment(transactionId);
+    showConfirm("Remove this recorded transaction?", async () => {
+      try {
+        if (type === 'advance') {
+          await paymentService.deleteAdvance(transactionId);
+        } else if (type === 'bonus') {
+          await paymentService.deleteBonus(transactionId);
+        } else {
+          await paymentService.deletePayment(transactionId);
+        }
+      } catch (err) {
+        console.error('Failed to delete transaction', err);
+        showAlert(err.message || 'Failed to delete. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error('Failed to delete transaction', err);
-      alert(err.message || 'Failed to delete. Please try again.');
-      return;
-    }
 
-    setProjects(prevProjects =>
-      prevProjects.map(project => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          lastModifiedAt: Date.now(),
-          employees: project.employees.map(emp => {
-            if (emp.id !== workerId) return emp;
-            if (type === 'advance') {
-              const removed = (emp.advancePayments || []).find(p => p.id === transactionId);
-              return { ...emp, advancePayments: (emp.advancePayments || []).filter(p => p.id !== transactionId), advance: Math.max(0, (emp.advance || 0) - (removed?.amount || 0)), lastUpdatedAt: Date.now() };
-            }
-            if (type === 'bonus') {
-              const removed = (emp.bonusPayments || []).find(p => p.id === transactionId);
-              return { ...emp, bonusPayments: (emp.bonusPayments || []).filter(p => p.id !== transactionId), bonus: Math.max(0, (emp.bonus || 0) - (removed?.amount || 0)), lastUpdatedAt: Date.now() };
-            }
-            return { ...emp, payments: (emp.payments || []).filter(p => p.id !== transactionId), lastUpdatedAt: Date.now() };
-          })
-        };
-      })
-    );
+      setProjects(prevProjects =>
+        prevProjects.map(project => {
+          if (project.id !== projectId) return project;
+          return {
+            ...project,
+            lastModifiedAt: Date.now(),
+            employees: project.employees.map(emp => {
+              if (emp.id !== workerId) return emp;
+              if (type === 'advance') {
+                const removed = (emp.advancePayments || []).find(p => p.id === transactionId);
+                return { ...emp, advancePayments: (emp.advancePayments || []).filter(p => p.id !== transactionId), advance: Math.max(0, (emp.advance || 0) - (removed?.amount || 0)), lastUpdatedAt: Date.now() };
+              }
+              if (type === 'bonus') {
+                const removed = (emp.bonusPayments || []).find(p => p.id === transactionId);
+                return { ...emp, bonusPayments: (emp.bonusPayments || []).filter(p => p.id !== transactionId), bonus: Math.max(0, (emp.bonus || 0) - (removed?.amount || 0)), lastUpdatedAt: Date.now() };
+              }
+              return { ...emp, payments: (emp.payments || []).filter(p => p.id !== transactionId), lastUpdatedAt: Date.now() };
+            })
+          };
+        })
+      );
+    }, { confirmLabel: t('remove'), tone: 'warning' });
   };
 
     const handleDownloadStatement = async ({ worker, project, fromDate, toDate, 
@@ -1796,7 +1989,7 @@ const paymentService = {
     const inr = (n) => `Rs. ${Math.abs(n).toLocaleString('en-IN')}`;
 
     if (!worker) {
-      alert('Worker data is missing. Please try again.');
+      showAlert('Worker data is missing. Please try again.');
       return;
     }
 
@@ -2042,7 +2235,7 @@ const paymentService = {
             document.body.removeChild(link);
           } catch (e) {
             console.error('Download failed:', e);
-            alert('Could not download the PDF. Please try again.');
+            showAlert('Could not download the PDF. Please try again.');
           }
         } else {
           doc.save(sanitizedFileName);
@@ -2063,7 +2256,7 @@ const paymentService = {
         errorMsg += 'Please try again or contact support if the issue persists.';
       }
       
-      alert(errorMsg);
+      showAlert(errorMsg);
       setPaymentFormValidationMsg('');
     }
   };
@@ -2081,46 +2274,125 @@ const paymentService = {
   const otpInputRefs = useRef([]);
   const [resendSeconds, setResendSeconds] = useState(0);
 
+  // ✅ Azure SQL Serverless auto-pauses after inactivity, so the very first request
+  // of the day can take 30-60s to "wake up" the DB instead of failing instantly.
+  // The backend already retries through this (see Program.cs EnableRetryOnFailure),
+  // but a bare spinner for that long makes users think the app has frozen. If a
+  // send-otp/login/register call is still in flight after a few seconds, switch the
+  // plain "Sending OTP.../Verifying..." label to an explanatory message instead.
+  const [showWakingMessage, setShowWakingMessage] = useState(false);
+  useEffect(() => {
+    if (!sendingOtp && !loading) {
+      setShowWakingMessage(false);
+      return;
+    }
+    const wakingTimer = setTimeout(() => setShowWakingMessage(true), 4000);
+    return () => clearTimeout(wakingTimer);
+  }, [sendingOtp, loading]);
+
   const toggleView = () => {
     setIsLoginView(!isLoginView);
     setOtp('');
     setOtpSent(false);
     setFullName('');
-    setIndustry('');
+    setIndustry('General');
     setOtpDigits(['', '', '', '', '', '']);
     setResendSeconds(0);
   };
 
-  const isRegistrationFormValid = () => industry.trim() !== '' && fullName.trim() !== '' && mobileNumber.length === 10;
+  const isRegistrationFormValid = () => fullName.trim() !== '' && mobileNumber.length === 10;
+
+  // Firebase phone-auth listeners: 'phoneCodeSent' fires once the SMS is dispatched and
+  // gives us the verificationId we need later to confirm the code the user types in.
+  // NOTE: these native-plugin listeners only fire on Android/iOS. On web we handle the
+  // send/confirm flow directly with the Firebase JS SDK below (see handleSendOtp / handleSubmit).
+  useEffect(() => {
+    if (Capacitor.getPlatform() === 'web') return;
+    const codeSentListener = FirebaseAuthentication.addListener('phoneCodeSent', (event) => {
+      setFirebaseVerificationId(event.verificationId);
+      setOtpSent(true);
+      setSendingOtp(false);
+    });
+    const verificationFailedListener = FirebaseAuthentication.addListener('phoneVerificationFailed', (event) => {
+      showAlert(event?.message || 'Could not send verification code. Please try again.');
+      setSendingOtp(false);
+    });
+    return () => {
+      codeSentListener.then((l) => l.remove());
+      verificationFailedListener.then((l) => l.remove());
+    };
+  }, []);
 
   const handleSendOtp = async () => {
-    if (!isLoginView && !isRegistrationFormValid()) { alert('Please fill all registration details accurately.'); return; }
-    if (!mobileNumber || mobileNumber.length !== 10) { alert('Please enter a valid 10-digit mobile number.'); return; }
+    if (!isLoginView && !isRegistrationFormValid()) { showAlert('Please fill all registration details accurately.'); return; }
+    if (!mobileNumber || mobileNumber.length !== 10) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
-// Inside handleSendOtp function:
-      const response = await fetch(`${API_BASE_URL}/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber, industry, isLoginView })
-      });
-      const responseText = await response.text();
-      let data = {};
-      if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
-      if (response.ok) { setOtpSent(true); alert(data.message || `OTP verification code dispatched to +91 ${mobileNumber}`); }
-      else { alert(data.message || 'Failed to dispatch verification code.'); }
-    } catch (error) { console.error('Network Error:', error); alert('Could not establish contact with backend services.'); }
-    finally { setSendingOtp(false); }
+      if (Capacitor.getPlatform() === 'web') {
+        // @capacitor-firebase/authentication's signInWithPhoneNumber only supports
+        // Android/iOS - on web we talk to the Firebase JS SDK directly instead.
+        const auth = getAuth();
+        if (!window.recaptchaVerifier) {
+          window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+            size: 'invisible',
+          });
+        }
+        const confirmationResult = await firebaseSignInWithPhoneNumber(
+          auth,
+          `+91${mobileNumber}`,
+          window.recaptchaVerifier,
+        );
+        window.confirmationResult = confirmationResult;
+        setOtpSent(true);
+        setSendingOtp(false);
+      } else {
+        await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
+        // otpSent / firebaseVerificationId are set by the 'phoneCodeSent' listener above once Firebase dispatches the SMS.
+      }
+    } catch (error) {
+      console.error('Firebase OTP Error:', error);
+      showAlert(error?.message || 'Could not send verification code. Please try again.');
+      setSendingOtp(false);
+      // Reset the verifier on failure so a retry gets a fresh challenge.
+      if (window.recaptchaVerifier) {
+        window.recaptchaVerifier.clear();
+        window.recaptchaVerifier = null;
+      }
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!otpSent) { alert('Please generate and input your verification OTP first.'); return; }
+    const isWeb = Capacitor.getPlatform() === 'web';
+    if (!otpSent || (isWeb ? !window.confirmationResult : !firebaseVerificationId)) {
+      showAlert('Please generate and input your verification OTP first.');
+      return;
+    }
     setLoading(true);
-    const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
-    const payload = isLoginView ? { mobileNumber: mobileNumber.trim(), otp } : { mobileNumber: mobileNumber.trim(), otp, fullName, industry };
     try {
-      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      // 1. Confirm the code with Firebase - this is what actually verifies the phone number now.
+      let idToken;
+      if (isWeb) {
+        const result = await window.confirmationResult.confirm(otp);
+        if (!result?.user) { throw new Error('Verification did not return a signed-in user.'); }
+        idToken = await result.user.getIdToken();
+      } else {
+        const confirmResult = await FirebaseAuthentication.confirmVerificationCode({
+          verificationId: firebaseVerificationId,
+          verificationCode: otp,
+        });
+        if (!confirmResult?.user) { throw new Error('Verification did not return a signed-in user.'); }
+        idToken = (await FirebaseAuthentication.getIdToken())?.token;
+      }
+      if (!idToken) { throw new Error('Could not obtain a verified session from Firebase.'); }
+
+      // 2. Send the verified Firebase ID token to our backend instead of a raw OTP code.
+      const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
+      const payload = isLoginView
+        ? { mobileNumber: mobileNumber.trim(), idToken }
+        : { mobileNumber: mobileNumber.trim(), idToken, fullName, industry };
+
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
       const responseText = await response.text();
       let data = {};
       if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
@@ -2130,23 +2402,29 @@ const paymentService = {
           const sessionUser = { 
             userId: data.userId, 
             fullName: data.fullName, 
-            industry: data.industry || industry 
+            industry: data.industry || industry,
+            profileImg: data.profileImage || null
           };
           localStorage.setItem('workforce_user', JSON.stringify(sessionUser));
           setLoggedInUser(sessionUser);
           setUserName(sessionUser.fullName || '');
+          setProfileImg(sessionUser.profileImg);
           setIsUserAuthenticated(true);
           setActivePage('dashboard');
           loadUserProjects(data.userId); 
         } else {
-          alert(data.message || 'Registration completed successfully! Proceeding to login view.');
+          showSuccess(data.message || 'Registration completed successfully! Proceeding to login view.');
           setIsLoginView(true);
           setOtp('');
           setOtpSent(false);
+          setFirebaseVerificationId(null);
+          window.confirmationResult = null;
         }
-      } else { alert(data.message || 'Validation failed down at backend services.'); }
-    } catch (error) { console.error('API Error:', error); alert('Connection error occurred while processing server tasks.'); }
-    finally { setLoading(false); }
+      } else { showAlert(data.message || 'Validation failed down at backend services.'); }
+    } catch (error) {
+      console.error('Verification Error:', error);
+      showAlert(error?.message || 'Invalid or expired OTP. Please try again.');
+    } finally { setLoading(false); }
   };
 
   // Keep the 6 OTP boxes in sync with the existing `otp` string used by handleSubmit
@@ -2170,23 +2448,144 @@ const paymentService = {
     setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
   };
 
+  // Lets the user go back and correct the mobile number if the OTP was sent to a wrong/mistyped
+  // number - without this they'd be stuck staring at an uneditable field waiting for an OTP
+  // that will never arrive at their own phone.
+  const handleChangeNumber = () => {
+    setOtpSent(false);
+    setOtp('');
+    setOtpDigits(['', '', '', '', '', '']);
+    setFirebaseVerificationId(null);
+    window.confirmationResult = null;
+    setResendSeconds(0);
+  };
+
 useEffect(() => {
   if (isUserAuthenticated && loggedInUser?.userId) {
     loadUserProjects(loggedInUser.userId);
   }
 }, [isUserAuthenticated, loggedInUser]);
-  const handleFullLogout = () => {
-    if (!window.confirm('Are you sure you want to sign out?')) return;
-    localStorage.clear();
-    setIsUserAuthenticated(false);
-    setLoggedInUser(null);
-    setOtp('');
-    setOtpSent(false);
-    setMobileNumber('');
-    window.location.reload();
+
+  // ===== Internet connectivity: full-screen "No Internet" / "Loading..." handling =====
+  // hasConnectedOnceRef distinguishes "never had internet since launch" (No Internet Connection)
+  // from "had internet, then lost it" (Internet connection lost) per the two required message variants.
+  const hasConnectedOnceRef = useRef(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  useEffect(() => {
+    let listenerHandle;
+
+    const applyStatus = (connected) => {
+      setIsOnline(prevOnline => {
+        if (connected) {
+          // Coming online after having been offline (not just the very first check) - refresh data.
+          if (hasConnectedOnceRef.current && !prevOnline) {
+            setIsReconnecting(true);
+          }
+          hasConnectedOnceRef.current = true;
+        }
+        return connected;
+      });
+    };
+
+    const checkInitialStatus = async () => {
+      try {
+        const status = await Network.getStatus();
+        applyStatus(status.connected);
+      } catch {
+        // Network plugin unavailable (e.g. running in a plain browser tab) - fall back to navigator.onLine.
+        applyStatus(navigator.onLine);
+      }
+    };
+    checkInitialStatus();
+
+    Network.addListener('networkStatusChange', (status) => {
+      applyStatus(status.connected);
+    }).then((handle) => { listenerHandle = handle; });
+
+    return () => { if (listenerHandle) listenerHandle.remove(); };
+  }, []);
+
+  // Once back online after a drop, re-fetch the core session data before letting the user
+  // back into the app, then return them to whatever screen they were already on.
+  useEffect(() => {
+    if (!isReconnecting) return;
+    const refreshAfterReconnect = async () => {
+      try {
+        if (isUserAuthenticated && loggedInUser?.userId) {
+          await loadUserProjects(loggedInUser.userId);
+        }
+      } finally {
+        setIsReconnecting(false);
+      }
+    };
+    refreshAfterReconnect();
+  }, [isReconnecting]);
+
+  const handleRetryConnection = async () => {
+    try {
+      const status = await Network.getStatus();
+      if (status.connected) {
+        hasConnectedOnceRef.current = true;
+        setIsOnline(true);
+        setIsReconnecting(true);
+      }
+    } catch {
+      if (navigator.onLine) {
+        hasConnectedOnceRef.current = true;
+        setIsOnline(true);
+        setIsReconnecting(true);
+      }
+    }
   };
 
-  const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/watch?v=6rRRAVSilss';
+  const connectivityStyles = {
+    container: { position: 'fixed', inset: 0, zIndex: 9999, backgroundColor: '#F4F6FB', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px', textAlign: 'center' },
+    icon: { fontSize: '56px', marginBottom: '20px' },
+    title: { fontSize: '20px', fontWeight: '700', color: '#111827', margin: '0 0 8px' },
+    message: { fontSize: '14.5px', color: '#6B7280', margin: '0 0 28px', maxWidth: '320px', lineHeight: '1.5' },
+    retryButton: { padding: '13px 32px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)' },
+    spinner: { width: '36px', height: '36px', border: '3.5px solid #DCE3F7', borderTopColor: '#0B3C9B', borderRadius: '50%', marginBottom: '20px', animation: 'smartmanage-spin 0.8s linear infinite' },
+  };
+
+  if (!isOnline) {
+    return (
+      <div style={connectivityStyles.container}>
+        <style>{'@keyframes smartmanage-spin { to { transform: rotate(360deg); } }'}</style>
+        <div style={connectivityStyles.icon}>📡</div>
+        <h2 style={connectivityStyles.title}>
+          {hasConnectedOnceRef.current ? 'Internet connection lost.' : 'No Internet Connection'}
+        </h2>
+        <p style={connectivityStyles.message}>Please turn on your internet connection to continue.</p>
+        <button onClick={handleRetryConnection} style={connectivityStyles.retryButton}>Retry</button>
+      </div>
+    );
+  }
+
+  if (isReconnecting || (isUserAuthenticated && loadingProjects && projects.length === 0)) {
+    return (
+      <div style={connectivityStyles.container}>
+        <style>{'@keyframes smartmanage-spin { to { transform: rotate(360deg); } }'}</style>
+        <div style={connectivityStyles.spinner} />
+        <p style={connectivityStyles.message}>Loading... Please wait.</p>
+      </div>
+    );
+  }
+
+  const handleFullLogout = () => {
+    showConfirm('Are you sure you want to sign out?', () => {
+      localStorage.clear();
+      setIsUserAuthenticated(false);
+      setLoggedInUser(null);
+      setOtp('');
+      setOtpSent(false);
+      setMobileNumber('');
+      window.location.reload();
+    }, { confirmLabel: t('yes'), tone: 'warning' });
+  };
+
+  const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/shorts/RtzdRnXkfX4';
   const handleWatchTutorialVideo = async () => {
     try {
       await Browser.open({ url: TUTORIAL_VIDEO_URL });
@@ -2216,6 +2615,7 @@ useEffect(() => {
   };
 
    const handleSaveWorkerInlineFormData = async () => {
+    if (isSavingWorker) return; // guard against double-tap / double-click while a save is in flight
     const missingRequiredFields = [];
     if (!tempWorkerName.trim()) missingRequiredFields.push(t('fullName'));
     if (!tempWorkerJoiningDate) missingRequiredFields.push(t('dateOfJoining'));
@@ -2225,14 +2625,14 @@ useEffect(() => {
     // Only validate mobile number if the user actually typed something in
     if (tempWorkerPhone.trim() !== '') {
       if (!/^[0-9]{10}$/.test(tempWorkerPhone.trim())) {
-        alert('Please enter a valid 10-digit Mobile Number (or leave it blank).');
+        showAlert('Please enter a valid 10-digit Mobile Number (or leave it blank).');
         return;
       }
     }
     // --- NEW VALIDATION END ---
 
     if (missingRequiredFields.length > 0) {
-      alert(`${t('fillRequiredFields')}\n\u2022 ${missingRequiredFields.join('\n\u2022 ')}`);
+      showAlert(`${t('fillRequiredFields')}\n\u2022 ${missingRequiredFields.join('\n\u2022 ')}`);
       return;
     }
     if ((editingWorkerId === null || editingWorkerId === undefined) && !isAddProjectOpen) {
@@ -2241,12 +2641,12 @@ useEffect(() => {
         emp => emp.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
       );
       if (isDuplicate) {
-        alert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
+        showAlert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
         return;
       }
     }
     if (tempWorkerJoiningDate && tempWorkerJoiningDate > todayStr) {
-      alert(t('futureJoiningDate'));
+      showAlert(t('futureJoiningDate'));
       return;
     }
     const compiledInlineWorker = {
@@ -2263,7 +2663,7 @@ useEffect(() => {
           w => w.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
         );
         if (isDuplicateInTempList) {
-          alert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
+          showAlert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
           return;
         }
       }
@@ -2281,6 +2681,7 @@ useEffect(() => {
     }
 
     // Editing/adding a worker on an already-existing project - hit the API.
+    setIsSavingWorker(true);
     try {
       if (editingWorkerId) {
         const currentProject = projects.find(p => p.id === selectedProjectId);
@@ -2309,7 +2710,9 @@ useEffect(() => {
       await refreshProject(selectedProjectId);
     } catch (error) {
       console.error('Error saving worker:', error);
-      alert('Could not save this employee on the server.');
+      showAlert('Could not save this employee on the server.');
+    } finally {
+      setIsSavingWorker(false);
     }
 
     setTempWorkerName('');
@@ -2323,8 +2726,14 @@ useEffect(() => {
   const handleCreateProjectFinalSubmission = async (e) => {
   e.preventDefault();
   if (loading) return; // guard against re-entrant double submits
-  if (!newSiteName.trim()) { alert(t('pleaseProvideValidProject')); return; }
-  if (tempWorkersList.length === 0) { alert(t('validationError')); return; }
+  if (!newSiteName.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
+  if (tempWorkersList.length === 0) { showAlert(t('validationError')); return; }
+  const trimmedNewProjectName = newSiteName.trim();
+  const isDuplicateProjectName = projects.some(p => p.name.trim().toLowerCase() === trimmedNewProjectName.toLowerCase());
+  if (isDuplicateProjectName) {
+    showAlert(t('projectAlreadyExists').replace('{name}', trimmedNewProjectName));
+    return;
+  }
   setLoading(true);
   try {
       const createdProject = await projectService.createProject({
@@ -2350,7 +2759,7 @@ useEffect(() => {
       if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
     } catch (error) {
       console.error('Error creating project:', error);
-      alert('Could not create the project on the server. Please try again.');
+      showAlert('Could not create the project on the server. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -2407,7 +2816,8 @@ useEffect(() => {
     tempWorkerJoiningDate.trim() !== '' && 
     tempWorkerJoiningDate <= todayStr && 
     tempWorkerWageAmount.trim() !== '' &&
-    !isNameDuplicateUI;
+    !isNameDuplicateUI &&
+    !isSavingWorker;
 
   const projectsMatchingQuery = projects.filter(p => p.name.toLowerCase().includes(siteSearchQuery.toLowerCase()));
   const sortedProjects = [...projectsMatchingQuery].sort((a, b) => {
@@ -2661,6 +3071,8 @@ useEffect(() => {
                                         pattern="[0-9]*"
                                         placeholder={t('advance')}
                                         value={pendingAdvanceByDate[currentDisplayedDate]?.[worker.id] ?? ''}
+                                        onFocus={handleAdvanceInputFocus}
+                                        onClick={handleAdvanceInputFocus}
                                         onChange={(e) => handleIndividualAdvanceChange(worker.id, e.target.value)}
                                         style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: '#92400E', boxSizing: 'border-box' }}
                                       />
@@ -2709,6 +3121,11 @@ useEffect(() => {
                         const joinYear = parseInt(joiningDateStr.slice(0, 4), 10);
                         const joinMonth = parseInt(joiningDateStr.slice(5, 7), 10) - 1;
                         const isAtEarliestMonth = trackerYear === joinYear && trackerMonth === joinMonth;
+
+                        // E-Muster: future dates (beyond today) must be disabled/greyed out,
+                        // matching the existing "before DOJ" disabled styling. Scoped to this
+                        // calendar only -- does not affect any other calendar in the app.
+                        const trackerTodayStr = toLocalISODate(new Date());
 
                         const statusColors = {
                           P: { bg: '#DCFCE7', text: '#15803D' },
@@ -2776,11 +3193,13 @@ useEffect(() => {
                                       if (!dayNum) return <div key={ci} />;
                                       const dateStr = `${trackerYear}-${String(trackerMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
                                       const beforeJoining = dateStr < joiningDateStr;
+                                      const afterToday = dateStr > trackerTodayStr;
+                                      const isDisabledDay = beforeJoining || afterToday;
                                       const record = trackerWorker.attendance?.[dateStr];
                                       const status = record?.status;
-                                      const colors = !beforeJoining && status ? statusColors[status] : null;
-                                      const dayWage = (!beforeJoining && status) ? calculateNetDaily(getEffectiveWage(trackerWorker, dateStr), status) : null;
-                                      const dayAdvance = (!beforeJoining && status)
+                                      const colors = !isDisabledDay && status ? statusColors[status] : null;
+                                      const dayWage = (!isDisabledDay && status) ? calculateNetDaily(getEffectiveWage(trackerWorker, dateStr), status) : null;
+                                      const dayAdvance = (!isDisabledDay && status)
                                         ? (trackerWorker.advancePayments || []).filter(p => p.date === dateStr).reduce((sum, p) => sum + (p.amount || 0), 0)
                                         : 0;
                                       return (
@@ -2789,7 +3208,7 @@ useEffect(() => {
                                           style={{
                                             textAlign: 'center', padding: '6px 0', margin: '2px 0', borderRadius: '8px',
                                             fontSize: '13px', fontWeight: colors ? '700' : '500',
-                                            color: beforeJoining ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
+                                            color: isDisabledDay ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
                                             backgroundColor: colors ? colors.bg : 'transparent'
                                           }}
                                         >
@@ -2827,36 +3246,33 @@ useEffect(() => {
                       })()}
 
                       {/* ============ ATTENDANCE SAVED SUCCESS POPUP ============ */}
-                      {isAttendanceSavedPopupOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#DCFCE7', color: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#10003;</div>
-                            <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('attendanceSavedSuccess')}</h3>
-                            <button
-                              onClick={() => setIsAttendanceSavedPopupOpen(false)}
-                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                            >
-                              {t('ok')}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={isAttendanceSavedPopupOpen}
+                        tone="success"
+                        title={t('attendanceSavedSuccess')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsAttendanceSavedPopupOpen(false)}
+                        onClose={() => setIsAttendanceSavedPopupOpen(false)}
+                      />
 
                       {/* ============ SAME-AS-CURRENT-WAGE POP-UP ============ */}
-                      {isSameWagePopupOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
-                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('sameWageError')}</h3>
-                            <button
-                              onClick={() => setIsSameWagePopupOpen(false)}
-                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                            >
-                              {t('ok')}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={isSameWagePopupOpen}
+                        tone="warning"
+                        title={t('sameWageError')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsSameWagePopupOpen(false)}
+                        onClose={() => setIsSameWagePopupOpen(false)}
+                      />
+
+                      <AppPopup
+                        open={isSelectDateForAdvancePopupOpen}
+                        tone="warning"
+                        title={t('selectDateForAdvanceError')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsSelectDateForAdvancePopupOpen(false)}
+                        onClose={() => setIsSelectDateForAdvancePopupOpen(false)}
+                      />
 
                       {/* ============ MULTI-SELECT ATTENDANCE CALENDAR ============ */}
                       {isCalendarPickerOpen && (() => {
@@ -2941,45 +3357,27 @@ useEffect(() => {
                       })()}
 
                       {/* ============ MAX 31 DATES POPUP ============ */}
-                      {isMaxDatesPopupOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '24px 22px', width: '82%', maxWidth: '300px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <p style={{ fontSize: '14px', color: '#1E293B', fontWeight: '600', margin: '0 0 16px 0' }}>{t('maxDaysError')}</p>
-                            <button
-                              onClick={() => setIsMaxDatesPopupOpen(false)}
-                              style={{ width: '100%', padding: '10px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
-                            >
-                              {t('ok')}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={isMaxDatesPopupOpen}
+                        tone="warning"
+                        title={t('maxDaysError')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsMaxDatesPopupOpen(false)}
+                        onClose={() => setIsMaxDatesPopupOpen(false)}
+                      />
 
                       {/* ============ UNMARK ATTENDANCE CONFIRMATION ============ */}
-                      {unmarkConfirmDate && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '24px 22px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('removeAttendance')}</h3>
-                            <p style={{ fontSize: '13px', color: '#64748B', margin: '0 0 18px 0' }}>
-                              {t('removeAttendanceConfirm').replace('{date}', formatSelectedDatesLabel([unmarkConfirmDate]))}
-                            </p>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                              <button
-                                onClick={() => setUnmarkConfirmDate(null)}
-                                style={{ flex: 1, padding: '11px', backgroundColor: '#F1F5F9', color: '#334155', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
-                              >
-                                {t('cancel')}
-                              </button>
-                              <button
-                                onClick={handleConfirmUnmarkDate}
-                                style={{ flex: 1, padding: '11px', backgroundColor: '#EF4444', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
-                              >
-                                {t('remove')}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={!!unmarkConfirmDate}
+                        tone="warning"
+                        title={t('removeAttendance')}
+                        message={unmarkConfirmDate ? t('removeAttendanceConfirm').replace('{date}', formatSelectedDatesLabel([unmarkConfirmDate])) : ''}
+                        confirmLabel={t('remove')}
+                        cancelLabel={t('cancel')}
+                        onConfirm={handleConfirmUnmarkDate}
+                        onCancel={() => setUnmarkConfirmDate(null)}
+                        onClose={() => setUnmarkConfirmDate(null)}
+                      />
 
                       {/* ============ EDIT WAGE MODAL ============ */}
                       {isEditWageModalOpen && (() => {
@@ -2990,20 +3388,21 @@ useEffect(() => {
                         const isEditWageAmountValid = !!editWageNewAmount && parseFloat(editWageNewAmount) > 0;
                         const isEditWageDateValid =
                           editWageApplyTo === 'only' ? !!editWageTodayDate :
-                          editWageApplyTo === 'past' ? !!editWagePastEndDate :
+                          editWageApplyTo === 'past' ? (editWagePastDates.length > 0 && editWagePastDates.length <= EDIT_WAGE_PAST_DAYS_MAX) :
                           editWageApplyTo === 'specific' ? (!!editWageSpecificStart && !!editWageSpecificEnd) :
                           editWageApplyTo === 'future' ? !!editWageFutureStart :
                           false;
                         const editWageEffectiveRangeForCheck =
                           editWageApplyTo === 'only' ? { from: (editWageTodayDate || selectedDate), to: (editWageTodayDate || selectedDate) } :
-                          editWageApplyTo === 'past' ? { from: null, to: (editWagePastEndDate || selectedDate) } :
                           editWageApplyTo === 'specific' ? { from: editWageSpecificStart, to: editWageSpecificEnd } :
                           editWageApplyTo === 'future' ? { from: (editWageFutureStart || selectedDate), to: null } :
                           { from: selectedDate, to: selectedDate };
                         const isEditWageSameAsCurrent =
                           isEditWageAmountValid &&
                           isEditWageDateValid &&
-                          isWageRangeAlreadyAtAmount(targetWorker, editWageEffectiveRangeForCheck, parseFloat(editWageNewAmount));
+                          (editWageApplyTo === 'past'
+                            ? editWagePastDates.every(d => getEffectiveWage(targetWorker, d) === parseFloat(editWageNewAmount))
+                            : isWageRangeAlreadyAtAmount(targetWorker, editWageEffectiveRangeForCheck, parseFloat(editWageNewAmount)));
                         const isEditWageSaveEnabled = isEditWageAmountValid && isEditWageDateValid && !isEditWageSameAsCurrent;
                         return (
                           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1900, padding: '16px', boxSizing: 'border-box' }}>
@@ -3020,9 +3419,9 @@ useEffect(() => {
                                 <label style={{ fontSize: '11px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>{t('applyTo')}</label>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
                                   {[
-                                    { key: 'only', label: t('today') },
                                     { key: 'past', label: t('pastDays') },
                                     { key: 'specific', label: t('specificDuration') },
+                                    { key: 'only', label: t('today') },
                                     { key: 'future', label: t('onwardsThisDay') }
                                   ].map(opt => (
                                     <button
@@ -3051,12 +3450,93 @@ useEffect(() => {
                                     <input type="date" value={editWageTodayDate} min={laterOfDates(toLocalISODate(new Date()), editWageJoinDateStr)} max={selectedDate} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWageTodayDate(e.target.value)} style={themeStyles.textInput} />
                                   </div>
                                 )}
-                                {editWageApplyTo === 'past' && (
-                                  <div style={{ marginBottom: '16px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('appliesUpTo')}</label>
-                                    <input type="date" value={editWagePastEndDate} min={editWageJoinDateStr} max={selectedDate} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWagePastEndDate(e.target.value)} style={themeStyles.textInput} />
-                                  </div>
-                                )}
+                                {editWageApplyTo === 'past' && (() => {
+                                  const pastTodayStr = toLocalISODate(new Date());
+                                  const pastYear = editWagePastCalendarMonth.getFullYear();
+                                  const pastMonth = editWagePastCalendarMonth.getMonth();
+                                  const pastFirstWeekday = new Date(pastYear, pastMonth, 1).getDay();
+                                  const pastDaysInMonth = new Date(pastYear, pastMonth + 1, 0).getDate();
+                                  const pastCells = [];
+                                  for (let i = 0; i < pastFirstWeekday; i++) pastCells.push(null);
+                                  for (let d = 1; d <= pastDaysInMonth; d++) pastCells.push(d);
+                                  const pastRows = [];
+                                  for (let i = 0; i < pastCells.length; i += 7) pastRows.push(pastCells.slice(i, i + 7));
+
+                                  const joinYear = parseInt(editWageJoinDateStr.slice(0, 4), 10);
+                                  const joinMonth = parseInt(editWageJoinDateStr.slice(5, 7), 10) - 1;
+                                  const isAtEarliestMonth = pastYear === joinYear && pastMonth === joinMonth;
+                                  const todayYear = parseInt(pastTodayStr.slice(0, 4), 10);
+                                  const todayMonthIdx = parseInt(pastTodayStr.slice(5, 7), 10) - 1;
+                                  const isAtLatestMonth = pastYear === todayYear && pastMonth === todayMonthIdx;
+
+                                  const toggleDate = (dateStr) => {
+                                    setEditWagePastDates(prev => {
+                                      if (prev.includes(dateStr)) return prev.filter(d => d !== dateStr);
+                                      if (prev.length >= EDIT_WAGE_PAST_DAYS_MAX) return prev;
+                                      return [...prev, dateStr].sort();
+                                    });
+                                  };
+
+                                  return (
+                                    <div style={{ marginBottom: '16px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                        <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569' }}>{t('selectDates')}</label>
+                                        <span style={{ fontSize: '11px', fontWeight: '700', color: editWagePastDates.length >= EDIT_WAGE_PAST_DAYS_MAX ? '#DC2626' : '#64748B' }}>
+                                          {editWagePastDates.length}/{EDIT_WAGE_PAST_DAYS_MAX}
+                                        </span>
+                                      </div>
+                                      <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', padding: '10px', backgroundColor: '#F8FAFC' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWagePastCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                                            disabled={isAtEarliestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtEarliestMonth ? 'default' : 'pointer', color: isAtEarliestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&lsaquo;</button>
+                                          <span style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>{editWagePastCalendarMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWagePastCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                                            disabled={isAtLatestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtLatestMonth ? 'default' : 'pointer', color: isAtLatestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&rsaquo;</button>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '2px' }}>
+                                          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                                            <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: '#94A3B8', fontWeight: '600', padding: '3px 0' }}>{d}</div>
+                                          ))}
+                                        </div>
+                                        {pastRows.map((row, ri) => (
+                                          <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                                            {row.map((dayNum, ci) => {
+                                              if (!dayNum) return <div key={ci} />;
+                                              const dateStr = `${pastYear}-${String(pastMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                              const isDisabled = dateStr < editWageJoinDateStr || dateStr > pastTodayStr;
+                                              const isSelected = editWagePastDates.includes(dateStr);
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  key={ci}
+                                                  disabled={isDisabled}
+                                                  onClick={() => toggleDate(dateStr)}
+                                                  style={{
+                                                    textAlign: 'center', padding: '6px 0', margin: '2px 0', borderRadius: '8px',
+                                                    fontSize: '12px', fontWeight: isSelected ? '700' : '500',
+                                                    border: 'none', cursor: isDisabled ? 'default' : 'pointer',
+                                                    color: isDisabled ? '#CBD5E1' : (isSelected ? '#ffffff' : '#1E293B'),
+                                                    backgroundColor: isSelected ? '#0B3C9B' : 'transparent',
+                                                  }}
+                                                >
+                                                  {dayNum}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 {editWageApplyTo === 'specific' && (
                                   (() => {
                                     const specificDateInputStyle = { ...themeStyles.textInput, width: '100%', boxSizing: 'border-box', fontSize: '12.5px', padding: '12px 8px' };
@@ -3251,6 +3731,7 @@ useEffect(() => {
                       <button 
                         type="button" 
                         onClick={handleSaveWorkerInlineFormData} 
+                        disabled={!isWorkerFormValid}
                         style={{ 
                           width: '100%', 
                           display: 'block',
@@ -3261,17 +3742,35 @@ useEffect(() => {
                           color: '#ffffff', 
                           fontSize: '14px', 
                           fontWeight: '600', 
-                          cursor: 'pointer',
+                          cursor: isWorkerFormValid ? 'pointer' : 'not-allowed',
                           boxSizing: 'border-box',
                           transition: 'background-color 0.2s ease'
                         }}
                       >
-                        {t('saveEmployee')}
+                        {isSavingWorker ? '...' : t('saveEmployee')}
                       </button>
                     </div>
                   </div>
                 </div>
               )}
+
+              <AppPopup
+                open={isRemoveBalancePendingPopupOpen}
+                tone="warning"
+                title={t('removeBalancePendingError')}
+                confirmLabel={t('ok')}
+                onConfirm={() => setIsRemoveBalancePendingPopupOpen(false)}
+                onClose={() => setIsRemoveBalancePendingPopupOpen(false)}
+              />
+
+              <AppPopup
+                open={isProjectRemoveBalancePendingPopupOpen}
+                tone="warning"
+                title={t('projectRemoveBalancePendingError')}
+                confirmLabel={t('ok')}
+                onConfirm={() => setIsProjectRemoveBalancePendingPopupOpen(false)}
+                onClose={() => setIsProjectRemoveBalancePendingPopupOpen(false)}
+              />
             </div>
           );
         })()}
@@ -3304,7 +3803,7 @@ useEffect(() => {
             <div style={{
               position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)',
               backgroundColor: '#f4f6f9', zIndex: 1660, display: 'flex', flexDirection: 'column',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden'
             }}>
               <div style={{
                 padding: '16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0',
@@ -3508,7 +4007,7 @@ useEffect(() => {
                 const balanceForRange = dueForRange - advanceAmount - wagePaymentsForRange;
 
                 return (
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                         <button onClick={() => setSelectedPaymentWorkerId(null)} style={{ background: 'none', border: 'none', fontSize: '24px', color: '#1E293B', cursor: 'pointer', padding: 0, flexShrink: 0 }}>&lsaquo;</button>
@@ -3674,8 +4173,10 @@ useEffect(() => {
                           </div>
                         );
                       })()}
+                    </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 16px 64px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', paddingTop: '10px', marginBottom: '10px' }}>
                         <h3 style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('paymentHistory')}</h3>
                         <button
                           type="button"
@@ -3696,9 +4197,6 @@ useEffect(() => {
                           {t('downloadStatement')}
                         </button>
                       </div>
-                    </div>
-
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 16px 64px 16px' }}>
                       {allTransactionsInRange.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '2px' }}>
                           {allTransactionsInRange.map(txn => {
@@ -3799,6 +4297,7 @@ useEffect(() => {
                     <button 
                       type="button" 
                       onClick={handleSaveWorkerInlineFormData} 
+                      disabled={!isWorkerFormValid}
                       style={{ 
                         width: '100%', 
                         display: 'block',
@@ -3809,12 +4308,12 @@ useEffect(() => {
                         color: '#ffffff', 
                         fontSize: '14px', 
                         fontWeight: '600', 
-                        cursor: 'pointer',
+                        cursor: isWorkerFormValid ? 'pointer' : 'not-allowed',
                         boxSizing: 'border-box',
                         transition: 'background-color 0.2s ease'
                       }}
                     >
-                      {t('saveEmployee')}
+                      {isSavingWorker ? '...' : t('saveEmployee')}
                     </button>
                   </div>
                 </div>
@@ -3873,7 +4372,7 @@ useEffect(() => {
               )}
             </div>
             <span style={{ color: '#ffffff', fontWeight: '600', fontSize: '15px' }}>
-              {t('greetingHi')}, {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'} 👋
+              {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -4161,7 +4660,7 @@ useEffect(() => {
                         <button
                           onClick={() => {
                             setSelectedSubscriptionPlan(plan.key);
-                            alert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`);
+                            showAlert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
                           }}
                           style={{
                             width: '100%', padding: '13px', borderRadius: '12px', fontWeight: '600', fontSize: '14px', cursor: 'pointer',
@@ -4203,7 +4702,13 @@ useEffect(() => {
                   </div>
                   <div style={{ position: 'absolute', bottom: '2px', right: '2px', backgroundColor: '#0B3C9B', color: '#ffffff', borderRadius: '50%', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', border: '2.5px solid #ffffff', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}>&#128247;</div>
                 </label>
-                <input id="user-avatar-file-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => { if (e.target.files && e.target.files[0]) { setProfileImg(URL.createObjectURL(e.target.files[0])); } }} />
+                <input id="user-avatar-file-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setProfileImg(reader.result); // base64 data URL - safe to persist
+                  reader.readAsDataURL(file);
+                }} />
                 <span style={{ fontSize: '12px', color: '#64748B', marginTop: '10px', fontWeight: '500' }}>{t('tapToChangePhoto')}</span>
               </div>
 
@@ -4215,8 +4720,54 @@ useEffect(() => {
                 </div>
               </div>
 
-              <button onClick={() => { setLoggedInUser(prev => ({ ...prev, fullName: userName })); setIsProfileModalOpen(false); }} style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)' }}>
-                <span>&#128190;</span>{t('saveChanges')}
+              <button
+                disabled={isSavingProfile}
+                onClick={async () => {
+                  const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
+                  if (!trimmedName) { showAlert(t('yourName') + ' is required.'); return; }
+
+                  // No server-side user (e.g. dev/mock session) - fall back to local-only save.
+                  if (!loggedInUser?.userId) {
+                    setLoggedInUser(prev => {
+                      const updatedUser = { ...prev, fullName: trimmedName, profileImg };
+                      try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                      return updatedUser;
+                    });
+                    setIsProfileModalOpen(false);
+                    return;
+                  }
+
+                  setIsSavingProfile(true);
+                  try {
+                    const response = await fetch(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ fullName: trimmedName, profileImage: profileImg }),
+                    });
+                    const responseText = await response.text();
+                    let data = {};
+                    if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
+
+                    if (!response.ok) {
+                      showAlert(data.message || 'Failed to update profile. Please try again.');
+                      return;
+                    }
+
+                    const updatedUser = { ...loggedInUser, fullName: data.fullName, industry: data.industry, profileImg: data.profileImage };
+                    try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                    setLoggedInUser(updatedUser);
+                    setUserName(data.fullName);
+                    setProfileImg(data.profileImage || null);
+                    setIsProfileModalOpen(false);
+                  } catch (err) {
+                    showAlert('Could not reach the server. Please check your connection and try again.');
+                  } finally {
+                    setIsSavingProfile(false);
+                  }
+                }}
+                style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
+                <span>&#128190;</span>{isSavingProfile ? t('loading') || 'Saving...' : t('saveChanges')}
               </button>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '18px 0' }}>
@@ -4237,17 +4788,29 @@ useEffect(() => {
         )}
 
         {/* ============ EXIT CONFIRMATION ============ */}
-        {isExitConfirmOpen && (
-          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0, 0, 0, 0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10000, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-            <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '16px', width: '86%', maxWidth: '320px', boxSizing: 'border-box', boxShadow: '0 12px 40px rgba(0,0,0,0.25)', textAlign: 'center' }}>
-              <p style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: '600', color: '#1E293B' }}>{t('exitConfirm')}</p>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button onClick={() => setIsExitConfirmOpen(false)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #CBD5E1', backgroundColor: '#ffffff', color: '#475569', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>{t('no')}</button>
-                <button onClick={handleConfirmExitApp} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', backgroundColor: '#DC2626', color: '#ffffff', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>{t('yes')}</button>
-              </div>
-            </div>
-          </div>
-        )}
+        <AppPopup
+          open={isExitConfirmOpen}
+          tone="warning"
+          title={t('exitConfirm')}
+          confirmLabel={t('yes')}
+          cancelLabel={t('no')}
+          onConfirm={handleConfirmExitApp}
+          onCancel={() => setIsExitConfirmOpen(false)}
+          onClose={() => setIsExitConfirmOpen(false)}
+        />
+
+        {/* ============ COMMON POPUP (replaces every window.alert / window.confirm) ============ */}
+        <AppPopup
+          open={!!appPopup?.open}
+          tone={appPopup?.tone}
+          title={appPopup?.title}
+          message={appPopup?.message}
+          confirmLabel={appPopup?.confirmLabel}
+          cancelLabel={appPopup?.cancelLabel}
+          onConfirm={appPopup?.onConfirm || closeAppPopup}
+          onCancel={closeAppPopup}
+          onClose={closeAppPopup}
+        />
       </div>
     );
   }
@@ -4257,12 +4820,15 @@ useEffect(() => {
 
   return (
     <div style={authStyles.page}>
+      {/* ---- App version (hardcoded; update manually on each release) ---- */}
+      <span style={authStyles.versionBadge}>Version 1.0</span>
+
       <div style={authStyles.pageInner}>
 
         {/* ---- Branding (sits on the page background, above the card) ---- */}
         <div style={authStyles.brandBlock}>
-          <img src={smartpayLogo} alt="SmartPay" style={authStyles.logoImg} />
-          <h1 style={authStyles.brandName}>SmartPay</h1>
+          <img src={smartpayLogo} alt="SmartManage" style={authStyles.logoImg} />
+          <h1 style={authStyles.brandName}>SmartManage</h1>
           <p style={authStyles.brandTagline}>Track Wages. Pay on Time.</p>
         </div>
 
@@ -4289,16 +4855,6 @@ useEffect(() => {
                     placeholder="Enter your full name"
                     style={authStyles.inputField}
                   />
-                </div>
-
-                <div style={{ ...authStyles.inputShell, marginTop: '10px' }}>
-                  <select required value={industry} onChange={(e) => setIndustry(e.target.value)} style={{ ...authStyles.inputField, paddingLeft: '2px', color: industry ? '#1E293B' : '#94A3B8' }}>
-                    <option value="">Select your industry segment</option>
-                    <option value="Construction & Real Estate">Construction & Real Estate</option>
-                    <option value="Information Technology">Information Technology</option>
-                    <option value="Retail & Commerce">Retail & Commerce</option>
-                    <option value="Manufacturing & Logistics">Manufacturing & Logistics</option>
-                  </select>
                 </div>
               </div>
             )}
@@ -4328,6 +4884,18 @@ useEffect(() => {
               <p style={authStyles.otpInfoText}>We'll send you a One Time Password (OTP) to verify your mobile number</p>
             </div>
 
+            {/* ---- Slow-request notice: shown once a send-otp/verify call has been ---- */}
+            {/* running for a few seconds, most likely an Azure SQL Serverless cold start ---- */}
+            {showWakingMessage && (
+              <div style={authStyles.otpInfoCard}>
+                <span style={authStyles.otpInfoIcon}><HiOutlineShieldCheck size={22} color="#B45309" /></span>
+                <p style={authStyles.otpInfoText}>Connecting to server, this can take up to a minute on first use today. Please hold on...</p>
+              </div>
+            )}
+
+            {/* ---- Invisible reCAPTCHA container (required for web phone-auth) ---- */}
+            <div id="recaptcha-container"></div>
+
             {/* ---- Send OTP button (only before the first send) ---- */}
             {!otpSent && (
               <button
@@ -4336,7 +4904,7 @@ useEffect(() => {
                 disabled={otpButtonDisabled}
                 style={{ ...authStyles.sendOtpBtn, opacity: otpButtonDisabled ? 0.45 : 1 }}
               >
-                {sendingOtp ? 'Sending OTP...' : 'Send OTP'}
+                {sendingOtp ? (showWakingMessage ? 'Waking up server...' : 'Sending OTP...') : 'Send OTP'}
               </button>
             )}
 
@@ -4352,6 +4920,18 @@ useEffect(() => {
                       {sendingOtp ? 'Resending...' : 'Resend OTP'}
                     </button>
                   )}
+                </div>
+                <div style={{ marginBottom: '10px' }}>
+                  <span style={{ fontSize: '13px', color: '#6B7280' }}>
+                    OTP sent to <b style={{ color: '#D97706' }}>+91 {mobileNumber}</b>.{' '}
+                    <button
+                      type="button"
+                      onClick={handleChangeNumber}
+                      style={{ background: 'none', border: 'none', padding: 0, color: '#0B3C9B', fontWeight: '700', fontSize: '13px', cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      Wrong number? Change it
+                    </button>
+                  </span>
                 </div>
                 <div style={authStyles.otpBoxRow}>
                   {otpDigits.map((digit, i) => (
@@ -4394,18 +4974,20 @@ useEffect(() => {
 
             {/* ---- Primary CTA ---- */}
             <button type="submit" disabled={!canVerify} style={{ ...authStyles.primaryCta, opacity: canVerify ? 1 : 0.5 }}>
-              <span>{loading ? 'Verifying...' : 'Verify & Continue'}</span>
+              <span>{loading ? (showWakingMessage ? 'Waking up server...' : 'Verifying...') : 'Verify & Continue'}</span>
               {!loading && <FiArrowRight size={19} color="#ffffff" />}
             </button>
 
             <p style={authStyles.switchViewText}>
-              {isLoginView ? "Don't have an employer account yet?" : 'Already registered corporate manager?'}
+              {isLoginView ? "Don't have an account yet?" : 'Already registered corporate manager?'}
               <button type="button" onClick={toggleView} style={authStyles.toggleLink}>{isLoginView ? 'Register here' : 'Login here'}</button>
             </p>
           </form>
         </div>
 
-        {/* ---- Bottom feature highlights (informational only) ---- */}
+        {/* ---- Bottom feature highlights (informational only) - hidden once the form ---- */}
+        {/* grows taller (register view or OTP entry) so the page always fits one screen ---- */}
+        {isLoginView && !otpSent && (
         <div style={authStyles.featureRow}>
           <div style={authStyles.featureItem}>
             <span style={authStyles.featureIconWrap}><HiOutlineUserGroup size={20} color="#2563EB" /></span>
@@ -4422,46 +5004,66 @@ useEffect(() => {
             <span style={authStyles.featureLabel}>Handle Payments</span>
           </div>
         </div>
+        )}
       </div>
+
+      {/* ============ COMMON POPUP (replaces every window.alert / window.confirm) ============ */}
+      <AppPopup
+        open={!!appPopup?.open}
+        tone={appPopup?.tone}
+        title={appPopup?.title}
+        message={appPopup?.message}
+        confirmLabel={appPopup?.confirmLabel}
+        cancelLabel={appPopup?.cancelLabel}
+        onConfirm={appPopup?.onConfirm || closeAppPopup}
+        onCancel={closeAppPopup}
+        onClose={closeAppPopup}
+      />
     </div>
   );
 }
 
 const authStyles = {
   page: {
+    position: 'relative',
     width: '100vw', minHeight: '100vh', boxSizing: 'border-box',
     backgroundColor: '#EDF1FC',
     display: 'flex', justifyContent: 'center',
-    padding: '36px 18px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    padding: '18px 18px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     overflowY: 'auto',
   },
   pageInner: { width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  versionBadge: {
+    position: 'absolute', top: '10px', right: '14px',
+    fontSize: '11px', fontWeight: '500', color: '#94A3B8',
+    letterSpacing: '0.01em', userSelect: 'none', zIndex: 1,
+  },
 
-  brandBlock: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', marginBottom: '26px' },
-  logoImg: { width: '92px', height: '92px', borderRadius: '22px', objectFit: 'cover' },
-  brandName: { margin: '10px 0 0 0', fontSize: '30px', fontWeight: '800', color: '#2554EB', letterSpacing: '-0.02em' },
-  brandTagline: { margin: 0, fontSize: '14px', color: '#64748B', fontWeight: '500' },
+  brandBlock: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', marginBottom: '12px' },
+  logoImg: { width: '60px', height: '60px', borderRadius: '16px', objectFit: 'cover' },
+  brandName: { margin: '6px 0 0 0', fontSize: '24px', fontWeight: '800', color: '#2554EB', letterSpacing: '-0.02em' },
+  brandTagline: { margin: 0, fontSize: '13px', color: '#64748B', fontWeight: '500' },
 
   card: {
     width: '100%', backgroundColor: '#ffffff',
-    borderRadius: '28px', padding: '30px 24px', boxSizing: 'border-box',
+    borderRadius: '24px', padding: '20px 20px', boxSizing: 'border-box',
     boxShadow: '0 20px 45px rgba(15, 23, 42, 0.07), 0 2px 8px rgba(15, 23, 42, 0.04)',
     display: 'flex', flexDirection: 'column',
   },
 
-  welcomeBlock: { textAlign: 'center', marginBottom: '24px' },
-  welcomeTitle: { margin: '0 0 6px 0', fontSize: '24px', fontWeight: '800', color: '#0F172A' },
-  welcomeSubtitle: { margin: 0, fontSize: '14px', color: '#64748B' },
+  welcomeBlock: { textAlign: 'center', marginBottom: '14px' },
+  welcomeTitle: { margin: '0 0 4px 0', fontSize: '20px', fontWeight: '800', color: '#0F172A' },
+  welcomeSubtitle: { margin: 0, fontSize: '13px', color: '#64748B' },
 
-  form: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  form: { display: 'flex', flexDirection: 'column', gap: '12px' },
   fieldGroup: { display: 'flex', flexDirection: 'column' },
-  fieldLabel: { fontSize: '13.5px', fontWeight: '700', color: '#0F172A', marginBottom: '8px' },
+  fieldLabel: { fontSize: '13px', fontWeight: '700', color: '#0F172A', marginBottom: '6px' },
   requiredMark: { color: '#EF4444' },
 
   inputShell: {
     display: 'flex', alignItems: 'center', gap: '10px',
     border: '1.5px solid #E2E8F0', borderRadius: '14px',
-    padding: '0 14px', backgroundColor: '#ffffff', height: '54px',
+    padding: '0 14px', backgroundColor: '#ffffff', height: '46px',
     boxSizing: 'border-box',
   },
   inputIcon: { display: 'flex', alignItems: 'center', flexShrink: 0 },
@@ -4473,56 +5075,56 @@ const authStyles = {
   },
 
   otpInfoCard: {
-    display: 'flex', alignItems: 'flex-start', gap: '12px',
+    display: 'flex', alignItems: 'flex-start', gap: '10px',
     backgroundColor: '#EBF1FE', border: 'none',
-    borderRadius: '16px', padding: '14px 16px',
+    borderRadius: '14px', padding: '10px 14px',
   },
   otpInfoIcon: { flexShrink: 0, marginTop: '1px' },
-  otpInfoText: { margin: 0, fontSize: '13px', color: '#1E3A8A', lineHeight: '1.5', fontWeight: '500' },
+  otpInfoText: { margin: 0, fontSize: '12.5px', color: '#1E3A8A', lineHeight: '1.4', fontWeight: '500' },
 
   sendOtpBtn: {
-    width: '100%', height: '52px', borderRadius: '16px', border: 'none',
+    width: '100%', height: '46px', borderRadius: '14px', border: 'none',
     backgroundColor: '#2554EB', color: '#ffffff',
     fontSize: '15px', fontWeight: '700', cursor: 'pointer',
     boxShadow: '0 10px 22px rgba(37, 84, 235, 0.22)', transition: 'opacity 0.2s',
   },
 
-  otpHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' },
+  otpHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' },
   resendTimerText: { fontSize: '12.5px', color: '#64748B', fontWeight: '500' },
   resendTimerBold: { color: '#2554EB', fontWeight: '700' },
   resendLinkBtn: { background: 'none', border: 'none', padding: 0, color: '#2554EB', fontSize: '12.5px', fontWeight: '700', cursor: 'pointer' },
   otpBoxRow: { display: 'flex', gap: '8px', justifyContent: 'space-between' },
   otpBox: {
-    width: '15%', aspectRatio: '1 / 1', maxWidth: '52px', borderRadius: '14px',
+    width: '15%', aspectRatio: '1 / 1', maxWidth: '46px', borderRadius: '12px',
     border: '1.5px solid #E2E8F0', backgroundColor: '#ffffff',
-    textAlign: 'center', fontSize: '20px', fontWeight: '700', color: '#1E293B',
+    textAlign: 'center', fontSize: '18px', fontWeight: '700', color: '#1E293B',
     outline: 'none', boxSizing: 'border-box',
   },
   otpBoxFilled: { borderColor: '#2554EB' },
 
   primaryCta: {
-    width: '100%', height: '54px', borderRadius: '16px', border: 'none',
+    width: '100%', height: '48px', borderRadius: '14px', border: 'none',
     backgroundColor: '#2554EB', color: '#ffffff',
-    fontSize: '15.5px', fontWeight: '700', cursor: 'pointer',
+    fontSize: '15px', fontWeight: '700', cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
     boxShadow: '0 12px 26px rgba(37, 84, 235, 0.25)', transition: 'opacity 0.2s',
-    marginTop: '4px',
+    marginTop: '2px',
   },
 
-  switchViewText: { textAlign: 'center', fontSize: '13px', color: '#64748B', margin: '4px 0 0 0' },
+  switchViewText: { textAlign: 'center', fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' },
   toggleLink: { color: '#2554EB', fontWeight: '700', background: 'none', border: 'none', padding: 0, marginLeft: '5px', cursor: 'pointer' },
 
   featureRow: {
     display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-    marginTop: '22px', width: '100%',
+    marginTop: '14px', width: '100%',
   },
-  featureItem: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' },
+  featureItem: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' },
   featureIconWrap: {
-    width: '44px', height: '44px', borderRadius: '14px', backgroundColor: '#E4EAFC',
+    width: '38px', height: '38px', borderRadius: '12px', backgroundColor: '#E4EAFC',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
-  featureLabel: { fontSize: '11.5px', fontWeight: '600', color: '#475569', textAlign: 'center', lineHeight: '1.3' },
-  featureDivider: { width: '1px', alignSelf: 'stretch', backgroundColor: '#E2E8F0', margin: '10px 4px 0 4px' },
+  featureLabel: { fontSize: '11px', fontWeight: '600', color: '#475569', textAlign: 'center', lineHeight: '1.3' },
+  featureDivider: { width: '1px', alignSelf: 'stretch', backgroundColor: '#E2E8F0', margin: '8px 4px 0 4px' },
 };
 
 const themeStyles = {
