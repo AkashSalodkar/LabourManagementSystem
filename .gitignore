@@ -25,3 +25,5 @@ Thumbs.db
 migrate.sql
 **/*.keystore
 **/keystore.properties
+
+**/PublishProfiles/
