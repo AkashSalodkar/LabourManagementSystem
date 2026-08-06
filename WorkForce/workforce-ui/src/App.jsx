@@ -4531,19 +4531,19 @@ useEffect(() => {
           return (
             <div style={themeStyles.bottomDockNavBar}>
               <button style={isHomeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={goHome}>
-                <span style={themeStyles.navTabIcon}>&#127968;</span>
+                <span style={isHomeTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#127968;</span>
                 <span style={themeStyles.navTabLabel}>{t('navHome')}</span>
               </button>
               <button style={isAttendanceTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => openPicker('attendance')}>
-                <span style={themeStyles.navTabIcon}>&#128197;</span>
+                <span style={isAttendanceTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#128197;</span>
                 <span style={themeStyles.navTabLabel}>{t('navAttendance')}</span>
               </button>
               <button style={isPaymentsTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => openPicker('payments')}>
-                <span style={themeStyles.navTabIcon}>&#128176;</span>
+                <span style={isPaymentsTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#128176;</span>
                 <span style={themeStyles.navTabLabel}>{t('navPayments')}</span>
               </button>
               <button style={isSubscribeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsSubscribePageOpen(true); }}>
-                <span style={themeStyles.navTabIcon}>&#11088;</span>
+                <span style={isSubscribeTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#11088;</span>
                 <span style={themeStyles.navTabLabel}>{t('navSubscribe')}</span>
               </button>
             </div>
@@ -5182,5 +5182,6 @@ const themeStyles = {
   navItemTab: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8' },
   navItemTabActive: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', background: 'none', border: 'none', cursor: 'pointer', color: '#0B3C9B' },
   navTabIcon: { fontSize: '18px' },
+  navTabIconInactive: { fontSize: '18px', filter: 'grayscale(1)', opacity: 0.75 },
   navTabLabel: { fontSize: '10px', fontWeight: '600' }
 };
