@@ -211,6 +211,7 @@ const translations = {
     addAtLeastOneEmployee: 'Add at least one employee to create this project.',
     validationError: 'Validation Error: Please register at least one employee before saving project context.',
     pleaseProvideValidProject: 'Please provide a valid project or worksite title.',
+    projectAlreadyExists: 'A project named "{name}" already exists.',
     
     // Miscellaneous
     labor: 'Labor',
@@ -414,6 +415,7 @@ const translations = {
     addAtLeastOneEmployee: 'यह प्रोजेक्ट बनाने के लिए कम से कम एक कर्मचारी जोड़ें।',
     validationError: 'सत्यापन त्रुटि: प्रोजेक्ट सहेजने से पहले कृपया कम से कम एक कर्मचारी पंजीकृत करें।',
     pleaseProvideValidProject: 'कृपया एक मान्य प्रोजेक्ट या वर्कसाइट शीर्षक प्रदान करें।',
+    projectAlreadyExists: '"{name}" नाम का एक प्रोजेक्ट पहले से मौजूद है।',
     
     // Miscellaneous
     labor: 'मजदूर',
@@ -760,6 +762,7 @@ const paymentService = {
   const [newSiteName, setNewSiteName] = useState('');
   const [tempWorkersList, setTempWorkersList] = useState([]);
   const [isWorkerSubFormOpen, setIsWorkerSubFormOpen] = useState(false);
+  const [isSavingWorker, setIsSavingWorker] = useState(false);
   const [tempWorkerName, setTempWorkerName] = useState('');
   const [tempWorkerPhone, setTempWorkerPhone] = useState('');
   const [tempWorkerJoiningDate, setTempWorkerJoiningDate] = useState('');
@@ -1035,8 +1038,13 @@ const paymentService = {
 
   const handleSaveEditedProjectName = async () => {
     if (!editProjectNameInput.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
-    const targetProject = projects.find(p => p.id === activeSiteViewId);
     const trimmedName = editProjectNameInput.trim();
+    const isDuplicateProjectName = projects.some(p => p.id !== activeSiteViewId && p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    if (isDuplicateProjectName) {
+      showAlert(t('projectAlreadyExists').replace('{name}', trimmedName));
+      return;
+    }
+    const targetProject = projects.find(p => p.id === activeSiteViewId);
     setProjects(prevProjects =>
       prevProjects.map(project =>
         project.id === activeSiteViewId ? { ...project, name: trimmedName, lastModifiedAt: Date.now() } : project
@@ -1300,7 +1308,6 @@ const paymentService = {
   const handleIndividualAdvanceChange = (workerId, rawValue) => {
     const digitsOnly = rawValue.replace(/[^0-9]/g, '');
     if (selectedAttendanceDates.length === 0) {
-      if (digitsOnly.length > 0) setIsSelectDateForAdvancePopupOpen(true);
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1309,6 +1316,13 @@ const paymentService = {
       ...prev,
       [dateStr]: { ...(prev[dateStr] || {}), [workerId]: digitsOnly }
     }));
+  };
+
+  const handleAdvanceInputFocus = (e) => {
+    if (selectedAttendanceDates.length === 0) {
+      e.target.blur(); // dismiss the keyboard immediately instead of letting the user type first
+      setIsSelectDateForAdvancePopupOpen(true);
+    }
   };
 
   const getEffectiveWage = (worker, dateStr) => {
@@ -2571,7 +2585,7 @@ useEffect(() => {
     }, { confirmLabel: t('yes'), tone: 'warning' });
   };
 
-  const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/watch?v=WQPjQam78-Q&t=2s';
+  const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/shorts/RtzdRnXkfX4';
   const handleWatchTutorialVideo = async () => {
     try {
       await Browser.open({ url: TUTORIAL_VIDEO_URL });
@@ -2601,6 +2615,7 @@ useEffect(() => {
   };
 
    const handleSaveWorkerInlineFormData = async () => {
+    if (isSavingWorker) return; // guard against double-tap / double-click while a save is in flight
     const missingRequiredFields = [];
     if (!tempWorkerName.trim()) missingRequiredFields.push(t('fullName'));
     if (!tempWorkerJoiningDate) missingRequiredFields.push(t('dateOfJoining'));
@@ -2666,6 +2681,7 @@ useEffect(() => {
     }
 
     // Editing/adding a worker on an already-existing project - hit the API.
+    setIsSavingWorker(true);
     try {
       if (editingWorkerId) {
         const currentProject = projects.find(p => p.id === selectedProjectId);
@@ -2695,6 +2711,8 @@ useEffect(() => {
     } catch (error) {
       console.error('Error saving worker:', error);
       showAlert('Could not save this employee on the server.');
+    } finally {
+      setIsSavingWorker(false);
     }
 
     setTempWorkerName('');
@@ -2710,6 +2728,12 @@ useEffect(() => {
   if (loading) return; // guard against re-entrant double submits
   if (!newSiteName.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
   if (tempWorkersList.length === 0) { showAlert(t('validationError')); return; }
+  const trimmedNewProjectName = newSiteName.trim();
+  const isDuplicateProjectName = projects.some(p => p.name.trim().toLowerCase() === trimmedNewProjectName.toLowerCase());
+  if (isDuplicateProjectName) {
+    showAlert(t('projectAlreadyExists').replace('{name}', trimmedNewProjectName));
+    return;
+  }
   setLoading(true);
   try {
       const createdProject = await projectService.createProject({
@@ -2792,7 +2816,8 @@ useEffect(() => {
     tempWorkerJoiningDate.trim() !== '' && 
     tempWorkerJoiningDate <= todayStr && 
     tempWorkerWageAmount.trim() !== '' &&
-    !isNameDuplicateUI;
+    !isNameDuplicateUI &&
+    !isSavingWorker;
 
   const projectsMatchingQuery = projects.filter(p => p.name.toLowerCase().includes(siteSearchQuery.toLowerCase()));
   const sortedProjects = [...projectsMatchingQuery].sort((a, b) => {
@@ -3046,6 +3071,8 @@ useEffect(() => {
                                         pattern="[0-9]*"
                                         placeholder={t('advance')}
                                         value={pendingAdvanceByDate[currentDisplayedDate]?.[worker.id] ?? ''}
+                                        onFocus={handleAdvanceInputFocus}
+                                        onClick={handleAdvanceInputFocus}
                                         onChange={(e) => handleIndividualAdvanceChange(worker.id, e.target.value)}
                                         style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: '#92400E', boxSizing: 'border-box' }}
                                       />
@@ -3704,6 +3731,7 @@ useEffect(() => {
                       <button 
                         type="button" 
                         onClick={handleSaveWorkerInlineFormData} 
+                        disabled={!isWorkerFormValid}
                         style={{ 
                           width: '100%', 
                           display: 'block',
@@ -3714,12 +3742,12 @@ useEffect(() => {
                           color: '#ffffff', 
                           fontSize: '14px', 
                           fontWeight: '600', 
-                          cursor: 'pointer',
+                          cursor: isWorkerFormValid ? 'pointer' : 'not-allowed',
                           boxSizing: 'border-box',
                           transition: 'background-color 0.2s ease'
                         }}
                       >
-                        {t('saveEmployee')}
+                        {isSavingWorker ? '...' : t('saveEmployee')}
                       </button>
                     </div>
                   </div>
@@ -4269,6 +4297,7 @@ useEffect(() => {
                     <button 
                       type="button" 
                       onClick={handleSaveWorkerInlineFormData} 
+                      disabled={!isWorkerFormValid}
                       style={{ 
                         width: '100%', 
                         display: 'block',
@@ -4279,12 +4308,12 @@ useEffect(() => {
                         color: '#ffffff', 
                         fontSize: '14px', 
                         fontWeight: '600', 
-                        cursor: 'pointer',
+                        cursor: isWorkerFormValid ? 'pointer' : 'not-allowed',
                         boxSizing: 'border-box',
                         transition: 'background-color 0.2s ease'
                       }}
                     >
-                      {t('saveEmployee')}
+                      {isSavingWorker ? '...' : t('saveEmployee')}
                     </button>
                   </div>
                 </div>
