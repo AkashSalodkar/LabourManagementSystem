@@ -92,7 +92,7 @@ const translations = {
     wageUpdatedSuccess: 'Wage updated successfully.',
     sameWageError: 'The new wage must be different from the current wage.',
     removeBalancePendingError: 'Employee can be removed only after the balance is \u20B90.',
-    selectDateForAdvanceError: 'Select a date from the calendar to add an advance.',
+    selectDateForAdvanceError: 'Please select the Date to Add Advance.',
     projectRemoveBalancePendingError: 'Project can be removed only when all employee balances are \u20B90.',
     selectDateFromCalendar: 'Select date from the calendar to mark attendance.',
     pleaseMarkAttendance: 'Please mark attendance for',
@@ -297,7 +297,7 @@ const translations = {
     wageUpdatedSuccess: 'वेतन सफलतापूर्वक अपडेट किया गया।',
     sameWageError: 'नई मजदूरी वर्तमान मजदूरी से अलग होनी चाहिए।',
     removeBalancePendingError: 'कर्मचारी को तभी हटाया जा सकता है जब शेष राशि \u20B90 हो।',
-    selectDateForAdvanceError: 'अग्रिम राशि जोड़ने के लिए कैलेंडर से एक तारीख चुनें।',
+    selectDateForAdvanceError: 'कृपया अग्रिम जोड़ने के लिए तारीख चुनें।',
     projectRemoveBalancePendingError: 'प्रोजेक्ट को तभी हटाया जा सकता है जब सभी कर्मचारियों की शेष राशि \u20B90 हो।',
     selectDateFromCalendar: 'उपस्थिति दर्ज करने के लिए कैलेंडर से तारीख चुनें।',
     pleaseMarkAttendance: 'कृपया के लिए उपस्थिति दर्ज करें',
@@ -482,6 +482,35 @@ function AppPopup({ open, tone = 'info', title, message, confirmLabel, cancelLab
     </div>
   );
 }
+
+// ===== EMPLOYEE AVATAR COLORS =====
+// Light pastel background + darker readable text, keyed off the employee's
+// first-name initial so the same letter always gets the same color across
+// every screen (Attendance, Payments, Employee List, Muster Card, etc).
+// Colors repeat after 12 letters, which is expected/acceptable.
+const AVATAR_COLOR_PALETTE = [
+  { bg: '#EAF3FF', text: '#1D4ED8' }, // Blue
+  { bg: '#EAFBF3', text: '#047857' }, // Mint / Green
+  { bg: '#FDECEC', text: '#DC2626' }, // Pink / Red
+  { bg: '#F3EEFF', text: '#7C3AED' }, // Lavender / Purple
+  { bg: '#FFF4E8', text: '#C2410C' }, // Peach / Orange
+  { bg: '#FEFBEA', text: '#A16207' }, // Yellow
+  { bg: '#E6FBF8', text: '#0F766E' }, // Teal
+  { bg: '#FFF0F6', text: '#BE185D' }, // Rose
+  { bg: '#EEF1FF', text: '#4338CA' }, // Indigo
+  { bg: '#F2FCE8', text: '#4D7C0F' }, // Lime / Green
+  { bg: '#E8FBFF', text: '#0369A1' }, // Cyan
+  { bg: '#FBF3EA', text: '#92400E' }, // Tan / Brown
+];
+
+const getEmployeeAvatarColors = (name) => {
+  const trimmed = (name || '').trim();
+  const firstLetter = trimmed ? trimmed[0].toUpperCase() : 'W';
+  const code = firstLetter.charCodeAt(0);
+  const paletteLen = AVATAR_COLOR_PALETTE.length;
+  const index = ((code - 65) % paletteLen + paletteLen) % paletteLen;
+  return AVATAR_COLOR_PALETTE[index];
+};
 
 export default function App1() {
   // Root of the API - controllers live directly under /api/<Controller>
@@ -3059,14 +3088,13 @@ useEffect(() => {
                               const record = primaryDateAttendance[worker.id] || { status: '' };
                               const effectiveWage = getEffectiveWage(worker, currentDisplayedDate || latestSelectedDate);
                               const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
-                              const bgColors = ['#0070F3', '#10B981', '#7C3AED', '#F59E0B', '#EF4444'];
-                              const assignedBg = bgColors[worker.id % bgColors.length];
+                              const avatarColors = getEmployeeAvatarColors(worker.name);
 
                               return (
                                 <div key={worker.id} style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '10px', border: '1px solid #F1F5F9' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: assignedBg, color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', flexShrink: 0 }}>{initials}</div>
+                                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: avatarColors.bg, color: avatarColors.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', flexShrink: 0, boxShadow: 'none', cursor: 'default' }}>{initials}</div>
                                       <div style={{ minWidth: 0 }}>
                                         <h5 style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{worker.name}</h5>
                                         <p style={{ margin: '1px 0 0 0', fontSize: '11px', color: '#64748B' }}>{`\u20B9${effectiveWage}/day`}</p>
@@ -3075,7 +3103,7 @@ useEffect(() => {
                                     <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
                                       <button
                                         onClick={() => handleOpenEditWage(worker)}
-                                        style={{ backgroundColor: '#EFF6FF', color: '#0B3C9B', border: 'none', padding: '5px 10px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                        style={{ backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', padding: '6px 12px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}
                                       >
                                         &#9998; {t('editWage')}
                                       </button>
@@ -3123,12 +3151,12 @@ useEffect(() => {
                                         inputMode="numeric"
                                         pattern="[0-9]*"
                                         placeholder={t('advance')}
-                                        disabled={!currentDisplayedDate}
+                                        readOnly={!currentDisplayedDate}
                                         value={pendingAdvanceByDate[currentDisplayedDate]?.[worker.id] ?? ''}
                                         onFocus={handleAdvanceInputFocus}
                                         onClick={handleAdvanceInputFocus}
                                         onChange={(e) => handleIndividualAdvanceChange(worker.id, e.target.value)}
-                                        style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: currentDisplayedDate ? '#92400E' : '#94A3B8', boxSizing: 'border-box' }}
+                                        style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: currentDisplayedDate ? '#92400E' : '#94A3B8', boxSizing: 'border-box', cursor: currentDisplayedDate ? 'text' : 'pointer' }}
                                       />
                                     </div>
                                   </div>
@@ -3722,12 +3750,11 @@ useEffect(() => {
                   {sortedWorkers.length > 0 ? (
                     sortedWorkers.map((worker) => {
                       const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
-                      const bgColors = ['#0070F3', '#10B981', '#7C3AED', '#F59E0B', '#EF4444'];
-                      const assignedBg = bgColors[worker.id % bgColors.length];
+                      const avatarColors = getEmployeeAvatarColors(worker.name);
                       return (
                         <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #F1F5F9', flexShrink: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: assignedBg, color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700' }}>{initials}</div>
+                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: avatarColors.bg, color: avatarColors.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', boxShadow: 'none', cursor: 'default' }}>{initials}</div>
                             <div>
                               <h5 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>{worker.name}</h5>
                               <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748B' }}>{worker.role || t('labor')} &bull; <span style={{ color: '#94A3B8' }}>{t('joined')} {worker.joiningDate ? new Date(worker.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '01 Jul'}</span></p>
@@ -3935,8 +3962,7 @@ useEffect(() => {
                       const absoluteBalance = Math.abs(netOutstandingBalance);
 
                       const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
-                      const themeBgColors = ['#0070F3', '#10B981', '#7C3AED', '#F59E0B', '#EF4444'];
-                      const avatarColor = themeBgColors[worker.id % themeBgColors.length];
+                      const avatarColors = getEmployeeAvatarColors(worker.name);
 
                       return (
                         <div 
@@ -3951,9 +3977,10 @@ useEffect(() => {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
                             <div style={{
                               width: '36px', height: '36px', borderRadius: '50%',
-                              backgroundColor: avatarColor, color: '#ffffff',
+                              backgroundColor: avatarColors.bg, color: avatarColors.text,
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '12px', fontWeight: '700', flexShrink: 0
+                              fontSize: '12px', fontWeight: '700', flexShrink: 0,
+                              boxShadow: 'none', cursor: 'default'
                             }}>
                               {initials}
                             </div>
