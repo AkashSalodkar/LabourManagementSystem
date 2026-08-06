@@ -427,65 +427,58 @@ const translations = {
   },
 };
 
-// ===== Reusable custom dropdown (replaces native <select> to match the app's dialog styling) =====
-function CustomDropdown({ value, options, onChange, placeholder, triggerStyle, align = 'left' }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
+// ===== Common popup component used app-wide for success/error/info/confirm messages =====
+// Mirrors the styling of the original "Attendance Saved Successfully" popup so every
+// alert/confirmation/validation message in the app looks and behaves consistently.
+function GlobalPopup({ popup, onClose, t }) {
+  if (!popup) return null;
 
-  useEffect(() => {
-    if (!open) return;
-    const handleOutside = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handleOutside);
-    document.addEventListener('touchstart', handleOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleOutside);
-      document.removeEventListener('touchstart', handleOutside);
-    };
-  }, [open]);
+  const iconByType = {
+    success: { bg: '#DCFCE7', color: '#10B981', glyph: '\u2713' },
+    error: { bg: '#FEE2E2', color: '#EF4444', glyph: '\u26A0' },
+    info: { bg: '#DBEAFE', color: '#2563EB', glyph: '\u2139' },
+    confirm: { bg: '#FEF3C7', color: '#D97706', glyph: '?' },
+  };
+  const iconMeta = iconByType[popup.type] || iconByType.error;
 
-  const selectedLabel = options.find(o => o.value === value)?.label || placeholder;
+  const handleConfirm = () => {
+    const cb = popup.onConfirm;
+    onClose();
+    if (typeof cb === 'function') cb();
+  };
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px',
-          cursor: 'pointer', width: '100%', boxSizing: 'border-box',
-          ...triggerStyle,
-        }}
-      >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedLabel}</span>
-        <span style={{ fontSize: '10px', transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease', flexShrink: 0, opacity: 0.7 }}>&#9662;</span>
-      </button>
-      {open && (
-        <div
-          style={{
-            position: 'absolute', top: 'calc(100% + 6px)', [align]: 0, zIndex: 50,
-            backgroundColor: '#ffffff', borderRadius: '14px', minWidth: '160px', maxWidth: '240px',
-            maxHeight: '260px', overflowY: 'auto', boxShadow: '0 10px 30px rgba(15, 23, 42, 0.18)',
-            border: '1px solid #EEF2F7', padding: '6px',
-          }}
-        >
-          {options.map(opt => (
-            <div
-              key={opt.value}
-              onClick={() => { onChange(opt.value); setOpen(false); }}
-              style={{
-                padding: '10px 12px', borderRadius: '10px', fontSize: '13.5px', cursor: 'pointer',
-                fontWeight: opt.value === value ? '700' : '500',
-                color: opt.value === value ? '#0B3C9B' : '#1E293B',
-                backgroundColor: opt.value === value ? '#EFF6FF' : 'transparent',
-              }}
-            >
-              {opt.label}
-            </div>
-          ))}
+    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+      <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+        <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: iconMeta.bg, color: iconMeta.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>
+          {iconMeta.glyph}
         </div>
-      )}
+        <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0', whiteSpace: 'pre-line' }}>{popup.message}</h3>
+
+        {popup.type === 'confirm' ? (
+          <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+            <button
+              onClick={onClose}
+              style={{ flex: 1, padding: '12px', backgroundColor: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+            >
+              {t('cancel')}
+            </button>
+            <button
+              onClick={handleConfirm}
+              style={{ flex: 1, padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+            >
+              {t('ok')}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onClose}
+            style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+          >
+            {t('ok')}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -777,11 +770,11 @@ const paymentService = {
   const [tempWorkerWageAmount, setTempWorkerWageAmount] = useState('');
   const [activeSiteViewId, setActiveSiteViewId] = useState(null);
   const [editingWorkerId, setEditingWorkerId] = useState(null);
-  const [isSavingWorker, setIsSavingWorker] = useState(false);
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
   const [pendingAttendanceByDate, setPendingAttendanceByDate] = useState({});
   const [pendingAdvanceByDate, setPendingAdvanceByDate] = useState({});
   const [attendanceWorkerSearchQuery, setAttendanceWorkerSearchQuery] = useState('');
+  const [isAttendanceSavedPopupOpen, setIsAttendanceSavedPopupOpen] = useState(false);
   const [currentAttendanceDateIndex, setCurrentAttendanceDateIndex] = useState(0);
 
   const [selectedAttendanceDates, setSelectedAttendanceDates] = useState([]);
@@ -789,6 +782,7 @@ const paymentService = {
   const [isCalendarPickerOpen, setIsCalendarPickerOpen] = useState(false);
   const [calendarViewMonth, setCalendarViewMonth] = useState(() => new Date());
   const [tempCalendarDates, setTempCalendarDates] = useState([]);
+  const [isMaxDatesPopupOpen, setIsMaxDatesPopupOpen] = useState(false);
   const [unmarkConfirmDate, setUnmarkConfirmDate] = useState(null);
   const calendarClickTimerRef = useRef(null);
 
@@ -807,17 +801,11 @@ const paymentService = {
   const [editWageFutureStart, setEditWageFutureStart] = useState('');
   const [editWageNewAmount, setEditWageNewAmount] = useState('');
   const [editWageNote, setEditWageNote] = useState('');
+  const [isSameWagePopupOpen, setIsSameWagePopupOpen] = useState(false);
+  const [isRemoveBalancePendingPopupOpen, setIsRemoveBalancePendingPopupOpen] = useState(false);
+  const [isSelectDateForAdvancePopupOpen, setIsSelectDateForAdvancePopupOpen] = useState(false);
+  const [isProjectRemoveBalancePendingPopupOpen, setIsProjectRemoveBalancePendingPopupOpen] = useState(false);
   const [isSavingWage, setIsSavingWage] = useState(false);
-
-  // ===== Common popup (single reusable dialog for all alerts/confirmations) =====
-  const [commonPopup, setCommonPopup] = useState({ open: false, type: 'success', title: '', message: '', onConfirm: null, confirmText: '', cancelText: '' });
-  const closeCommonPopup = () => setCommonPopup(prev => ({ ...prev, open: false }));
-  const showAlert = (message, type = 'success', title = '') => {
-    setCommonPopup({ open: true, type, title, message, onConfirm: null, confirmText: '', cancelText: '' });
-  };
-  const showConfirm = (message, onConfirm, opts = {}) => {
-    setCommonPopup({ open: true, type: opts.type || 'warning', title: opts.title || '', message, onConfirm, confirmText: opts.confirmText || '', cancelText: opts.cancelText || '' });
-  };
 
   const [isPaymentsPageOpen, setIsPaymentsPageOpen] = useState(false);
   const [paymentsRangeFrom, setPaymentsRangeFrom] = useState('');
@@ -853,6 +841,13 @@ const paymentService = {
   const [editProjectNameInput, setEditProjectNameInput] = useState('');
 
   const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
+
+  // ===== Common popup system (replaces browser showPopup()/window.confirm() everywhere) =====
+  const [globalPopup, setGlobalPopup] = useState(null); // { type: 'success'|'error'|'info'|'confirm', message, onConfirm }
+  const showPopup = (message, type = 'error') => setGlobalPopup({ type, message });
+  const showConfirmPopup = (message, onConfirm) => setGlobalPopup({ type: 'confirm', message, onConfirm });
+  const closeGlobalPopup = () => setGlobalPopup(null);
+  const [isSavingWorker, setIsSavingWorker] = useState(false);
   
   const closeTopmostScreen = () => {
     if (isEditWageModalOpen) { setIsEditWageModalOpen(false); return true; }
@@ -992,10 +987,10 @@ const paymentService = {
     const wageTargetProjectForDelete = projects.find(p => p.id === projectId);
     const workerToDelete = wageTargetProjectForDelete?.employees.find(w => w.id === workerId);
     if (workerToDelete && calcTotalDue(workerToDelete) > 0) {
-      showAlert(t('removeBalancePendingError'), 'warning');
+      setIsRemoveBalancePendingPopupOpen(true);
       return;
     }
-    const proceedWithDelete = async () => {
+    showConfirmPopup("Are you sure you want to remove this employee from this worksite?", async () => {
       // Optimistic update so the UI feels instant...
       setProjects(prevProjects =>
         prevProjects.map(project => {
@@ -1010,13 +1005,12 @@ const paymentService = {
         await workerService.deleteWorker(workerId);
       } catch (error) {
         console.error('Error deleting worker:', error);
-        showAlert('Could not delete employee on the server. Reloading latest data.', 'error');
+        showPopup('Could not delete employee on the server. Reloading latest data.');
       } finally {
         // ...then reconcile with the server either way (soft-delete flips IsActive).
         await refreshProject(projectId);
       }
-    };
-    showConfirm("Are you sure you want to remove this employee from this worksite?", proceedWithDelete, { type: 'warning', confirmText: t('remove') });
+    });
   };
 
   const handleOpenEditProjectModal = (project) => {
@@ -1030,7 +1024,7 @@ const paymentService = {
   };
 
   const handleSaveEditedProjectName = async () => {
-    if (!editProjectNameInput.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
+    if (!editProjectNameInput.trim()) { showPopup(t('pleaseProvideValidProject')); return; }
     const targetProject = projects.find(p => p.id === activeSiteViewId);
     const trimmedName = editProjectNameInput.trim();
     setProjects(prevProjects =>
@@ -1046,7 +1040,7 @@ const paymentService = {
       });
     } catch (error) {
       console.error('Error updating project:', error);
-      showAlert('Could not save the project name on the server.');
+      showPopup('Could not save the project name on the server.');
       await refreshProject(activeSiteViewId);
     }
   };
@@ -1055,10 +1049,10 @@ const paymentService = {
     const projectToDelete = projects.find(p => p.id === projectId);
     const hasUnsettledEmployee = (projectToDelete?.employees || []).some(w => calcTotalDue(w) > 0);
     if (hasUnsettledEmployee) {
-      showAlert(t('projectRemoveBalancePendingError'), 'warning');
+      setIsProjectRemoveBalancePendingPopupOpen(true);
       return;
     }
-    const proceedWithDelete = async () => {
+    showConfirmPopup(t('deleteProject'), async () => {
       setProjects(prevProjects => prevProjects.filter(p => p.id !== projectId));
       setActiveSiteViewId(null);
       setIsAttendanceModalOpen(false);
@@ -1069,11 +1063,10 @@ const paymentService = {
         await projectService.deleteProject(projectId);
       } catch (error) {
         console.error('Error deleting project:', error);
-        showAlert('Could not delete the project on the server. Reloading your projects.', 'error');
+        showPopup('Could not delete the project on the server. Reloading your projects.');
         if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
       }
-    };
-    showConfirm(t('deleteProject'), proceedWithDelete, { type: 'warning', confirmText: t('remove') });
+    });
   };
 
   const handleOpenAttendanceScreen = (project) => {
@@ -1161,7 +1154,7 @@ const paymentService = {
     setTempCalendarDates(prev => {
       if (prev.includes(dateStr)) return prev.filter(d => d !== dateStr);
       if (prev.length >= 31) {
-        showAlert(t('maxDaysError'), 'warning');
+        setIsMaxDatesPopupOpen(true);
         return prev;
       }
       return [...prev, dateStr].sort();
@@ -1255,7 +1248,7 @@ const paymentService = {
     const currentProject = projects.find(p => p.id === activeSiteViewId);
     if (!currentProject) return;
     if (selectedAttendanceDates.length === 0) {
-      showAlert(t('selectDateFromCalendar'));
+      showPopup(t('selectDateFromCalendar'));
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1280,7 +1273,7 @@ const paymentService = {
     const currentProject = projects.find(p => p.id === activeSiteViewId);
     if (!currentProject) return;
     if (selectedAttendanceDates.length === 0) {
-      showAlert(t('selectDateFromCalendar'));
+      showPopup(t('selectDateFromCalendar'));
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1294,17 +1287,10 @@ const paymentService = {
     }));
   };
 
-  const handleAdvanceFieldFocus = (e) => {
-    if (selectedAttendanceDates.length === 0) {
-      e.target.blur();
-      showAlert(t('selectDateForAdvanceError') || 'Please select the attendance date first.', 'warning');
-    }
-  };
-
   const handleIndividualAdvanceChange = (workerId, rawValue) => {
     const digitsOnly = rawValue.replace(/[^0-9]/g, '');
     if (selectedAttendanceDates.length === 0) {
-      if (digitsOnly.length > 0) showAlert(t('selectDateForAdvanceError') || 'Please select the attendance date first.', 'warning');
+      if (digitsOnly.length > 0) setIsSelectDateForAdvancePopupOpen(true);
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1460,7 +1446,7 @@ const paymentService = {
     if (!currentProject) return;
 
     if (selectedAttendanceDates.length === 0) {
-      showAlert(t('selectDateFromCalendar'));
+      showPopup(t('selectDateFromCalendar'));
       return;
     }
 
@@ -1476,7 +1462,7 @@ const paymentService = {
     });
 
     if (firstMissingDate) {
-      showAlert(`${t('pleaseMarkAttendance')} ${formatLargeDateHeader(firstMissingDate)}.`);
+      showPopup(`${t('pleaseMarkAttendance')} ${formatLargeDateHeader(firstMissingDate)}.`);
       return;
     }
 
@@ -1529,7 +1515,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to save attendance', err);
       setIsSavingAttendance(false);
-      showAlert(err.message || 'Failed to save attendance. Please try again.');
+      showPopup(err.message || 'Failed to save attendance. Please try again.');
       return; // don't touch local state if the server rejected the save
     }
     setIsSavingAttendance(false);
@@ -1580,7 +1566,7 @@ const paymentService = {
     setTempCalendarDates([]);
     setPendingAdvanceByDate({});
 
-    showAlert(t('attendanceSavedSuccess'), 'success');
+    setIsAttendanceSavedPopupOpen(true);
   };
 
   const handleOpenEditWage = (worker) => {
@@ -1604,7 +1590,7 @@ const paymentService = {
 
   const handleSaveEditWage = async () => {
     const amount = parseFloat(editWageNewAmount);
-    if (!amount || amount <= 0) { showAlert("Please enter a valid wage amount."); return; }
+    if (!amount || amount <= 0) { showPopup("Please enter a valid wage amount."); return; }
 
     const wageTargetProject = projects.find(p => p.id === activeSiteViewId);
     const wageTargetWorker = wageTargetProject?.employees.find(w => w.id === editWageTargetWorkerId);
@@ -1616,18 +1602,18 @@ const paymentService = {
     // Apply-To option keeps its existing single-range behavior untouched.
     if (editWageApplyTo === 'past') {
       if (!editWagePastDates || editWagePastDates.length === 0) {
-        showAlert('Please select at least one date.');
+        showPopup('Please select at least one date.');
         return;
       }
       if (editWagePastDates.length > EDIT_WAGE_PAST_DAYS_MAX) {
-        showAlert(`You can select up to ${EDIT_WAGE_PAST_DAYS_MAX} dates.`);
+        showPopup(`You can select up to ${EDIT_WAGE_PAST_DAYS_MAX} dates.`);
         return;
       }
 
       if (wageTargetWorker) {
         const alreadyAtAmount = editWagePastDates.every(d => getEffectiveWage(wageTargetWorker, d) === amount);
         if (alreadyAtAmount) {
-          showAlert(t('sameWageError'), 'error');
+          setIsSameWagePopupOpen(true);
           return;
         }
       }
@@ -1645,7 +1631,7 @@ const paymentService = {
       } catch (err) {
         console.error('Failed to save wage override', err);
         setIsSavingWage(false);
-        showAlert(err.message || 'Failed to save wage change. Please try again.');
+        showPopup(err.message || 'Failed to save wage change. Please try again.');
         return;
       }
       setIsSavingWage(false);
@@ -1665,7 +1651,7 @@ const paymentService = {
         })
       );
       handleCloseEditWage();
-      showAlert(t('wageUpdatedSuccess'));
+      showPopup(t('wageUpdatedSuccess'), 'success');
       return;
     }
 
@@ -1674,7 +1660,7 @@ const paymentService = {
       const todayApplyDate = editWageTodayDate || selectedDate;
       range = { from: todayApplyDate, to: todayApplyDate };
     } else if (editWageApplyTo === 'specific') {
-      if (!editWageSpecificStart || !editWageSpecificEnd) { showAlert("Please select both dates for the specific duration."); return; }
+      if (!editWageSpecificStart || !editWageSpecificEnd) { showPopup("Please select both dates for the specific duration."); return; }
       range = { from: clampToJoinDate(editWageSpecificStart), to: editWageSpecificEnd };
     } else if (editWageApplyTo === 'future') {
       range = { from: clampToJoinDate(editWageFutureStart || selectedDate), to: null };
@@ -1682,7 +1668,7 @@ const paymentService = {
 
     if (wageTargetWorker) {
       if (isWageRangeAlreadyAtAmount(wageTargetWorker, range, amount)) {
-        showAlert(t('sameWageError'), 'error');
+        setIsSameWagePopupOpen(true);
         return;
       }
     }
@@ -1702,7 +1688,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to save wage override', err);
       setIsSavingWage(false);
-      showAlert(err.message || 'Failed to save wage change. Please try again.');
+      showPopup(err.message || 'Failed to save wage change. Please try again.');
       return;
     }
     setIsSavingWage(false);
@@ -1722,7 +1708,7 @@ const paymentService = {
       })
     );
     handleCloseEditWage();
-    showAlert(t('wageUpdatedSuccess'));
+    showPopup(t('wageUpdatedSuccess'), 'success');
   };
 
   const handleOpenPaymentsPage = () => {
@@ -1829,9 +1815,9 @@ const paymentService = {
     setRecordPaymentDate('');
     setActivePaymentForm(null);
     if (type === 'bonus') {
-      showAlert(t('bonusSavedMsg'));
+      showPopup(t('bonusSavedMsg'), 'success');
     } else if (type === 'payment') {
-      showAlert(t('paymentSavedMsg'));
+      showPopup(t('paymentSavedMsg'), 'success');
     }
   };
 
@@ -1843,7 +1829,7 @@ const paymentService = {
 
   const handleSaveEditedTransaction = async (projectId, workerId) => {
     const amount = parseFloat(editPaymentAmount);
-    if (!amount || amount <= 0) { showAlert("Please enter a valid amount."); return; }
+    if (!amount || amount <= 0) { showPopup("Please enter a valid amount."); return; }
 
     const project = projects.find(p => p.id === projectId);
     const emp = project?.employees.find(e => e.id === workerId);
@@ -1890,7 +1876,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to update transaction', err);
       setIsSavingTransaction(false);
-      showAlert(err.message || 'Failed to save changes. Please try again.');
+      showPopup(err.message || 'Failed to save changes. Please try again.');
       return;
     }
     setIsSavingTransaction(false);
@@ -1923,7 +1909,7 @@ const paymentService = {
   };
 
   const handleDeleteTransaction = async (projectId, workerId, type, transactionId) => {
-    const proceedWithDelete = async () => {
+    showConfirmPopup("Remove this recorded transaction?", async () => {
       try {
         if (type === 'advance') {
           await paymentService.deleteAdvance(transactionId);
@@ -1934,7 +1920,7 @@ const paymentService = {
         }
       } catch (err) {
         console.error('Failed to delete transaction', err);
-        showAlert(err.message || 'Failed to delete. Please try again.', 'error');
+        showPopup(err.message || 'Failed to delete. Please try again.');
         return;
       }
 
@@ -1959,8 +1945,7 @@ const paymentService = {
           };
         })
       );
-    };
-    showConfirm("Remove this recorded transaction?", proceedWithDelete, { type: 'warning', confirmText: t('remove') });
+    });
   };
 
     const handleDownloadStatement = async ({ worker, project, fromDate, toDate, 
@@ -1980,7 +1965,7 @@ const paymentService = {
     const inr = (n) => `Rs. ${Math.abs(n).toLocaleString('en-IN')}`;
 
     if (!worker) {
-      showAlert('Worker data is missing. Please try again.');
+      showPopup('Worker data is missing. Please try again.');
       return;
     }
 
@@ -2226,7 +2211,7 @@ const paymentService = {
             document.body.removeChild(link);
           } catch (e) {
             console.error('Download failed:', e);
-            showAlert('Could not download the PDF. Please try again.');
+            showPopup('Could not download the PDF. Please try again.');
           }
         } else {
           doc.save(sanitizedFileName);
@@ -2247,7 +2232,7 @@ const paymentService = {
         errorMsg += 'Please try again or contact support if the issue persists.';
       }
       
-      showAlert(errorMsg);
+      showPopup(errorMsg);
       setPaymentFormValidationMsg('');
     }
   };
@@ -2302,7 +2287,7 @@ const paymentService = {
       setSendingOtp(false);
     });
     const verificationFailedListener = FirebaseAuthentication.addListener('phoneVerificationFailed', (event) => {
-      showAlert(event?.message || 'Could not send verification code. Please try again.');
+      showPopup(event?.message || 'Could not send verification code. Please try again.');
       setSendingOtp(false);
     });
     return () => {
@@ -2312,22 +2297,22 @@ const paymentService = {
   }, []);
 
   const handleSendOtp = async () => {
-    if (!isLoginView && !isRegistrationFormValid()) { showAlert('Please fill all registration details accurately.'); return; }
-    if (!mobileNumber || mobileNumber.length !== 10) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
+    if (!isLoginView && !isRegistrationFormValid()) { showPopup('Please fill all registration details accurately.'); return; }
+    if (!mobileNumber || mobileNumber.length !== 10) { showPopup('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
       await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
       // otpSent / firebaseVerificationId are set by the 'phoneCodeSent' listener above once Firebase dispatches the SMS.
     } catch (error) {
       console.error('Firebase OTP Error:', error);
-      showAlert(error?.message || 'Could not send verification code. Please try again.');
+      showPopup(error?.message || 'Could not send verification code. Please try again.');
       setSendingOtp(false);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!otpSent || !firebaseVerificationId) { showAlert('Please generate and input your verification OTP first.'); return; }
+    if (!otpSent || !firebaseVerificationId) { showPopup('Please generate and input your verification OTP first.'); return; }
     setLoading(true);
     try {
       // 1. Confirm the code with Firebase - this is what actually verifies the phone number now.
@@ -2366,16 +2351,16 @@ const paymentService = {
           setActivePage('dashboard');
           loadUserProjects(data.userId); 
         } else {
-          showAlert(data.message || 'Registration completed successfully! Proceeding to login view.');
+          showPopup(data.message || 'Registration completed successfully! Proceeding to login view.', 'success');
           setIsLoginView(true);
           setOtp('');
           setOtpSent(false);
           setFirebaseVerificationId(null);
         }
-      } else { showAlert(data.message || 'Validation failed down at backend services.'); }
+      } else { showPopup(data.message || 'Validation failed down at backend services.'); }
     } catch (error) {
       console.error('Verification Error:', error);
-      showAlert(error?.message || 'Invalid or expired OTP. Please try again.');
+      showPopup(error?.message || 'Invalid or expired OTP. Please try again.');
     } finally { setLoading(false); }
   };
 
@@ -2525,7 +2510,7 @@ useEffect(() => {
   }
 
   const handleFullLogout = () => {
-    const proceedWithLogout = () => {
+    showConfirmPopup('Are you sure you want to sign out?', () => {
       localStorage.clear();
       setIsUserAuthenticated(false);
       setLoggedInUser(null);
@@ -2533,8 +2518,7 @@ useEffect(() => {
       setOtpSent(false);
       setMobileNumber('');
       window.location.reload();
-    };
-    showConfirm('Are you sure you want to sign out?', proceedWithLogout, { type: 'warning', confirmText: t('yes') || 'Yes' });
+    });
   };
 
   const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/watch?v=WQPjQam78-Q&t=2s';
@@ -2567,7 +2551,8 @@ useEffect(() => {
   };
 
    const handleSaveWorkerInlineFormData = async () => {
-    if (isSavingWorker) return; // guard against duplicate employee creation from rapid repeat taps
+    // Guard against duplicate employee creation from rapid/repeated taps on Save.
+    if (isSavingWorker) return;
     const missingRequiredFields = [];
     if (!tempWorkerName.trim()) missingRequiredFields.push(t('fullName'));
     if (!tempWorkerJoiningDate) missingRequiredFields.push(t('dateOfJoining'));
@@ -2577,14 +2562,14 @@ useEffect(() => {
     // Only validate mobile number if the user actually typed something in
     if (tempWorkerPhone.trim() !== '') {
       if (!/^[0-9]{10}$/.test(tempWorkerPhone.trim())) {
-        showAlert('Please enter a valid 10-digit Mobile Number (or leave it blank).');
+        showPopup('Please enter a valid 10-digit Mobile Number (or leave it blank).');
         return;
       }
     }
     // --- NEW VALIDATION END ---
 
     if (missingRequiredFields.length > 0) {
-      showAlert(`${t('fillRequiredFields')}\n\u2022 ${missingRequiredFields.join('\n\u2022 ')}`);
+      showPopup(`${t('fillRequiredFields')}\n\u2022 ${missingRequiredFields.join('\n\u2022 ')}`);
       return;
     }
     if ((editingWorkerId === null || editingWorkerId === undefined) && !isAddProjectOpen) {
@@ -2593,12 +2578,12 @@ useEffect(() => {
         emp => emp.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
       );
       if (isDuplicate) {
-        showAlert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
+        showPopup(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
         return;
       }
     }
     if (tempWorkerJoiningDate && tempWorkerJoiningDate > todayStr) {
-      showAlert(t('futureJoiningDate'));
+      showPopup(t('futureJoiningDate'));
       return;
     }
     const compiledInlineWorker = {
@@ -2615,10 +2600,11 @@ useEffect(() => {
           w => w.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
         );
         if (isDuplicateInTempList) {
-          showAlert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
+          showPopup(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
           return;
         }
       }
+      setIsSavingWorker(true);
       const targetWorkerId = (editingWorkerId !== null && editingWorkerId !== undefined) ? editingWorkerId : Date.now();
       const withId = { id: targetWorkerId, ...compiledInlineWorker, lastUpdatedAt: Date.now() };
       if (editingWorkerId) setTempWorkersList(tempWorkersList.map(w => w.id === editingWorkerId ? { ...w, ...withId, attendance: w.attendance || {}, wageOverrides: w.wageOverrides || [], payments: w.payments || [] } : w));
@@ -2629,6 +2615,7 @@ useEffect(() => {
       setTempWorkerWageAmount('');
       setEditingWorkerId(null);
       setIsWorkerSubFormOpen(false);
+      setIsSavingWorker(false);
       return;
     }
 
@@ -2662,7 +2649,7 @@ useEffect(() => {
       await refreshProject(selectedProjectId);
     } catch (error) {
       console.error('Error saving worker:', error);
-      showAlert('Could not save this employee on the server.', 'error');
+      showPopup('Could not save this employee on the server.');
     } finally {
       setIsSavingWorker(false);
     }
@@ -2678,8 +2665,8 @@ useEffect(() => {
   const handleCreateProjectFinalSubmission = async (e) => {
   e.preventDefault();
   if (loading) return; // guard against re-entrant double submits
-  if (!newSiteName.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
-  if (tempWorkersList.length === 0) { showAlert(t('validationError')); return; }
+  if (!newSiteName.trim()) { showPopup(t('pleaseProvideValidProject')); return; }
+  if (tempWorkersList.length === 0) { showPopup(t('validationError')); return; }
   setLoading(true);
   try {
       const createdProject = await projectService.createProject({
@@ -2705,7 +2692,7 @@ useEffect(() => {
       if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
     } catch (error) {
       console.error('Error creating project:', error);
-      showAlert('Could not create the project on the server. Please try again.');
+      showPopup('Could not create the project on the server. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -2855,7 +2842,7 @@ useEffect(() => {
                   return (
                     <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#f4f6f9', zIndex: 5, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                       <div
-                        style={{ padding: '12px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}
+                        style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                           <button
@@ -2870,31 +2857,22 @@ useEffect(() => {
                         <h2 style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', fontSize: '17px', fontWeight: '700', color: '#1E293B', margin: 0, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                           {t('attendance')}
                         </h2>
-                      </div>
 
-                      {/* ============ PROMINENT "SELECT DATE" CARD — first & most important action on this page ============ */}
-                      <div style={{ padding: '10px 16px 0 16px', backgroundColor: '#ffffff', flexShrink: 0 }}>
-                        <button
-                          onClick={openAttendanceCalendarPicker}
-                          style={{
-                            width: '100%', display: 'flex', alignItems: 'center', gap: '10px',
-                            padding: '12px 14px', boxSizing: 'border-box',
-                            backgroundColor: currentDisplayedDate ? '#EFF6FF' : '#FFFBEB',
-                            border: currentDisplayedDate ? '1.5px solid #BFDBFE' : '2px solid #FBBF24',
-                            borderRadius: '12px', cursor: 'pointer',
-                            boxShadow: currentDisplayedDate ? '0 2px 8px rgba(11, 60, 155, 0.08)' : '0 3px 10px rgba(251, 191, 36, 0.25)',
-                          }}
-                        >
-                          <span style={{ fontSize: '22px', lineHeight: 1, flexShrink: 0 }}>&#128197;</span>
-                          <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: '700', color: currentDisplayedDate ? '#0B3C9B' : '#92400E' }}>
-                            {currentDisplayedDate ? formatLargeDateHeader(currentDisplayedDate) : t('selectDate')}
-                          </span>
-                          <span style={{ fontSize: '12px', color: currentDisplayedDate ? '#0B3C9B' : '#92400E', fontWeight: '700', flexShrink: 0 }}>&rsaquo;</span>
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                          <div
+                            onClick={openAttendanceCalendarPicker}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', flexShrink: 0, gap: '2px' }}
+                          >
+                            <span style={{ fontSize: '22px', lineHeight: 1, pointerEvents: 'none', display: 'block' }}>&#128197;</span>
+                            <span style={{ fontSize: '10px', fontWeight: '700', color: '#1E293B', margin: 0, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+                              {t('selectDate')}
+                            </span>
+                          </div>
+                        </div>
                       </div>
 
                       {currentDisplayedDate && (
-                        <div style={{ padding: '10px 16px 4px 16px', backgroundColor: '#ffffff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
+                        <div style={{ padding: '6px 16px 4px 16px', backgroundColor: '#ffffff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
                           {selectedAttendanceDates.length > 1 && (
                             <button
                               onClick={goToPreviousAttendanceDate}
@@ -2936,7 +2914,7 @@ useEffect(() => {
                         </div>
                       )}
 
-                      <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
+                      <div style={{ padding: '8px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>{t('bulkMark')}</span>
                           <button onClick={() => handleBulkAttendanceChange('P')} style={{ backgroundColor: '#10B981', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>{t('allPresent')}</button>
@@ -3025,7 +3003,6 @@ useEffect(() => {
                                         pattern="[0-9]*"
                                         placeholder={t('advance')}
                                         value={pendingAdvanceByDate[currentDisplayedDate]?.[worker.id] ?? ''}
-                                        onFocus={handleAdvanceFieldFocus}
                                         onChange={(e) => handleIndividualAdvanceChange(worker.id, e.target.value)}
                                         style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: '#92400E', boxSizing: 'border-box' }}
                                       />
@@ -3198,6 +3175,53 @@ useEffect(() => {
                         );
                       })()}
 
+                      {/* ============ ATTENDANCE SAVED SUCCESS POPUP ============ */}
+                      {isAttendanceSavedPopupOpen && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#DCFCE7', color: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#10003;</div>
+                            <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('attendanceSavedSuccess')}</h3>
+                            <button
+                              onClick={() => setIsAttendanceSavedPopupOpen(false)}
+                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                            >
+                              {t('ok')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ============ SAME-AS-CURRENT-WAGE POP-UP ============ */}
+                      {isSameWagePopupOpen && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
+                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('sameWageError')}</h3>
+                            <button
+                              onClick={() => setIsSameWagePopupOpen(false)}
+                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                            >
+                              {t('ok')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {isSelectDateForAdvancePopupOpen && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
+                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('selectDateForAdvanceError')}</h3>
+                            <button
+                              onClick={() => setIsSelectDateForAdvancePopupOpen(false)}
+                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                            >
+                              {t('ok')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* ============ MULTI-SELECT ATTENDANCE CALENDAR ============ */}
                       {isCalendarPickerOpen && (() => {
                         const year = calendarViewMonth.getFullYear();
@@ -3279,6 +3303,21 @@ useEffect(() => {
                           </div>
                         );
                       })()}
+
+                      {/* ============ MAX 31 DATES POPUP ============ */}
+                      {isMaxDatesPopupOpen && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
+                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '24px 22px', width: '82%', maxWidth: '300px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                            <p style={{ fontSize: '14px', color: '#1E293B', fontWeight: '600', margin: '0 0 16px 0' }}>{t('maxDaysError')}</p>
+                            <button
+                              onClick={() => setIsMaxDatesPopupOpen(false)}
+                              style={{ width: '100%', padding: '10px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+                            >
+                              {t('ok')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* ============ UNMARK ATTENDANCE CONFIRMATION ============ */}
                       {unmarkConfirmDate && (
@@ -3657,7 +3696,7 @@ useEffect(() => {
                     <div style={{ width: '100%', marginTop: '16px', boxSizing: 'border-box' }}>
                       <button 
                         type="button" 
-                        disabled={isSavingWorker}
+                        disabled={!isWorkerFormValid || isSavingWorker}
                         onClick={handleSaveWorkerInlineFormData} 
                         style={{ 
                           width: '100%', 
@@ -3665,11 +3704,11 @@ useEffect(() => {
                           padding: '14px', 
                           borderRadius: '12px', 
                           border: 'none', 
-                          backgroundColor: !isWorkerFormValid ? '#8FA4D6' : (isSavingWorker ? '#6B87C7' : '#0B3C9B'), 
+                          backgroundColor: (isWorkerFormValid && !isSavingWorker) ? '#0B3C9B' : '#8FA4D6', 
                           color: '#ffffff', 
                           fontSize: '14px', 
                           fontWeight: '600', 
-                          cursor: isSavingWorker ? 'default' : 'pointer',
+                          cursor: (isWorkerFormValid && !isSavingWorker) ? 'pointer' : 'not-allowed',
                           boxSizing: 'border-box',
                           transition: 'background-color 0.2s ease'
                         }}
@@ -3681,6 +3720,35 @@ useEffect(() => {
                 </div>
               )}
 
+              {isRemoveBalancePendingPopupOpen && (
+                <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                  <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                    <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
+                    <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('removeBalancePendingError')}</h3>
+                    <button
+                      onClick={() => setIsRemoveBalancePendingPopupOpen(false)}
+                      style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                    >
+                      {t('ok')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {isProjectRemoveBalancePendingPopupOpen && (
+                <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                  <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
+                    <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
+                    <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('projectRemoveBalancePendingError')}</h3>
+                    <button
+                      onClick={() => setIsProjectRemoveBalancePendingPopupOpen(false)}
+                      style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                    >
+                      {t('ok')}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -3716,7 +3784,7 @@ useEffect(() => {
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
             }}>
               <div style={{
-                padding: '12px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0',
+                padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0',
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, position: 'relative'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
@@ -3738,7 +3806,7 @@ useEffect(() => {
                   </div>
                 </div>
               </div>
-              <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
+              <div style={{ padding: '8px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <span style={{ position: 'absolute', left: '12px', color: '#94A3B8', fontSize: '14px' }}>🔍</span>
                   <input
@@ -3755,7 +3823,7 @@ useEffect(() => {
                 </div>
               </div>
 
-              <div style={{ padding: '8px 16px 4px 16px', fontSize: '13px', fontWeight: '700', color: '#475569', flexShrink: 0 }}>
+              <div style={{ padding: '12px 16px 4px 16px', fontSize: '13px', fontWeight: '700', color: '#475569', flexShrink: 0 }}>
                 {t('employeesCount')} ({filteredPaymentWorkers.length})
               </div>
 
@@ -3918,7 +3986,7 @@ useEffect(() => {
 
                 return (
                   <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
+                    <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                         <button onClick={() => setSelectedPaymentWorkerId(null)} style={{ background: 'none', border: 'none', fontSize: '24px', color: '#1E293B', cursor: 'pointer', padding: 0, flexShrink: 0 }}>&lsaquo;</button>
                         <span style={{ fontSize: '13px', color: '#334155', fontWeight: '500', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -3933,7 +4001,7 @@ useEffect(() => {
                       <div style={{ flexShrink: 0, minWidth: '20px' }} />
                     </div>
 
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 14px 80px 14px' }}>
+                    <div style={{ padding: '6px 14px 6px 14px', flexShrink: 0 }}>
                       <div style={{ backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '14px', marginBottom: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '7px 2px' }}>
                           <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155', minWidth: 0 }}>{t('wagesDue')}</span>
@@ -4105,9 +4173,11 @@ useEffect(() => {
                           {t('downloadStatement')}
                         </button>
                       </div>
+                    </div>
 
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 16px 64px 16px' }}>
                       {allTransactionsInRange.length > 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '10px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '2px' }}>
                           {allTransactionsInRange.map(txn => {
                             const meta = txnTypeMeta[txn.txnType];
                             return (
@@ -4205,7 +4275,7 @@ useEffect(() => {
                   <div style={{ width: '100%', marginTop: '16px', boxSizing: 'border-box' }}>
                     <button 
                       type="button" 
-                      disabled={isSavingWorker}
+                      disabled={!isWorkerFormValid || isSavingWorker}
                       onClick={handleSaveWorkerInlineFormData} 
                       style={{ 
                         width: '100%', 
@@ -4213,11 +4283,11 @@ useEffect(() => {
                         padding: '14px', 
                         borderRadius: '12px', 
                         border: 'none', 
-                        backgroundColor: !isWorkerFormValid ? '#8FA4D6' : (isSavingWorker ? '#6B87C7' : '#0B3C9B'), 
+                        backgroundColor: (isWorkerFormValid && !isSavingWorker) ? '#0B3C9B' : '#8FA4D6', 
                         color: '#ffffff', 
                         fontSize: '14px', 
                         fontWeight: '600', 
-                        cursor: isSavingWorker ? 'default' : 'pointer',
+                        cursor: (isWorkerFormValid && !isSavingWorker) ? 'pointer' : 'not-allowed',
                         boxSizing: 'border-box',
                         transition: 'background-color 0.2s ease'
                       }}
@@ -4288,22 +4358,26 @@ useEffect(() => {
             <button type="button" onClick={handleWatchTutorialVideo} style={{ ...themeStyles.logoutIconBtn, fontSize: '11px', padding: '6px 10px', whiteSpace: 'nowrap' }}>
               <span style={{ marginRight: '4px' }}>&#9654;&#65039;</span>{t('watchVideo')}
             </button>
-            <CustomDropdown
+            <select
               value={language}
-              onChange={handleLanguageChange}
-              options={SUPPORTED_LANGUAGES.map(l => ({ value: l.code, label: l.label }))}
-              align="right"
-              triggerStyle={{
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              style={{
                 background: 'rgba(255,255,255,255)',
                 color: '#1110107c',
                 fontWeight: 600,
                 fontSize: '11px',
                 border: 'none',
                 borderRadius: '20px',
-                padding: '6px 10px',
-                maxWidth: '90px',
+                padding: '6px 8px',
+                outline: 'none',
+                cursor: 'pointer',
+                flexShrink: 0,
+                maxWidth: '76px',
               }}
-            />
+              aria-label="Language"
+            >
+              {SUPPORTED_LANGUAGES.map(l => (<option key={l.code} value={l.code}>{l.label}</option>))}
+            </select>
           </div>
         </div>
 
@@ -4328,13 +4402,14 @@ useEffect(() => {
                   style={themeStyles.searchField}
                 />
               </div>
-              <CustomDropdown
+              <select
                 value={selectedProjectDropdown}
-                onChange={(val) => { setSelectedProjectDropdown(val); setSiteSearchQuery(val); }}
-                options={[{ value: '', label: t('allProjects') }, ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map(p => ({ value: p.name, label: p.name }))]}
-                align="right"
-                triggerStyle={themeStyles.matchedDropdown}
-              />
+                onChange={(e) => { setSelectedProjectDropdown(e.target.value); setSiteSearchQuery(e.target.value); }}
+                style={themeStyles.matchedDropdown}
+              >
+                <option value="">{t('allProjects')}</option>
+                {[...projects].sort((a, b) => a.name.localeCompare(b.name)).map(p => (<option key={p.id} value={p.name}>{p.name}</option>))}
+              </select>
             </div>
           </div>
 
@@ -4471,13 +4546,14 @@ useEffect(() => {
                     style={themeStyles.searchField}
                   />
                 </div>
-                <CustomDropdown
+                <select
                   value={projectPickerDropdown}
-                  onChange={(val) => { setProjectPickerDropdown(val); setProjectPickerSearch(val); }}
-                  options={[{ value: '', label: t('allProjects') }, ...[...projects].sort((a, b) => a.name.localeCompare(b.name)).map(p => ({ value: p.name, label: p.name }))]}
-                  align="right"
-                  triggerStyle={themeStyles.matchedDropdown}
-                />
+                  onChange={(e) => { setProjectPickerDropdown(e.target.value); setProjectPickerSearch(e.target.value); }}
+                  style={themeStyles.matchedDropdown}
+                >
+                  <option value="">{t('allProjects')}</option>
+                  {[...projects].sort((a, b) => a.name.localeCompare(b.name)).map(p => (<option key={p.id} value={p.name}>{p.name}</option>))}
+                </select>
               </div>
 
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px' }}>
@@ -4563,7 +4639,7 @@ useEffect(() => {
                         <button
                           onClick={() => {
                             setSelectedSubscriptionPlan(plan.key);
-                            showAlert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`);
+                            showPopup(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
                           }}
                           style={{
                             width: '100%', padding: '13px', borderRadius: '12px', fontWeight: '600', fontSize: '14px', cursor: 'pointer',
@@ -4627,7 +4703,7 @@ useEffect(() => {
                 disabled={isSavingProfile}
                 onClick={async () => {
                   const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
-                  if (!trimmedName) { showAlert(t('yourName') + ' is required.'); return; }
+                  if (!trimmedName) { showPopup(t('yourName') + ' is required.'); return; }
 
                   // No server-side user (e.g. dev/mock session) - fall back to local-only save.
                   if (!loggedInUser?.userId) {
@@ -4653,7 +4729,7 @@ useEffect(() => {
                     if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
 
                     if (!response.ok) {
-                      showAlert(data.message || 'Failed to update profile. Please try again.');
+                      showPopup(data.message || 'Failed to update profile. Please try again.');
                       return;
                     }
 
@@ -4664,7 +4740,7 @@ useEffect(() => {
                     setProfileImg(data.profileImage || null);
                     setIsProfileModalOpen(false);
                   } catch (err) {
-                    showAlert('Could not reach the server. Please check your connection and try again.');
+                    showPopup('Could not reach the server. Please check your connection and try again.');
                   } finally {
                     setIsSavingProfile(false);
                   }
@@ -4703,45 +4779,8 @@ useEffect(() => {
           </div>
         )}
 
-        {/* ============ COMMON POPUP (single reusable dialog for all alerts / confirmations) ============ */}
-        {commonPopup.open && (
-          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
-            <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-              <div style={{
-                width: '52px', height: '52px', borderRadius: '50%',
-                backgroundColor: commonPopup.type === 'success' ? '#DCFCE7' : commonPopup.type === 'error' ? '#FEE2E2' : commonPopup.type === 'warning' ? '#FEF3C7' : '#DBEAFE',
-                color: commonPopup.type === 'success' ? '#10B981' : commonPopup.type === 'error' ? '#EF4444' : commonPopup.type === 'warning' ? '#D97706' : '#2554EB',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto'
-              }}>
-                {commonPopup.type === 'success' ? '\u2713' : commonPopup.type === 'error' ? '\u2715' : '\u26A0'}
-              </div>
-              {commonPopup.title ? (
-                <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{commonPopup.title}</h3>
-              ) : null}
-              <p style={{ fontSize: '14px', fontWeight: commonPopup.title ? '400' : '700', color: commonPopup.title ? '#475569' : '#1E293B', margin: 0, lineHeight: '1.4' }}>{commonPopup.message}</p>
-              <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                {commonPopup.onConfirm && (
-                  <button
-                    onClick={closeCommonPopup}
-                    style={{ flex: 1, padding: '12px', backgroundColor: '#ffffff', color: '#475569', border: '1px solid #CBD5E1', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                  >
-                    {commonPopup.cancelText || t('cancel')}
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    const confirmFn = commonPopup.onConfirm;
-                    closeCommonPopup();
-                    if (confirmFn) confirmFn();
-                  }}
-                  style={{ flex: 1, padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                >
-                  {commonPopup.onConfirm ? (commonPopup.confirmText || t('ok')) : t('ok')}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* ============ COMMON POPUP (used app-wide for success/error/info/confirm) ============ */}
+        <GlobalPopup popup={globalPopup} onClose={closeGlobalPopup} t={t} />
       </div>
     );
   }
@@ -4934,6 +4973,9 @@ useEffect(() => {
         </div>
         )}
       </div>
+
+      {/* ============ COMMON POPUP (used app-wide for success/error/info/confirm) ============ */}
+      <GlobalPopup popup={globalPopup} onClose={closeGlobalPopup} t={t} />
     </div>
   );
 }
