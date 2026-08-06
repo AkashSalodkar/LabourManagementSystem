@@ -212,6 +212,7 @@ const translations = {
     validationError: 'Validation Error: Please register at least one employee before saving project context.',
     pleaseProvideValidProject: 'Please provide a valid project or worksite title.',
     projectAlreadyExists: 'A project named "{name}" already exists.',
+    projectNameDuplicateInline: 'Project name already exists. Please enter a different project name.',
     
     // Miscellaneous
     labor: 'Labor',
@@ -416,6 +417,7 @@ const translations = {
     validationError: 'सत्यापन त्रुटि: प्रोजेक्ट सहेजने से पहले कृपया कम से कम एक कर्मचारी पंजीकृत करें।',
     pleaseProvideValidProject: 'कृपया एक मान्य प्रोजेक्ट या वर्कसाइट शीर्षक प्रदान करें।',
     projectAlreadyExists: '"{name}" नाम का एक प्रोजेक्ट पहले से मौजूद है।',
+    projectNameDuplicateInline: 'प्रोजेक्ट नाम पहले से मौजूद है। कृपया एक अलग प्रोजेक्ट नाम दर्ज करें।',
     
     // Miscellaneous
     labor: 'मजदूर',
@@ -760,6 +762,7 @@ const paymentService = {
   const [industry, setIndustry] = useState('General');
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
+  const [isNewProjectNameDuplicate, setIsNewProjectNameDuplicate] = useState(false);
   const [tempWorkersList, setTempWorkersList] = useState([]);
   const [isWorkerSubFormOpen, setIsWorkerSubFormOpen] = useState(false);
   const [isSavingWorker, setIsSavingWorker] = useState(false);
@@ -2723,6 +2726,19 @@ useEffect(() => {
     setIsWorkerSubFormOpen(false);
   };
 
+  // Checked as soon as the project-name field loses focus, so the user finds
+  // out about a duplicate name right away instead of after filling in every
+  // employee and hitting "Create Project".
+  const handleProjectNameBlur = () => {
+    const trimmedName = newSiteName.trim();
+    if (!trimmedName) { setIsNewProjectNameDuplicate(false); return; }
+    const isDuplicate = projects.some(p => p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    setIsNewProjectNameDuplicate(isDuplicate);
+    if (isDuplicate) {
+      showAlert(t('projectNameDuplicateInline'));
+    }
+  };
+
   const handleCreateProjectFinalSubmission = async (e) => {
   e.preventDefault();
   if (loading) return; // guard against re-entrant double submits
@@ -2754,6 +2770,7 @@ useEffect(() => {
         bonus: w.bonus || 0,
       })));
       setNewSiteName('');
+      setIsNewProjectNameDuplicate(false);
       setTempWorkersList([]);
       setIsAddProjectOpen(false);
       if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
@@ -2996,8 +3013,26 @@ useEffect(() => {
                       <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>{t('bulkMark')}</span>
-                          <button onClick={() => handleBulkAttendanceChange('P')} style={{ backgroundColor: '#10B981', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>{t('allPresent')}</button>
-                          <button onClick={() => handleBulkAttendanceChange('A')} style={{ backgroundColor: '#EF4444', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>{t('allAbsent')}</button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange('P')}
+                            disabled={!currentDisplayedDate}
+                            style={{
+                              backgroundColor: currentDisplayedDate ? '#10B981' : '#E2E8F0',
+                              color: currentDisplayedDate ? '#ffffff' : '#94A3B8',
+                              border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+                              cursor: currentDisplayedDate ? 'pointer' : 'not-allowed',
+                            }}
+                          >{t('allPresent')}</button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange('A')}
+                            disabled={!currentDisplayedDate}
+                            style={{
+                              backgroundColor: currentDisplayedDate ? '#EF4444' : '#E2E8F0',
+                              color: currentDisplayedDate ? '#ffffff' : '#94A3B8',
+                              border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+                              cursor: currentDisplayedDate ? 'pointer' : 'not-allowed',
+                            }}
+                          >{t('allAbsent')}</button>
                         </div>
                       </div>
 
@@ -3074,18 +3109,26 @@ useEffect(() => {
                                         );
                                       })}
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flex: 1, minWidth: '64px', maxWidth: '92px', border: '1.5px solid #FBBF24', borderRadius: '7px', padding: '0 6px', backgroundColor: '#FFFBEB', boxShadow: '0 0 0 1px rgba(251, 191, 36, 0.15)', boxSizing: 'border-box' }}>
-                                      <span style={{ fontSize: '11px', color: '#B45309', fontWeight: '700', flexShrink: 0 }}>&#8377;</span>
+                                    <div style={{
+                                      display: 'flex', alignItems: 'center', gap: '3px', flex: 1, minWidth: '64px', maxWidth: '92px',
+                                      border: currentDisplayedDate ? '1.5px solid #FBBF24' : '1.5px solid #E2E8F0',
+                                      borderRadius: '7px', padding: '0 6px',
+                                      backgroundColor: currentDisplayedDate ? '#FFFBEB' : '#F1F5F9',
+                                      boxShadow: currentDisplayedDate ? '0 0 0 1px rgba(251, 191, 36, 0.15)' : 'none',
+                                      boxSizing: 'border-box',
+                                    }}>
+                                      <span style={{ fontSize: '11px', color: currentDisplayedDate ? '#B45309' : '#94A3B8', fontWeight: '700', flexShrink: 0 }}>&#8377;</span>
                                       <input
                                         type="text"
                                         inputMode="numeric"
                                         pattern="[0-9]*"
                                         placeholder={t('advance')}
+                                        disabled={!currentDisplayedDate}
                                         value={pendingAdvanceByDate[currentDisplayedDate]?.[worker.id] ?? ''}
                                         onFocus={handleAdvanceInputFocus}
                                         onClick={handleAdvanceInputFocus}
                                         onChange={(e) => handleIndividualAdvanceChange(worker.id, e.target.value)}
-                                        style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: '#92400E', boxSizing: 'border-box' }}
+                                        style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: currentDisplayedDate ? '#92400E' : '#94A3B8', boxSizing: 'border-box' }}
                                       />
                                     </div>
                                   </div>
@@ -3101,7 +3144,18 @@ useEffect(() => {
                       </div>
 
                       <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderTop: '1px solid #E2E8F0', flexShrink: 0, boxSizing: 'border-box' }}>
-                        <button onClick={handleSaveAttendanceData} disabled={isSavingAttendance} style={{ width: '100%', minHeight: '48px', padding: '14px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontWeight: '600', fontSize: '15px', cursor: isSavingAttendance ? 'default' : 'pointer', opacity: isSavingAttendance ? 0.7 : 1, boxSizing: 'border-box', flexShrink: 0 }}>{isSavingAttendance ? '...' : t('saveAttendance')}</button>
+                        <button
+                          onClick={handleSaveAttendanceData}
+                          disabled={isSavingAttendance || !currentDisplayedDate}
+                          style={{
+                            width: '100%', minHeight: '48px', padding: '14px',
+                            backgroundColor: !currentDisplayedDate ? '#E2E8F0' : '#0B3C9B',
+                            color: !currentDisplayedDate ? '#94A3B8' : '#ffffff',
+                            border: 'none', borderRadius: '12px', fontWeight: '600', fontSize: '15px',
+                            cursor: (isSavingAttendance || !currentDisplayedDate) ? 'default' : 'pointer',
+                            opacity: isSavingAttendance ? 0.7 : 1, boxSizing: 'border-box', flexShrink: 0,
+                          }}
+                        >{isSavingAttendance ? '...' : t('saveAttendance')}</button>
                       </div>
 
                       {/* ============ ATTENDANCE TRACKER PAGE ============ */}
@@ -3680,8 +3734,16 @@ useEffect(() => {
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span onClick={() => handleEditWorkerInline(currentProject, worker)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px', filter: 'grayscale(1)' }} title={t('edit')}>&#9999;&#65039;</span>
-                            <span onClick={() => handleDeleteWorkerInline(currentProject.id, worker.id)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px', filter: 'grayscale(1)' }} title={t('delete')}>&#128465;&#65039;</span>
+                            <span
+                              onClick={() => handleEditWorkerInline(currentProject, worker)}
+                              style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                              title={t('edit')}
+                            >&#9999;&#65039;</span>
+                            <span
+                              onClick={() => handleDeleteWorkerInline(currentProject.id, worker.id)}
+                              style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#FEF2F2', color: '#F87171' }}
+                              title={t('delete')}
+                            >&#128465;&#65039;</span>
                           </div>
                         </div>
                       );
@@ -4257,11 +4319,21 @@ useEffect(() => {
         {isAddProjectOpen && (
           <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
             <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', borderBottom: '1px solid #F1F5F9' }}>
-              <button onClick={() => { setIsAddProjectOpen(false); setNewSiteName(''); setTempWorkersList([]); }} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
+              <button onClick={() => { setIsAddProjectOpen(false); setNewSiteName(''); setTempWorkersList([]); setIsNewProjectNameDuplicate(false); }} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
             </div>
             <div style={{ flex: 1, padding: '20px', overflowY: 'auto' }}>
               <div style={{ marginBottom: '24px' }}>
-                <input type="text" placeholder={t('enterProjectName')} value={newSiteName} onChange={(e) => setNewSiteName(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '14px', color: '#1E293B', backgroundColor: '#F8FAFC', outline: 'none', boxSizing: 'border-box' }} />
+                <input
+                  type="text"
+                  placeholder={t('enterProjectName')}
+                  value={newSiteName}
+                  onChange={(e) => { setNewSiteName(e.target.value); if (isNewProjectNameDuplicate) setIsNewProjectNameDuplicate(false); }}
+                  onBlur={handleProjectNameBlur}
+                  style={{ width: '100%', padding: '14px', borderRadius: '10px', border: isNewProjectNameDuplicate ? '1.5px solid #EF4444' : '1px solid #CBD5E1', fontSize: '14px', color: '#1E293B', backgroundColor: '#F8FAFC', outline: 'none', boxSizing: 'border-box' }}
+                />
+                {isNewProjectNameDuplicate && (
+                  <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{t('projectNameDuplicateInline')}</p>
+                )}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <span style={{ fontSize: '14px', fontWeight: '700', color: '#1E293B' }}>{t('employees')}</span>
@@ -4500,10 +4572,13 @@ useEffect(() => {
         </div>
 
         {(() => {
-          const isHomeTabActive = !activeSiteViewId && !isProjectPickerOpen && !isSubscribePageOpen;
           const isAttendanceTabActive = isAttendanceModalOpen || (isProjectPickerOpen && projectPickerPurpose === 'attendance');
           const isPaymentsTabActive = isPaymentsPageOpen || (isProjectPickerOpen && projectPickerPurpose === 'payments');
           const isSubscribeTabActive = isSubscribePageOpen;
+          // Home stays highlighted for anything that belongs to the Home section
+          // (including viewing an individual project via "My Projects"), and only
+          // yields to another tab when that tab is genuinely active.
+          const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive && !isSubscribeTabActive;
 
           const goHome = () => {
             setActiveSiteViewId(null);
@@ -4531,19 +4606,19 @@ useEffect(() => {
           return (
             <div style={themeStyles.bottomDockNavBar}>
               <button style={isHomeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={goHome}>
-                <span style={isHomeTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#127968;</span>
+                <span style={themeStyles.navTabIcon}>&#127968;</span>
                 <span style={themeStyles.navTabLabel}>{t('navHome')}</span>
               </button>
               <button style={isAttendanceTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => openPicker('attendance')}>
-                <span style={isAttendanceTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#128197;</span>
+                <span style={themeStyles.navTabIcon}>&#128197;</span>
                 <span style={themeStyles.navTabLabel}>{t('navAttendance')}</span>
               </button>
               <button style={isPaymentsTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => openPicker('payments')}>
-                <span style={isPaymentsTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#128176;</span>
+                <span style={themeStyles.navTabIcon}>&#128176;</span>
                 <span style={themeStyles.navTabLabel}>{t('navPayments')}</span>
               </button>
               <button style={isSubscribeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsSubscribePageOpen(true); }}>
-                <span style={isSubscribeTabActive ? themeStyles.navTabIcon : themeStyles.navTabIconInactive}>&#11088;</span>
+                <span style={themeStyles.navTabIcon}>&#11088;</span>
                 <span style={themeStyles.navTabLabel}>{t('navSubscribe')}</span>
               </button>
             </div>
@@ -5179,9 +5254,11 @@ const themeStyles = {
   payoutLabel: { fontSize: '11px', color: '#94A3B8', fontWeight: '500' },
   payoutPercentageText: { fontSize: '11px', color: '#475569', fontWeight: '600' },
   bottomDockNavBar: { position: 'fixed', bottom: 0, left: 0, width: '100%', height: '64px', backgroundColor: '#ffffff', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-around', alignItems: 'center', boxSizing: 'border-box', zIndex: 1600 },
-  navItemTab: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8' },
-  navItemTabActive: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', background: 'none', border: 'none', cursor: 'pointer', color: '#0B3C9B' },
+  // Unselected tabs keep their normal, full-color look (no greying out) — they
+  // just sit on a transparent background. The selected tab gets a light-blue
+  // pill behind it so it's clearly the active one, without dulling the rest.
+  navItemTab: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', background: 'none', border: 'none', cursor: 'pointer', color: '#334155', padding: '6px 14px', borderRadius: '16px', transition: 'background-color 0.15s ease, color 0.15s ease' },
+  navItemTabActive: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', background: '#DBEAFE', border: 'none', cursor: 'pointer', color: '#0B3C9B', padding: '6px 14px', borderRadius: '16px', transition: 'background-color 0.15s ease, color 0.15s ease' },
   navTabIcon: { fontSize: '18px' },
-  navTabIconInactive: { fontSize: '18px', filter: 'grayscale(1)', opacity: 0.75 },
   navTabLabel: { fontSize: '10px', fontWeight: '600' }
 };
