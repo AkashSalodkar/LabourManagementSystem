@@ -2929,15 +2929,26 @@ useEffect(() => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                           <div
                             onClick={openAttendanceCalendarPicker}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', flexShrink: 0, gap: '2px' }}
+                            style={{
+                              display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', flexShrink: 0, gap: '2px',
+                              padding: '5px 12px', borderRadius: '12px',
+                              ...(!currentDisplayedDate ? {
+                                backgroundColor: '#FFF4E5',
+                                border: '1.5px solid #F59E0B',
+                                animation: 'attendanceDatePulse 1.6s ease-in-out infinite',
+                              } : { border: '1.5px solid transparent' }),
+                            }}
                           >
                             <span style={{ fontSize: '22px', lineHeight: 1, pointerEvents: 'none', display: 'block' }}>&#128197;</span>
-                            <span style={{ fontSize: '10px', fontWeight: '700', color: '#1E293B', margin: 0, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+                            <span style={{ fontSize: '10px', fontWeight: '700', color: !currentDisplayedDate ? '#B45309' : '#1E293B', margin: 0, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                               {t('selectDate')}
                             </span>
                           </div>
                         </div>
                       </div>
+                      {!currentDisplayedDate && (
+                        <style>{'@keyframes attendanceDatePulse { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,0.45); } 70% { box-shadow: 0 0 0 9px rgba(245,158,11,0); } 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } }'}</style>
+                      )}
 
                       {currentDisplayedDate && (
                         <div style={{ padding: '14px 16px 4px 16px', backgroundColor: '#ffffff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
