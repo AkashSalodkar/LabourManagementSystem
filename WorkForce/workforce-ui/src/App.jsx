@@ -427,55 +427,48 @@ const translations = {
   },
 };
 
-// ===== Common popup component used app-wide for success/error/info/confirm messages =====
-// Mirrors the styling of the original "Attendance Saved Successfully" popup so every
-// alert/confirmation/validation message in the app looks and behaves consistently.
-function GlobalPopup({ popup, onClose, t }) {
-  if (!popup) return null;
+// ===== Common popup used everywhere in the app (success / error / warning / confirm) =====
+// Same visual language as the original "Attendance Saved Successfully" popup:
+// icon circle, title, optional message, blue primary button, soft scale-in animation.
+const POPUP_ICONS = {
+  success: { glyph: '\u2713', bg: '#DCFCE7', color: '#10B981' },
+  warning: { glyph: '\u26A0', bg: '#FEE2E2', color: '#EF4444' },
+  error: { glyph: '\u26A0', bg: '#FEE2E2', color: '#EF4444' },
+  info: { glyph: '\u2139', bg: '#DBEAFE', color: '#2554EB' },
+};
 
-  const iconByType = {
-    success: { bg: '#DCFCE7', color: '#10B981', glyph: '\u2713' },
-    error: { bg: '#FEE2E2', color: '#EF4444', glyph: '\u26A0' },
-    info: { bg: '#DBEAFE', color: '#2563EB', glyph: '\u2139' },
-    confirm: { bg: '#FEF3C7', color: '#D97706', glyph: '?' },
-  };
-  const iconMeta = iconByType[popup.type] || iconByType.error;
-
-  const handleConfirm = () => {
-    const cb = popup.onConfirm;
-    onClose();
-    if (typeof cb === 'function') cb();
-  };
-
+function AppPopup({ open, tone = 'info', title, message, confirmLabel, cancelLabel, onConfirm, onCancel, onClose }) {
+  if (!open) return null;
+  const icon = POPUP_ICONS[tone] || POPUP_ICONS.info;
+  const isConfirm = !!cancelLabel;
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-      <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-        <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: iconMeta.bg, color: iconMeta.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>
-          {iconMeta.glyph}
-        </div>
-        <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0', whiteSpace: 'pre-line' }}>{popup.message}</h3>
-
-        {popup.type === 'confirm' ? (
-          <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}>
+      <style>{'@keyframes appPopupIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }'}</style>
+      <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', animation: 'appPopupIn 0.18s ease-out' }}>
+        <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: icon.bg, color: icon.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>{icon.glyph}</div>
+        {title && <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{title}</h3>}
+        {message && <p style={{ fontSize: title ? '13px' : '15px', fontWeight: title ? '400' : '700', color: title ? '#64748B' : '#1E293B', margin: 0, lineHeight: '1.4' }}>{message}</p>}
+        {isConfirm ? (
+          <div style={{ display: 'flex', gap: '10px', marginTop: '18px' }}>
             <button
-              onClick={onClose}
-              style={{ flex: 1, padding: '12px', backgroundColor: '#F1F5F9', color: '#475569', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+              onClick={onCancel || onClose}
+              style={{ flex: 1, padding: '12px', backgroundColor: '#F1F5F9', color: '#334155', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
             >
-              {t('cancel')}
+              {cancelLabel}
             </button>
             <button
-              onClick={handleConfirm}
-              style={{ flex: 1, padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+              onClick={onConfirm}
+              style={{ flex: 1, padding: '12px', backgroundColor: '#2554EB', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
             >
-              {t('ok')}
+              {confirmLabel}
             </button>
           </div>
         ) : (
           <button
-            onClick={onClose}
-            style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+            onClick={onConfirm || onClose}
+            style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#2554EB', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
           >
-            {t('ok')}
+            {confirmLabel || 'OK'}
           </button>
         )}
       </div>
@@ -842,13 +835,27 @@ const paymentService = {
 
   const [isExitConfirmOpen, setIsExitConfirmOpen] = useState(false);
 
-  // ===== Common popup system (replaces browser showPopup()/window.confirm() everywhere) =====
-  const [globalPopup, setGlobalPopup] = useState(null); // { type: 'success'|'error'|'info'|'confirm', message, onConfirm }
-  const showPopup = (message, type = 'error') => setGlobalPopup({ type, message });
-  const showConfirmPopup = (message, onConfirm) => setGlobalPopup({ type: 'confirm', message, onConfirm });
-  const closeGlobalPopup = () => setGlobalPopup(null);
-  const [isSavingWorker, setIsSavingWorker] = useState(false);
-  
+  // ===== Common popup (replaces window.alert / window.confirm everywhere) =====
+  const [appPopup, setAppPopup] = useState(null);
+  const closeAppPopup = () => setAppPopup(null);
+  const showAlert = (message, tone = 'warning', title) => {
+    setAppPopup({ open: true, tone, title, message, confirmLabel: t('ok') });
+  };
+  const showSuccess = (message, title) => {
+    setAppPopup({ open: true, tone: 'success', title, message, confirmLabel: t('ok') });
+  };
+  const showConfirm = (message, onConfirm, opts = {}) => {
+    setAppPopup({
+      open: true,
+      tone: opts.tone || 'warning',
+      title: opts.title,
+      message,
+      confirmLabel: opts.confirmLabel || t('yes'),
+      cancelLabel: opts.cancelLabel || t('no'),
+      onConfirm: () => { closeAppPopup(); onConfirm(); },
+    });
+  };
+
   const closeTopmostScreen = () => {
     if (isEditWageModalOpen) { setIsEditWageModalOpen(false); return true; }
     if (trackerWorkerId) { setTrackerWorkerId(null); return true; }
@@ -990,7 +997,7 @@ const paymentService = {
       setIsRemoveBalancePendingPopupOpen(true);
       return;
     }
-    showConfirmPopup("Are you sure you want to remove this employee from this worksite?", async () => {
+    showConfirm("Are you sure you want to remove this employee from this worksite?", async () => {
       // Optimistic update so the UI feels instant...
       setProjects(prevProjects =>
         prevProjects.map(project => {
@@ -1005,12 +1012,12 @@ const paymentService = {
         await workerService.deleteWorker(workerId);
       } catch (error) {
         console.error('Error deleting worker:', error);
-        showPopup('Could not delete employee on the server. Reloading latest data.');
+        showAlert('Could not delete employee on the server. Reloading latest data.');
       } finally {
         // ...then reconcile with the server either way (soft-delete flips IsActive).
         await refreshProject(projectId);
       }
-    });
+    }, { confirmLabel: t('remove'), tone: 'warning' });
   };
 
   const handleOpenEditProjectModal = (project) => {
@@ -1024,7 +1031,7 @@ const paymentService = {
   };
 
   const handleSaveEditedProjectName = async () => {
-    if (!editProjectNameInput.trim()) { showPopup(t('pleaseProvideValidProject')); return; }
+    if (!editProjectNameInput.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
     const targetProject = projects.find(p => p.id === activeSiteViewId);
     const trimmedName = editProjectNameInput.trim();
     setProjects(prevProjects =>
@@ -1040,7 +1047,7 @@ const paymentService = {
       });
     } catch (error) {
       console.error('Error updating project:', error);
-      showPopup('Could not save the project name on the server.');
+      showAlert('Could not save the project name on the server.');
       await refreshProject(activeSiteViewId);
     }
   };
@@ -1052,7 +1059,7 @@ const paymentService = {
       setIsProjectRemoveBalancePendingPopupOpen(true);
       return;
     }
-    showConfirmPopup(t('deleteProject'), async () => {
+    showConfirm(t('deleteProject'), async () => {
       setProjects(prevProjects => prevProjects.filter(p => p.id !== projectId));
       setActiveSiteViewId(null);
       setIsAttendanceModalOpen(false);
@@ -1063,10 +1070,10 @@ const paymentService = {
         await projectService.deleteProject(projectId);
       } catch (error) {
         console.error('Error deleting project:', error);
-        showPopup('Could not delete the project on the server. Reloading your projects.');
+        showAlert('Could not delete the project on the server. Reloading your projects.');
         if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
       }
-    });
+    }, { confirmLabel: t('remove'), tone: 'warning' });
   };
 
   const handleOpenAttendanceScreen = (project) => {
@@ -1248,7 +1255,7 @@ const paymentService = {
     const currentProject = projects.find(p => p.id === activeSiteViewId);
     if (!currentProject) return;
     if (selectedAttendanceDates.length === 0) {
-      showPopup(t('selectDateFromCalendar'));
+      showAlert(t('selectDateFromCalendar'));
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1273,7 +1280,7 @@ const paymentService = {
     const currentProject = projects.find(p => p.id === activeSiteViewId);
     if (!currentProject) return;
     if (selectedAttendanceDates.length === 0) {
-      showPopup(t('selectDateFromCalendar'));
+      showAlert(t('selectDateFromCalendar'));
       return;
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
@@ -1446,7 +1453,7 @@ const paymentService = {
     if (!currentProject) return;
 
     if (selectedAttendanceDates.length === 0) {
-      showPopup(t('selectDateFromCalendar'));
+      showAlert(t('selectDateFromCalendar'));
       return;
     }
 
@@ -1462,7 +1469,7 @@ const paymentService = {
     });
 
     if (firstMissingDate) {
-      showPopup(`${t('pleaseMarkAttendance')} ${formatLargeDateHeader(firstMissingDate)}.`);
+      showAlert(`${t('pleaseMarkAttendance')} ${formatLargeDateHeader(firstMissingDate)}.`);
       return;
     }
 
@@ -1515,7 +1522,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to save attendance', err);
       setIsSavingAttendance(false);
-      showPopup(err.message || 'Failed to save attendance. Please try again.');
+      showAlert(err.message || 'Failed to save attendance. Please try again.');
       return; // don't touch local state if the server rejected the save
     }
     setIsSavingAttendance(false);
@@ -1590,7 +1597,7 @@ const paymentService = {
 
   const handleSaveEditWage = async () => {
     const amount = parseFloat(editWageNewAmount);
-    if (!amount || amount <= 0) { showPopup("Please enter a valid wage amount."); return; }
+    if (!amount || amount <= 0) { showAlert("Please enter a valid wage amount."); return; }
 
     const wageTargetProject = projects.find(p => p.id === activeSiteViewId);
     const wageTargetWorker = wageTargetProject?.employees.find(w => w.id === editWageTargetWorkerId);
@@ -1602,11 +1609,11 @@ const paymentService = {
     // Apply-To option keeps its existing single-range behavior untouched.
     if (editWageApplyTo === 'past') {
       if (!editWagePastDates || editWagePastDates.length === 0) {
-        showPopup('Please select at least one date.');
+        showAlert('Please select at least one date.');
         return;
       }
       if (editWagePastDates.length > EDIT_WAGE_PAST_DAYS_MAX) {
-        showPopup(`You can select up to ${EDIT_WAGE_PAST_DAYS_MAX} dates.`);
+        showAlert(`You can select up to ${EDIT_WAGE_PAST_DAYS_MAX} dates.`);
         return;
       }
 
@@ -1631,7 +1638,7 @@ const paymentService = {
       } catch (err) {
         console.error('Failed to save wage override', err);
         setIsSavingWage(false);
-        showPopup(err.message || 'Failed to save wage change. Please try again.');
+        showAlert(err.message || 'Failed to save wage change. Please try again.');
         return;
       }
       setIsSavingWage(false);
@@ -1651,7 +1658,7 @@ const paymentService = {
         })
       );
       handleCloseEditWage();
-      showPopup(t('wageUpdatedSuccess'), 'success');
+      showSuccess(t('wageUpdatedSuccess'));
       return;
     }
 
@@ -1660,7 +1667,7 @@ const paymentService = {
       const todayApplyDate = editWageTodayDate || selectedDate;
       range = { from: todayApplyDate, to: todayApplyDate };
     } else if (editWageApplyTo === 'specific') {
-      if (!editWageSpecificStart || !editWageSpecificEnd) { showPopup("Please select both dates for the specific duration."); return; }
+      if (!editWageSpecificStart || !editWageSpecificEnd) { showAlert("Please select both dates for the specific duration."); return; }
       range = { from: clampToJoinDate(editWageSpecificStart), to: editWageSpecificEnd };
     } else if (editWageApplyTo === 'future') {
       range = { from: clampToJoinDate(editWageFutureStart || selectedDate), to: null };
@@ -1688,7 +1695,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to save wage override', err);
       setIsSavingWage(false);
-      showPopup(err.message || 'Failed to save wage change. Please try again.');
+      showAlert(err.message || 'Failed to save wage change. Please try again.');
       return;
     }
     setIsSavingWage(false);
@@ -1708,7 +1715,7 @@ const paymentService = {
       })
     );
     handleCloseEditWage();
-    showPopup(t('wageUpdatedSuccess'), 'success');
+    showSuccess(t('wageUpdatedSuccess'));
   };
 
   const handleOpenPaymentsPage = () => {
@@ -1815,9 +1822,9 @@ const paymentService = {
     setRecordPaymentDate('');
     setActivePaymentForm(null);
     if (type === 'bonus') {
-      showPopup(t('bonusSavedMsg'), 'success');
+      showSuccess(t('bonusSavedMsg'));
     } else if (type === 'payment') {
-      showPopup(t('paymentSavedMsg'), 'success');
+      showSuccess(t('paymentSavedMsg'));
     }
   };
 
@@ -1829,7 +1836,7 @@ const paymentService = {
 
   const handleSaveEditedTransaction = async (projectId, workerId) => {
     const amount = parseFloat(editPaymentAmount);
-    if (!amount || amount <= 0) { showPopup("Please enter a valid amount."); return; }
+    if (!amount || amount <= 0) { showAlert("Please enter a valid amount."); return; }
 
     const project = projects.find(p => p.id === projectId);
     const emp = project?.employees.find(e => e.id === workerId);
@@ -1876,7 +1883,7 @@ const paymentService = {
     } catch (err) {
       console.error('Failed to update transaction', err);
       setIsSavingTransaction(false);
-      showPopup(err.message || 'Failed to save changes. Please try again.');
+      showAlert(err.message || 'Failed to save changes. Please try again.');
       return;
     }
     setIsSavingTransaction(false);
@@ -1909,7 +1916,7 @@ const paymentService = {
   };
 
   const handleDeleteTransaction = async (projectId, workerId, type, transactionId) => {
-    showConfirmPopup("Remove this recorded transaction?", async () => {
+    showConfirm("Remove this recorded transaction?", async () => {
       try {
         if (type === 'advance') {
           await paymentService.deleteAdvance(transactionId);
@@ -1920,7 +1927,7 @@ const paymentService = {
         }
       } catch (err) {
         console.error('Failed to delete transaction', err);
-        showPopup(err.message || 'Failed to delete. Please try again.');
+        showAlert(err.message || 'Failed to delete. Please try again.');
         return;
       }
 
@@ -1945,7 +1952,7 @@ const paymentService = {
           };
         })
       );
-    });
+    }, { confirmLabel: t('remove'), tone: 'warning' });
   };
 
     const handleDownloadStatement = async ({ worker, project, fromDate, toDate, 
@@ -1965,7 +1972,7 @@ const paymentService = {
     const inr = (n) => `Rs. ${Math.abs(n).toLocaleString('en-IN')}`;
 
     if (!worker) {
-      showPopup('Worker data is missing. Please try again.');
+      showAlert('Worker data is missing. Please try again.');
       return;
     }
 
@@ -2211,7 +2218,7 @@ const paymentService = {
             document.body.removeChild(link);
           } catch (e) {
             console.error('Download failed:', e);
-            showPopup('Could not download the PDF. Please try again.');
+            showAlert('Could not download the PDF. Please try again.');
           }
         } else {
           doc.save(sanitizedFileName);
@@ -2232,7 +2239,7 @@ const paymentService = {
         errorMsg += 'Please try again or contact support if the issue persists.';
       }
       
-      showPopup(errorMsg);
+      showAlert(errorMsg);
       setPaymentFormValidationMsg('');
     }
   };
@@ -2287,7 +2294,7 @@ const paymentService = {
       setSendingOtp(false);
     });
     const verificationFailedListener = FirebaseAuthentication.addListener('phoneVerificationFailed', (event) => {
-      showPopup(event?.message || 'Could not send verification code. Please try again.');
+      showAlert(event?.message || 'Could not send verification code. Please try again.');
       setSendingOtp(false);
     });
     return () => {
@@ -2297,22 +2304,22 @@ const paymentService = {
   }, []);
 
   const handleSendOtp = async () => {
-    if (!isLoginView && !isRegistrationFormValid()) { showPopup('Please fill all registration details accurately.'); return; }
-    if (!mobileNumber || mobileNumber.length !== 10) { showPopup('Please enter a valid 10-digit mobile number.'); return; }
+    if (!isLoginView && !isRegistrationFormValid()) { showAlert('Please fill all registration details accurately.'); return; }
+    if (!mobileNumber || mobileNumber.length !== 10) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
       await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
       // otpSent / firebaseVerificationId are set by the 'phoneCodeSent' listener above once Firebase dispatches the SMS.
     } catch (error) {
       console.error('Firebase OTP Error:', error);
-      showPopup(error?.message || 'Could not send verification code. Please try again.');
+      showAlert(error?.message || 'Could not send verification code. Please try again.');
       setSendingOtp(false);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!otpSent || !firebaseVerificationId) { showPopup('Please generate and input your verification OTP first.'); return; }
+    if (!otpSent || !firebaseVerificationId) { showAlert('Please generate and input your verification OTP first.'); return; }
     setLoading(true);
     try {
       // 1. Confirm the code with Firebase - this is what actually verifies the phone number now.
@@ -2351,16 +2358,16 @@ const paymentService = {
           setActivePage('dashboard');
           loadUserProjects(data.userId); 
         } else {
-          showPopup(data.message || 'Registration completed successfully! Proceeding to login view.', 'success');
+          showSuccess(data.message || 'Registration completed successfully! Proceeding to login view.');
           setIsLoginView(true);
           setOtp('');
           setOtpSent(false);
           setFirebaseVerificationId(null);
         }
-      } else { showPopup(data.message || 'Validation failed down at backend services.'); }
+      } else { showAlert(data.message || 'Validation failed down at backend services.'); }
     } catch (error) {
       console.error('Verification Error:', error);
-      showPopup(error?.message || 'Invalid or expired OTP. Please try again.');
+      showAlert(error?.message || 'Invalid or expired OTP. Please try again.');
     } finally { setLoading(false); }
   };
 
@@ -2510,7 +2517,7 @@ useEffect(() => {
   }
 
   const handleFullLogout = () => {
-    showConfirmPopup('Are you sure you want to sign out?', () => {
+    showConfirm('Are you sure you want to sign out?', () => {
       localStorage.clear();
       setIsUserAuthenticated(false);
       setLoggedInUser(null);
@@ -2518,7 +2525,7 @@ useEffect(() => {
       setOtpSent(false);
       setMobileNumber('');
       window.location.reload();
-    });
+    }, { confirmLabel: t('yes'), tone: 'warning' });
   };
 
   const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/watch?v=WQPjQam78-Q&t=2s';
@@ -2551,8 +2558,6 @@ useEffect(() => {
   };
 
    const handleSaveWorkerInlineFormData = async () => {
-    // Guard against duplicate employee creation from rapid/repeated taps on Save.
-    if (isSavingWorker) return;
     const missingRequiredFields = [];
     if (!tempWorkerName.trim()) missingRequiredFields.push(t('fullName'));
     if (!tempWorkerJoiningDate) missingRequiredFields.push(t('dateOfJoining'));
@@ -2562,14 +2567,14 @@ useEffect(() => {
     // Only validate mobile number if the user actually typed something in
     if (tempWorkerPhone.trim() !== '') {
       if (!/^[0-9]{10}$/.test(tempWorkerPhone.trim())) {
-        showPopup('Please enter a valid 10-digit Mobile Number (or leave it blank).');
+        showAlert('Please enter a valid 10-digit Mobile Number (or leave it blank).');
         return;
       }
     }
     // --- NEW VALIDATION END ---
 
     if (missingRequiredFields.length > 0) {
-      showPopup(`${t('fillRequiredFields')}\n\u2022 ${missingRequiredFields.join('\n\u2022 ')}`);
+      showAlert(`${t('fillRequiredFields')}\n\u2022 ${missingRequiredFields.join('\n\u2022 ')}`);
       return;
     }
     if ((editingWorkerId === null || editingWorkerId === undefined) && !isAddProjectOpen) {
@@ -2578,12 +2583,12 @@ useEffect(() => {
         emp => emp.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
       );
       if (isDuplicate) {
-        showPopup(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
+        showAlert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
         return;
       }
     }
     if (tempWorkerJoiningDate && tempWorkerJoiningDate > todayStr) {
-      showPopup(t('futureJoiningDate'));
+      showAlert(t('futureJoiningDate'));
       return;
     }
     const compiledInlineWorker = {
@@ -2600,11 +2605,10 @@ useEffect(() => {
           w => w.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
         );
         if (isDuplicateInTempList) {
-          showPopup(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
+          showAlert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
           return;
         }
       }
-      setIsSavingWorker(true);
       const targetWorkerId = (editingWorkerId !== null && editingWorkerId !== undefined) ? editingWorkerId : Date.now();
       const withId = { id: targetWorkerId, ...compiledInlineWorker, lastUpdatedAt: Date.now() };
       if (editingWorkerId) setTempWorkersList(tempWorkersList.map(w => w.id === editingWorkerId ? { ...w, ...withId, attendance: w.attendance || {}, wageOverrides: w.wageOverrides || [], payments: w.payments || [] } : w));
@@ -2615,12 +2619,10 @@ useEffect(() => {
       setTempWorkerWageAmount('');
       setEditingWorkerId(null);
       setIsWorkerSubFormOpen(false);
-      setIsSavingWorker(false);
       return;
     }
 
     // Editing/adding a worker on an already-existing project - hit the API.
-    setIsSavingWorker(true);
     try {
       if (editingWorkerId) {
         const currentProject = projects.find(p => p.id === selectedProjectId);
@@ -2649,9 +2651,7 @@ useEffect(() => {
       await refreshProject(selectedProjectId);
     } catch (error) {
       console.error('Error saving worker:', error);
-      showPopup('Could not save this employee on the server.');
-    } finally {
-      setIsSavingWorker(false);
+      showAlert('Could not save this employee on the server.');
     }
 
     setTempWorkerName('');
@@ -2665,8 +2665,8 @@ useEffect(() => {
   const handleCreateProjectFinalSubmission = async (e) => {
   e.preventDefault();
   if (loading) return; // guard against re-entrant double submits
-  if (!newSiteName.trim()) { showPopup(t('pleaseProvideValidProject')); return; }
-  if (tempWorkersList.length === 0) { showPopup(t('validationError')); return; }
+  if (!newSiteName.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
+  if (tempWorkersList.length === 0) { showAlert(t('validationError')); return; }
   setLoading(true);
   try {
       const createdProject = await projectService.createProject({
@@ -2692,7 +2692,7 @@ useEffect(() => {
       if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
     } catch (error) {
       console.error('Error creating project:', error);
-      showPopup('Could not create the project on the server. Please try again.');
+      showAlert('Could not create the project on the server. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -2842,7 +2842,7 @@ useEffect(() => {
                   return (
                     <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#f4f6f9', zIndex: 5, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                       <div
-                        style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}
+                        style={{ padding: '16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                           <button
@@ -2872,7 +2872,7 @@ useEffect(() => {
                       </div>
 
                       {currentDisplayedDate && (
-                        <div style={{ padding: '6px 16px 4px 16px', backgroundColor: '#ffffff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
+                        <div style={{ padding: '14px 16px 4px 16px', backgroundColor: '#ffffff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
                           {selectedAttendanceDates.length > 1 && (
                             <button
                               onClick={goToPreviousAttendanceDate}
@@ -2914,7 +2914,7 @@ useEffect(() => {
                         </div>
                       )}
 
-                      <div style={{ padding: '8px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
+                      <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>{t('bulkMark')}</span>
                           <button onClick={() => handleBulkAttendanceChange('P')} style={{ backgroundColor: '#10B981', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>{t('allPresent')}</button>
@@ -3176,51 +3176,33 @@ useEffect(() => {
                       })()}
 
                       {/* ============ ATTENDANCE SAVED SUCCESS POPUP ============ */}
-                      {isAttendanceSavedPopupOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#DCFCE7', color: '#10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#10003;</div>
-                            <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('attendanceSavedSuccess')}</h3>
-                            <button
-                              onClick={() => setIsAttendanceSavedPopupOpen(false)}
-                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                            >
-                              {t('ok')}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={isAttendanceSavedPopupOpen}
+                        tone="success"
+                        title={t('attendanceSavedSuccess')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsAttendanceSavedPopupOpen(false)}
+                        onClose={() => setIsAttendanceSavedPopupOpen(false)}
+                      />
 
                       {/* ============ SAME-AS-CURRENT-WAGE POP-UP ============ */}
-                      {isSameWagePopupOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
-                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('sameWageError')}</h3>
-                            <button
-                              onClick={() => setIsSameWagePopupOpen(false)}
-                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                            >
-                              {t('ok')}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={isSameWagePopupOpen}
+                        tone="warning"
+                        title={t('sameWageError')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsSameWagePopupOpen(false)}
+                        onClose={() => setIsSameWagePopupOpen(false)}
+                      />
 
-                      {isSelectDateForAdvancePopupOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
-                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('selectDateForAdvanceError')}</h3>
-                            <button
-                              onClick={() => setIsSelectDateForAdvancePopupOpen(false)}
-                              style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                            >
-                              {t('ok')}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={isSelectDateForAdvancePopupOpen}
+                        tone="warning"
+                        title={t('selectDateForAdvanceError')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsSelectDateForAdvancePopupOpen(false)}
+                        onClose={() => setIsSelectDateForAdvancePopupOpen(false)}
+                      />
 
                       {/* ============ MULTI-SELECT ATTENDANCE CALENDAR ============ */}
                       {isCalendarPickerOpen && (() => {
@@ -3305,45 +3287,27 @@ useEffect(() => {
                       })()}
 
                       {/* ============ MAX 31 DATES POPUP ============ */}
-                      {isMaxDatesPopupOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '24px 22px', width: '82%', maxWidth: '300px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <p style={{ fontSize: '14px', color: '#1E293B', fontWeight: '600', margin: '0 0 16px 0' }}>{t('maxDaysError')}</p>
-                            <button
-                              onClick={() => setIsMaxDatesPopupOpen(false)}
-                              style={{ width: '100%', padding: '10px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
-                            >
-                              {t('ok')}
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={isMaxDatesPopupOpen}
+                        tone="warning"
+                        title={t('maxDaysError')}
+                        confirmLabel={t('ok')}
+                        onConfirm={() => setIsMaxDatesPopupOpen(false)}
+                        onClose={() => setIsMaxDatesPopupOpen(false)}
+                      />
 
                       {/* ============ UNMARK ATTENDANCE CONFIRMATION ============ */}
-                      {unmarkConfirmDate && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
-                          <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '24px 22px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                            <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('removeAttendance')}</h3>
-                            <p style={{ fontSize: '13px', color: '#64748B', margin: '0 0 18px 0' }}>
-                              {t('removeAttendanceConfirm').replace('{date}', formatSelectedDatesLabel([unmarkConfirmDate]))}
-                            </p>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                              <button
-                                onClick={() => setUnmarkConfirmDate(null)}
-                                style={{ flex: 1, padding: '11px', backgroundColor: '#F1F5F9', color: '#334155', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
-                              >
-                                {t('cancel')}
-                              </button>
-                              <button
-                                onClick={handleConfirmUnmarkDate}
-                                style={{ flex: 1, padding: '11px', backgroundColor: '#EF4444', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
-                              >
-                                {t('remove')}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      <AppPopup
+                        open={!!unmarkConfirmDate}
+                        tone="warning"
+                        title={t('removeAttendance')}
+                        message={unmarkConfirmDate ? t('removeAttendanceConfirm').replace('{date}', formatSelectedDatesLabel([unmarkConfirmDate])) : ''}
+                        confirmLabel={t('remove')}
+                        cancelLabel={t('cancel')}
+                        onConfirm={handleConfirmUnmarkDate}
+                        onCancel={() => setUnmarkConfirmDate(null)}
+                        onClose={() => setUnmarkConfirmDate(null)}
+                      />
 
                       {/* ============ EDIT WAGE MODAL ============ */}
                       {isEditWageModalOpen && (() => {
@@ -3696,7 +3660,6 @@ useEffect(() => {
                     <div style={{ width: '100%', marginTop: '16px', boxSizing: 'border-box' }}>
                       <button 
                         type="button" 
-                        disabled={!isWorkerFormValid || isSavingWorker}
                         onClick={handleSaveWorkerInlineFormData} 
                         style={{ 
                           width: '100%', 
@@ -3704,51 +3667,39 @@ useEffect(() => {
                           padding: '14px', 
                           borderRadius: '12px', 
                           border: 'none', 
-                          backgroundColor: (isWorkerFormValid && !isSavingWorker) ? '#0B3C9B' : '#8FA4D6', 
+                          backgroundColor: isWorkerFormValid ? '#0B3C9B' : '#8FA4D6', 
                           color: '#ffffff', 
                           fontSize: '14px', 
                           fontWeight: '600', 
-                          cursor: (isWorkerFormValid && !isSavingWorker) ? 'pointer' : 'not-allowed',
+                          cursor: 'pointer',
                           boxSizing: 'border-box',
                           transition: 'background-color 0.2s ease'
                         }}
                       >
-                        {isSavingWorker ? '...' : t('saveEmployee')}
+                        {t('saveEmployee')}
                       </button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {isRemoveBalancePendingPopupOpen && (
-                <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                  <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                    <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
-                    <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('removeBalancePendingError')}</h3>
-                    <button
-                      onClick={() => setIsRemoveBalancePendingPopupOpen(false)}
-                      style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                    >
-                      {t('ok')}
-                    </button>
-                  </div>
-                </div>
-              )}
+              <AppPopup
+                open={isRemoveBalancePendingPopupOpen}
+                tone="warning"
+                title={t('removeBalancePendingError')}
+                confirmLabel={t('ok')}
+                onConfirm={() => setIsRemoveBalancePendingPopupOpen(false)}
+                onClose={() => setIsRemoveBalancePendingPopupOpen(false)}
+              />
 
-              {isProjectRemoveBalancePendingPopupOpen && (
-                <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-                  <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }}>
-                    <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: '#FEE2E2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>&#9888;</div>
-                    <h3 style={{ fontSize: '15px', fontWeight: '700', color: '#1E293B', margin: '0 0 6px 0' }}>{t('projectRemoveBalancePendingError')}</h3>
-                    <button
-                      onClick={() => setIsProjectRemoveBalancePendingPopupOpen(false)}
-                      style={{ marginTop: '16px', width: '100%', padding: '12px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
-                    >
-                      {t('ok')}
-                    </button>
-                  </div>
-                </div>
-              )}
+              <AppPopup
+                open={isProjectRemoveBalancePendingPopupOpen}
+                tone="warning"
+                title={t('projectRemoveBalancePendingError')}
+                confirmLabel={t('ok')}
+                onConfirm={() => setIsProjectRemoveBalancePendingPopupOpen(false)}
+                onClose={() => setIsProjectRemoveBalancePendingPopupOpen(false)}
+              />
             </div>
           );
         })()}
@@ -3784,7 +3735,7 @@ useEffect(() => {
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
             }}>
               <div style={{
-                padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0',
+                padding: '16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0',
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, position: 'relative'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
@@ -3806,7 +3757,7 @@ useEffect(() => {
                   </div>
                 </div>
               </div>
-              <div style={{ padding: '8px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
+              <div style={{ padding: '12px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <span style={{ position: 'absolute', left: '12px', color: '#94A3B8', fontSize: '14px' }}>🔍</span>
                   <input
@@ -3986,7 +3937,7 @@ useEffect(() => {
 
                 return (
                   <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
+                    <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                         <button onClick={() => setSelectedPaymentWorkerId(null)} style={{ background: 'none', border: 'none', fontSize: '24px', color: '#1E293B', cursor: 'pointer', padding: 0, flexShrink: 0 }}>&lsaquo;</button>
                         <span style={{ fontSize: '13px', color: '#334155', fontWeight: '500', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -4001,7 +3952,7 @@ useEffect(() => {
                       <div style={{ flexShrink: 0, minWidth: '20px' }} />
                     </div>
 
-                    <div style={{ padding: '6px 14px 6px 14px', flexShrink: 0 }}>
+                    <div style={{ padding: '10px 14px 6px 14px', flexShrink: 0 }}>
                       <div style={{ backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '14px', marginBottom: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '7px 2px' }}>
                           <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155', minWidth: 0 }}>{t('wagesDue')}</span>
@@ -4275,7 +4226,6 @@ useEffect(() => {
                   <div style={{ width: '100%', marginTop: '16px', boxSizing: 'border-box' }}>
                     <button 
                       type="button" 
-                      disabled={!isWorkerFormValid || isSavingWorker}
                       onClick={handleSaveWorkerInlineFormData} 
                       style={{ 
                         width: '100%', 
@@ -4283,16 +4233,16 @@ useEffect(() => {
                         padding: '14px', 
                         borderRadius: '12px', 
                         border: 'none', 
-                        backgroundColor: (isWorkerFormValid && !isSavingWorker) ? '#0B3C9B' : '#8FA4D6', 
+                        backgroundColor: isWorkerFormValid ? '#0B3C9B' : '#8FA4D6', 
                         color: '#ffffff', 
                         fontSize: '14px', 
                         fontWeight: '600', 
-                        cursor: (isWorkerFormValid && !isSavingWorker) ? 'pointer' : 'not-allowed',
+                        cursor: 'pointer',
                         boxSizing: 'border-box',
                         transition: 'background-color 0.2s ease'
                       }}
                     >
-                      {isSavingWorker ? '...' : t('saveEmployee')}
+                      {t('saveEmployee')}
                     </button>
                   </div>
                 </div>
@@ -4351,7 +4301,7 @@ useEffect(() => {
               )}
             </div>
             <span style={{ color: '#ffffff', fontWeight: '600', fontSize: '15px' }}>
-              {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'}
+              {t('greetingHi')}, {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'} 👋
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
@@ -4639,7 +4589,7 @@ useEffect(() => {
                         <button
                           onClick={() => {
                             setSelectedSubscriptionPlan(plan.key);
-                            showPopup(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
+                            showAlert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
                           }}
                           style={{
                             width: '100%', padding: '13px', borderRadius: '12px', fontWeight: '600', fontSize: '14px', cursor: 'pointer',
@@ -4703,7 +4653,7 @@ useEffect(() => {
                 disabled={isSavingProfile}
                 onClick={async () => {
                   const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
-                  if (!trimmedName) { showPopup(t('yourName') + ' is required.'); return; }
+                  if (!trimmedName) { showAlert(t('yourName') + ' is required.'); return; }
 
                   // No server-side user (e.g. dev/mock session) - fall back to local-only save.
                   if (!loggedInUser?.userId) {
@@ -4729,7 +4679,7 @@ useEffect(() => {
                     if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
 
                     if (!response.ok) {
-                      showPopup(data.message || 'Failed to update profile. Please try again.');
+                      showAlert(data.message || 'Failed to update profile. Please try again.');
                       return;
                     }
 
@@ -4740,7 +4690,7 @@ useEffect(() => {
                     setProfileImg(data.profileImage || null);
                     setIsProfileModalOpen(false);
                   } catch (err) {
-                    showPopup('Could not reach the server. Please check your connection and try again.');
+                    showAlert('Could not reach the server. Please check your connection and try again.');
                   } finally {
                     setIsSavingProfile(false);
                   }
@@ -4767,20 +4717,29 @@ useEffect(() => {
         )}
 
         {/* ============ EXIT CONFIRMATION ============ */}
-        {isExitConfirmOpen && (
-          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0, 0, 0, 0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10000, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-            <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '16px', width: '86%', maxWidth: '320px', boxSizing: 'border-box', boxShadow: '0 12px 40px rgba(0,0,0,0.25)', textAlign: 'center' }}>
-              <p style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: '600', color: '#1E293B' }}>{t('exitConfirm')}</p>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button onClick={() => setIsExitConfirmOpen(false)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #CBD5E1', backgroundColor: '#ffffff', color: '#475569', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>{t('no')}</button>
-                <button onClick={handleConfirmExitApp} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', backgroundColor: '#DC2626', color: '#ffffff', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>{t('yes')}</button>
-              </div>
-            </div>
-          </div>
-        )}
+        <AppPopup
+          open={isExitConfirmOpen}
+          tone="warning"
+          title={t('exitConfirm')}
+          confirmLabel={t('yes')}
+          cancelLabel={t('no')}
+          onConfirm={handleConfirmExitApp}
+          onCancel={() => setIsExitConfirmOpen(false)}
+          onClose={() => setIsExitConfirmOpen(false)}
+        />
 
-        {/* ============ COMMON POPUP (used app-wide for success/error/info/confirm) ============ */}
-        <GlobalPopup popup={globalPopup} onClose={closeGlobalPopup} t={t} />
+        {/* ============ COMMON POPUP (replaces every window.alert / window.confirm) ============ */}
+        <AppPopup
+          open={!!appPopup?.open}
+          tone={appPopup?.tone}
+          title={appPopup?.title}
+          message={appPopup?.message}
+          confirmLabel={appPopup?.confirmLabel}
+          cancelLabel={appPopup?.cancelLabel}
+          onConfirm={appPopup?.onConfirm || closeAppPopup}
+          onCancel={closeAppPopup}
+          onClose={closeAppPopup}
+        />
       </div>
     );
   }
@@ -4974,8 +4933,18 @@ useEffect(() => {
         )}
       </div>
 
-      {/* ============ COMMON POPUP (used app-wide for success/error/info/confirm) ============ */}
-      <GlobalPopup popup={globalPopup} onClose={closeGlobalPopup} t={t} />
+      {/* ============ COMMON POPUP (replaces every window.alert / window.confirm) ============ */}
+      <AppPopup
+        open={!!appPopup?.open}
+        tone={appPopup?.tone}
+        title={appPopup?.title}
+        message={appPopup?.message}
+        confirmLabel={appPopup?.confirmLabel}
+        cancelLabel={appPopup?.cancelLabel}
+        onConfirm={appPopup?.onConfirm || closeAppPopup}
+        onCancel={closeAppPopup}
+        onClose={closeAppPopup}
+      />
     </div>
   );
 }
