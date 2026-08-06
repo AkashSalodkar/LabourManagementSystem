@@ -3775,7 +3775,7 @@ useEffect(() => {
             <div style={{
               position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)',
               backgroundColor: '#f4f6f9', zIndex: 1660, display: 'flex', flexDirection: 'column',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden'
             }}>
               <div style={{
                 padding: '16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0',
@@ -3979,7 +3979,7 @@ useEffect(() => {
                 const balanceForRange = dueForRange - advanceAmount - wagePaymentsForRange;
 
                 return (
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                         <button onClick={() => setSelectedPaymentWorkerId(null)} style={{ background: 'none', border: 'none', fontSize: '24px', color: '#1E293B', cursor: 'pointer', padding: 0, flexShrink: 0 }}>&lsaquo;</button>
