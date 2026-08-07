@@ -776,6 +776,61 @@ const paymentService = {
     };
   }, []);
 
+  // ===== Keyboard-open detection (used to hide the bottom nav bar) =====
+  // The visualViewport shrinks whenever the on-screen keyboard opens, on both
+  // web and inside a Capacitor WebView. We track the tallest viewport height
+  // seen -- that's the "no keyboard" baseline -- and treat any big drop below
+  // it as the keyboard being open. The baseline resets on orientation/size
+  // changes (tracked via width) so rotating the device doesn't get mistaken
+  // for a keyboard opening.
+  const maxViewportHeightRef = useRef(viewportHeightPx);
+  const lastViewportWidthRef = useRef(typeof window !== 'undefined' ? window.innerWidth : 0);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const currentWidth = typeof window !== 'undefined' ? window.innerWidth : lastViewportWidthRef.current;
+    if (currentWidth !== lastViewportWidthRef.current) {
+      lastViewportWidthRef.current = currentWidth;
+      maxViewportHeightRef.current = viewportHeightPx;
+    } else if (viewportHeightPx > maxViewportHeightRef.current) {
+      maxViewportHeightRef.current = viewportHeightPx;
+    }
+    setIsKeyboardOpen((maxViewportHeightRef.current - viewportHeightPx) > 120);
+  }, [viewportHeightPx]);
+
+  // ===== Vertical scroll indicator (scrollbar) visibility, app-wide =====
+  // Injected once into <head> instead of per-screen, so every current and
+  // future scrollable container (Home, My Projects, Attendance, Payments,
+  // Employee List, Add/Edit Employee, Add/Edit Project, Settings,
+  // Subscription, modals, etc.) picks it up automatically -- nothing to
+  // repeat per screen. This only styles the scrollbar itself (thin, fading,
+  // matching native platform look) and never touches overflow, height,
+  // padding, or any other layout property, so existing scroll behaviour and
+  // UI layout are unaffected.
+  useEffect(() => {
+    const styleId = 'app-vertical-scrollbar-visibility';
+    if (document.getElementById(styleId)) return;
+    const styleEl = document.createElement('style');
+    styleEl.id = styleId;
+    styleEl.textContent = `
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(100, 116, 139, 0.5) transparent;
+      }
+      *::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      *::-webkit-scrollbar-thumb {
+        background-color: rgba(100, 116, 139, 0.5);
+        border-radius: 999px;
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }, []);
+
   // Project list search / dropdown / sort
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
   const [selectedProjectDropdown, setSelectedProjectDropdown] = useState('');
@@ -1121,6 +1176,7 @@ const paymentService = {
 
   const handleOpenAttendanceScreen = (project) => {
     setPendingAttendanceByDate({});
+    setPendingAdvanceByDate({});
     setSelectedAttendanceDates([]);
     setAttendanceWorkerSearchQuery('');
     setCurrentAttendanceDateIndex(0);
@@ -1136,6 +1192,22 @@ const paymentService = {
         seeded[emp.id] = { status: currentRecord.status || '' };
       });
       return { ...prev, [dateStr]: seeded };
+    });
+    // Also seed the Advance field from any advance already recorded for this
+    // worker on this date (via this same attendance screen), so re-opening a
+    // saved date shows the previously entered amount instead of a blank
+    // field. Only pre-fills; the field stays fully editable either way.
+    setPendingAdvanceByDate(prev => {
+      if (prev[dateStr]) return prev;
+      const seededAdvance = {};
+      project.employees.forEach(emp => {
+        const existingAdvance = (emp.advancePayments || []).find(
+          p => p.date === dateStr && p.note === 'Recorded from Attendance'
+        );
+        if (existingAdvance) seededAdvance[emp.id] = String(existingAdvance.amount);
+      });
+      if (Object.keys(seededAdvance).length === 0) return prev;
+      return { ...prev, [dateStr]: seededAdvance };
     });
   };
 
@@ -1541,13 +1613,21 @@ const paymentService = {
     // Same deal for any advances entered on this screen -- collect the
     // (worker, date, amount) triples so each can be recorded via
     // paymentService.recordAdvance (POST /api/payments/advance).
+    // If an advance was already recorded for this worker/date from this same
+    // screen (e.g. the field was pre-filled from a previously saved amount),
+    // treat this as an edit: skip it if the amount is unchanged, otherwise
+    // carry along the existing entry's id so it gets replaced rather than
+    // duplicated.
     const advancesToSave = [];
     Object.entries(pendingAdvanceByDate).forEach(([dateStr, advanceForDate]) => {
       (currentProject.employees || []).forEach(emp => {
         const amount = parseFloat(advanceForDate[emp.id]);
-        if (amount && amount > 0) {
-          advancesToSave.push({ workerId: emp.id, dateStr, amount });
-        }
+        if (!amount || amount <= 0) return;
+        const existingAdvance = (emp.advancePayments || []).find(
+          p => p.date === dateStr && p.note === 'Recorded from Attendance'
+        );
+        if (existingAdvance && existingAdvance.amount === amount) return; // unchanged, nothing to save
+        advancesToSave.push({ workerId: emp.id, dateStr, amount, existingAdvanceId: existingAdvance?.id });
       });
     });
 
@@ -1559,6 +1639,12 @@ const paymentService = {
         await attendanceService.markAttendance(record);
       }
       for (const adv of advancesToSave) {
+        // The backend has no update endpoint for advances, so an edit is a
+        // delete of the old row followed by recording the new amount --
+        // same pattern used for editing advances from the Payments page.
+        if (adv.existingAdvanceId) {
+          await paymentService.deleteAdvance(adv.existingAdvanceId);
+        }
         const result = await paymentService.recordAdvance({
           workerId: adv.workerId,
           advanceDate: adv.dateStr,
@@ -1590,24 +1676,40 @@ const paymentService = {
           const newAdvanceEntries = [];
           Object.entries(pendingAdvanceByDate).forEach(([dateStr, advanceForDate]) => {
             const amount = parseFloat(advanceForDate[emp.id]);
-            if (amount && amount > 0) {
-              newAdvanceEntries.push({
-                id: savedAdvanceIds[`${emp.id}|${dateStr}`],
-                amount,
-                date: dateStr,
-                method: 'Cash',
-                note: 'Recorded from Attendance',
-              });
-            }
+            if (!amount || amount <= 0) return;
+            const existingAdvance = (emp.advancePayments || []).find(
+              p => p.date === dateStr && p.note === 'Recorded from Attendance'
+            );
+            if (existingAdvance && existingAdvance.amount === amount) return; // unchanged, keep as-is
+            newAdvanceEntries.push({
+              id: savedAdvanceIds[`${emp.id}|${dateStr}`] || existingAdvance?.id,
+              amount,
+              date: dateStr,
+              method: 'Cash',
+              note: 'Recorded from Attendance',
+              replacesId: existingAdvance?.id,
+            });
           });
-          const advanceTotalAdded = newAdvanceEntries.reduce((sum, e) => sum + e.amount, 0);
+          // Entries that are edits replace the prior record (rather than
+          // sitting alongside it), and only the difference between the new
+          // and old amount should move the running advance total -- not the
+          // full new amount, which would double-count the original portion.
+          const replacedIds = new Set(newAdvanceEntries.map(e => e.replacesId).filter(Boolean));
+          const retainedAdvancePayments = (emp.advancePayments || []).filter(p => !replacedIds.has(p.id));
+          const advanceTotalDelta = newAdvanceEntries.reduce((sum, e) => {
+            const oldAmount = e.replacesId
+              ? (emp.advancePayments || []).find(p => p.id === e.replacesId)?.amount || 0
+              : 0;
+            return sum + (e.amount - oldAmount);
+          }, 0);
+          const cleanedNewEntries = newAdvanceEntries.map(({ replacesId, ...rest }) => rest);
 
           return {
             ...emp,
             attendance: mergedAttendance,
-            advancePayments: newAdvanceEntries.length > 0 ? [...(emp.advancePayments || []), ...newAdvanceEntries] : emp.advancePayments,
-            advance: advanceTotalAdded > 0 ? (emp.advance || 0) + advanceTotalAdded : emp.advance,
-            lastUpdatedAt: advanceTotalAdded > 0 ? Date.now() : emp.lastUpdatedAt,
+            advancePayments: newAdvanceEntries.length > 0 ? [...retainedAdvancePayments, ...cleanedNewEntries] : emp.advancePayments,
+            advance: advanceTotalDelta !== 0 ? (emp.advance || 0) + advanceTotalDelta : emp.advance,
+            lastUpdatedAt: newAdvanceEntries.length > 0 ? Date.now() : emp.lastUpdatedAt,
           };
         });
         const presentCountToday = updatedEmployees.filter(emp => {
@@ -2306,13 +2408,6 @@ const paymentService = {
   const otpInputRefs = useRef([]);
   const [resendSeconds, setResendSeconds] = useState(0);
 
-  // ===== On-screen keyboard detection (used to hide the bottom nav bar while typing) =====
-  // Whenever a numeric/text input is focused, mobile browsers/WebViews shrink the visible
-  // viewport by roughly the keyboard's height. We watch window.visualViewport (falling back
-  // to window.innerHeight) and treat a meaningful shrink as "keyboard open". This works
-  // app-wide with no per-screen wiring needed.
-  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
-
   // ✅ Azure SQL Serverless auto-pauses after inactivity, so the very first request
   // of the day can take 30-60s to "wake up" the DB instead of failing instantly.
   // The backend already retries through this (see Program.cs EnableRetryOnFailure),
@@ -2477,58 +2572,6 @@ const paymentService = {
     const id = setInterval(() => setResendSeconds((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(id);
   }, [resendSeconds]);
-
-  // On-screen keyboard show/hide detection (app-wide).
-  // Uses the visualViewport API where available (accurate on modern mobile
-  // browsers/WebViews, including Capacitor's Android/iOS webview) and falls
-  // back to comparing window.innerHeight against the layout viewport height.
-  // A shrink of more than ~120px is treated as the keyboard opening; this
-  // threshold comfortably clears normal address-bar / status-bar changes
-  // while still catching every keyboard height in practice.
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    const layoutHeight = window.innerHeight;
-    const KEYBOARD_HEIGHT_THRESHOLD = 120;
-
-    const handleViewportChange = () => {
-      if (!viewport) return;
-      const heightDiff = layoutHeight - viewport.height;
-      setIsKeyboardOpen(heightDiff > KEYBOARD_HEIGHT_THRESHOLD);
-    };
-
-    if (viewport) {
-      viewport.addEventListener('resize', handleViewportChange);
-      viewport.addEventListener('scroll', handleViewportChange);
-    }
-
-    // Fallback for environments without visualViewport support: track focus
-    // on text/number inputs directly, since window.innerHeight doesn't
-    // reliably shrink when the keyboard opens in every WebView.
-    const isTextEntryField = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
-    const handleFocusIn = (e) => {
-      if (!viewport && isTextEntryField(e.target)) setIsKeyboardOpen(true);
-    };
-    const handleFocusOut = (e) => {
-      if (!viewport && isTextEntryField(e.target)) {
-        // Defer so a focus move to another input doesn't cause a flicker.
-        setTimeout(() => {
-          const active = document.activeElement;
-          if (!isTextEntryField(active)) setIsKeyboardOpen(false);
-        }, 50);
-      }
-    };
-    document.addEventListener('focusin', handleFocusIn);
-    document.addEventListener('focusout', handleFocusOut);
-
-    return () => {
-      if (viewport) {
-        viewport.removeEventListener('resize', handleViewportChange);
-        viewport.removeEventListener('scroll', handleViewportChange);
-      }
-      document.removeEventListener('focusin', handleFocusIn);
-      document.removeEventListener('focusout', handleFocusOut);
-    };
-  }, []);
 
   // Thin UI wrapper: calls the existing, unchanged handleSendOtp for both the initial
   // send and the resend action, then resets the boxes / starts the 30s countdown.
@@ -4689,19 +4732,10 @@ useEffect(() => {
             setIsProjectPickerOpen(true);
           };
 
+          if (isKeyboardOpen) return null;
+
           return (
-            <div
-              style={{
-                ...themeStyles.bottomDockNavBar,
-                // Slide the bar out of view (rather than unmounting it) while the
-                // keyboard is open, so it reappears instantly and smoothly the
-                // moment the keyboard is dismissed, with no layout jump/flicker.
-                transform: isKeyboardOpen ? 'translateY(100%)' : 'translateY(0)',
-                opacity: isKeyboardOpen ? 0 : 1,
-                pointerEvents: isKeyboardOpen ? 'none' : 'auto',
-                transition: 'transform 0.2s ease, opacity 0.2s ease',
-              }}
-            >
+            <div style={themeStyles.bottomDockNavBar}>
               <button style={isHomeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={goHome}>
                 <span style={themeStyles.navTabIcon}>&#127968;</span>
                 <span style={themeStyles.navTabLabel}>{t('navHome')}</span>
