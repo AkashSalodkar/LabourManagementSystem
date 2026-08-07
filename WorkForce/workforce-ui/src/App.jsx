@@ -95,6 +95,7 @@ const translations = {
     selectDateForAdvanceError: 'Please select the Date to Add Advance.',
     projectRemoveBalancePendingError: 'Project can be removed only when all employee balances are \u20B90.',
     selectDateFromCalendar: 'Select a date from the calendar to mark attendance.',
+    selectDateToSaveAttendance: 'Select a date from the calendar to save attendance.',
     pleaseMarkAttendance: 'Please mark attendance for',
     
     // Tracker
@@ -300,6 +301,7 @@ const translations = {
     selectDateForAdvanceError: 'कृपया अग्रिम जोड़ने के लिए तारीख चुनें।',
     projectRemoveBalancePendingError: 'प्रोजेक्ट को तभी हटाया जा सकता है जब सभी कर्मचारियों की शेष राशि \u20B90 हो।',
     selectDateFromCalendar: 'उपस्थिति दर्ज करने के लिए कैलेंडर से तारीख चुनें।',
+    selectDateToSaveAttendance: 'उपस्थिति सहेजने के लिए कैलेंडर से तारीख चुनें।',
     pleaseMarkAttendance: 'कृपया के लिए उपस्थिति दर्ज करें',
     
     // Tracker
@@ -904,6 +906,20 @@ const paymentService = {
   const [recordPaymentDate, setRecordPaymentDate] = useState('');
   const [recordPaymentNote, setRecordPaymentNote] = useState('');
   const [activePaymentForm, setActivePaymentForm] = useState(null);
+
+  // ===== Auto-scroll the Pay Amount / Add Bonus form into view when the =====
+  // keyboard opens, so the user sees the form (with Quick Actions still
+  // visible above it) instead of having to scroll manually.
+  const paymentFormRef = useRef(null);
+  useEffect(() => {
+    if (isKeyboardOpen && activePaymentForm && paymentFormRef.current) {
+      const timer = setTimeout(() => {
+        paymentFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isKeyboardOpen, activePaymentForm]);
+
   const [isPaymentDatePickerOpen, setIsPaymentDatePickerOpen] = useState(false);
   const [paymentDateCalendarMonth, setPaymentDateCalendarMonth] = useState(() => new Date());
   const [paymentFormValidationMsg, setPaymentFormValidationMsg] = useState('');
@@ -999,6 +1015,8 @@ const paymentService = {
   const closeTopmostScreenRef = useRef(() => false);
   closeTopmostScreenRef.current = closeTopmostScreen;
 
+  const backButtonListenerRef = useRef(null);
+
   useEffect(() => {
   if (!isUserAuthenticated) return;
 
@@ -1009,12 +1027,12 @@ const paymentService = {
     }
   };
 
-  const backButtonListener = App.addListener('backButton', () => {
+  App.addListener('backButton', () => {
     handleBackPressed();
-  });
+  }).then((handle) => { backButtonListenerRef.current = handle; });
 
   return () => {
-    backButtonListener.remove();
+    backButtonListenerRef.current?.remove();
   };
 }, [isUserAuthenticated]);
 
@@ -1574,7 +1592,7 @@ const paymentService = {
     if (!currentProject) return;
 
     if (selectedAttendanceDates.length === 0) {
-      showAlert(t('selectDateFromCalendar'));
+      showAlert(t('selectDateToSaveAttendance'));
       return;
     }
 
@@ -2993,7 +3011,7 @@ useEffect(() => {
           });
 
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1650, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1650, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
               <div style={{ backgroundColor: '#ffffff', padding: '20px 16px', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -3276,13 +3294,13 @@ useEffect(() => {
                       <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderTop: '1px solid #E2E8F0', flexShrink: 0, boxSizing: 'border-box' }}>
                         <button
                           onClick={handleSaveAttendanceData}
-                          disabled={isSavingAttendance || !currentDisplayedDate}
+                          disabled={isSavingAttendance}
                           style={{
                             width: '100%', minHeight: '48px', padding: '14px',
                             backgroundColor: !currentDisplayedDate ? '#E2E8F0' : '#0B3C9B',
                             color: !currentDisplayedDate ? '#94A3B8' : '#ffffff',
                             border: 'none', borderRadius: '12px', fontWeight: '600', fontSize: '15px',
-                            cursor: (isSavingAttendance || !currentDisplayedDate) ? 'default' : 'pointer',
+                            cursor: isSavingAttendance ? 'default' : 'pointer',
                             opacity: isSavingAttendance ? 0.7 : 1, boxSizing: 'border-box', flexShrink: 0,
                           }}
                         >{isSavingAttendance ? '...' : t('saveAttendance')}</button>
@@ -4003,7 +4021,7 @@ useEffect(() => {
 
           return (
             <div style={{
-              position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)',
+              position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)',
               backgroundColor: '#f4f6f9', zIndex: 1660, display: 'flex', flexDirection: 'column',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden'
             }}>
@@ -4209,7 +4227,7 @@ useEffect(() => {
                 const balanceForRange = dueForRange - advanceAmount - wagePaymentsForRange;
 
                 return (
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                         <button onClick={() => setSelectedPaymentWorkerId(null)} style={{ background: 'none', border: 'none', fontSize: '24px', color: '#1E293B', cursor: 'pointer', padding: 0, flexShrink: 0 }}>&lsaquo;</button>
@@ -4225,6 +4243,7 @@ useEffect(() => {
                       <div style={{ flexShrink: 0, minWidth: '20px' }} />
                     </div>
 
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                     <div style={{ padding: '10px 14px 6px 14px', flexShrink: 0 }}>
                       <div style={{ backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '14px', marginBottom: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '7px 2px' }}>
@@ -4261,7 +4280,7 @@ useEffect(() => {
                       </div>
 
                       {activePaymentForm && (
-                        <div style={{ backgroundColor: '#ffffff', border: `1px solid ${txnTypeMeta[activePaymentForm].color}33`, borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
+                        <div ref={paymentFormRef} style={{ backgroundColor: '#ffffff', border: `1px solid ${txnTypeMeta[activePaymentForm].color}33`, borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
                           <h3 style={{ fontSize: '13px', fontWeight: '700', color: txnTypeMeta[activePaymentForm].color, margin: '0 0 10px 0' }}>
                             {activePaymentForm === 'payment' ? t('payAmount') : t('addBonus')}
                           </h3>
@@ -4377,7 +4396,7 @@ useEffect(() => {
                       })()}
                     </div>
 
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 16px 64px 16px' }}>
+                    <div style={{ padding: '0 16px 64px 16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', paddingTop: '10px', marginBottom: '10px' }}>
                         <h3 style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('paymentHistory')}</h3>
                         <button
@@ -4439,6 +4458,7 @@ useEffect(() => {
                         <p style={{ fontSize: '12px', color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>{t('noTransactions')}</p>
                       )}
                     </div>
+                    </div>
                   </div>
                 );
               })()}
@@ -4446,7 +4466,7 @@ useEffect(() => {
           );
         })()}
         {isAddProjectOpen && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
             <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', borderBottom: '1px solid #F1F5F9' }}>
               <button onClick={() => { setIsAddProjectOpen(false); setNewSiteName(''); setTempWorkersList([]); setIsNewProjectNameDuplicate(false); }} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
             </div>
@@ -4772,7 +4792,7 @@ useEffect(() => {
             }
           };
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
               <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ ...themeStyles.searchBarContainer, flex: 1 }}>
                   <span style={themeStyles.searchIconMarker}>&#128269;</span>
@@ -4834,7 +4854,7 @@ useEffect(() => {
             }
           ];
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
               <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                 <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscribe now</h2>
                 <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>Pick a plan that fits how many projects and employees you manage</p>
