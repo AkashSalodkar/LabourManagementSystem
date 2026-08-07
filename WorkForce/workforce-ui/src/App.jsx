@@ -92,9 +92,10 @@ const translations = {
     wageUpdatedSuccess: 'Wage updated successfully.',
     sameWageError: 'The new wage must be different from the current wage.',
     removeBalancePendingError: 'Employee can be removed only after the balance is \u20B90.',
-    selectDateForAdvanceError: 'Select a date from the calendar to add an advance.',
+    selectDateForAdvanceError: 'Please select the Date to Add Advance.',
     projectRemoveBalancePendingError: 'Project can be removed only when all employee balances are \u20B90.',
-    selectDateFromCalendar: 'Select date from the calendar to mark attendance.',
+    selectDateFromCalendar: 'Select a date from the calendar to mark attendance.',
+    selectDateToSaveAttendance: 'Select a date from the calendar to save attendance.',
     pleaseMarkAttendance: 'Please mark attendance for',
     
     // Tracker
@@ -212,6 +213,7 @@ const translations = {
     validationError: 'Validation Error: Please register at least one employee before saving project context.',
     pleaseProvideValidProject: 'Please provide a valid project or worksite title.',
     projectAlreadyExists: 'A project named "{name}" already exists.',
+    projectNameDuplicateInline: 'Project name already exists. Please enter a different project name.',
     
     // Miscellaneous
     labor: 'Labor',
@@ -296,9 +298,10 @@ const translations = {
     wageUpdatedSuccess: 'वेतन सफलतापूर्वक अपडेट किया गया।',
     sameWageError: 'नई मजदूरी वर्तमान मजदूरी से अलग होनी चाहिए।',
     removeBalancePendingError: 'कर्मचारी को तभी हटाया जा सकता है जब शेष राशि \u20B90 हो।',
-    selectDateForAdvanceError: 'अग्रिम राशि जोड़ने के लिए कैलेंडर से एक तारीख चुनें।',
+    selectDateForAdvanceError: 'कृपया अग्रिम जोड़ने के लिए तारीख चुनें।',
     projectRemoveBalancePendingError: 'प्रोजेक्ट को तभी हटाया जा सकता है जब सभी कर्मचारियों की शेष राशि \u20B90 हो।',
     selectDateFromCalendar: 'उपस्थिति दर्ज करने के लिए कैलेंडर से तारीख चुनें।',
+    selectDateToSaveAttendance: 'उपस्थिति सहेजने के लिए कैलेंडर से तारीख चुनें।',
     pleaseMarkAttendance: 'कृपया के लिए उपस्थिति दर्ज करें',
     
     // Tracker
@@ -416,6 +419,7 @@ const translations = {
     validationError: 'सत्यापन त्रुटि: प्रोजेक्ट सहेजने से पहले कृपया कम से कम एक कर्मचारी पंजीकृत करें।',
     pleaseProvideValidProject: 'कृपया एक मान्य प्रोजेक्ट या वर्कसाइट शीर्षक प्रदान करें।',
     projectAlreadyExists: '"{name}" नाम का एक प्रोजेक्ट पहले से मौजूद है।',
+    projectNameDuplicateInline: 'प्रोजेक्ट नाम पहले से मौजूद है। कृपया एक अलग प्रोजेक्ट नाम दर्ज करें।',
     
     // Miscellaneous
     labor: 'मजदूर',
@@ -480,6 +484,35 @@ function AppPopup({ open, tone = 'info', title, message, confirmLabel, cancelLab
     </div>
   );
 }
+
+// ===== EMPLOYEE AVATAR COLORS =====
+// Light pastel background + darker readable text, keyed off the employee's
+// first-name initial so the same letter always gets the same color across
+// every screen (Attendance, Payments, Employee List, Muster Card, etc).
+// Colors repeat after 12 letters, which is expected/acceptable.
+const AVATAR_COLOR_PALETTE = [
+  { bg: '#EAF3FF', text: '#1D4ED8' }, // Blue
+  { bg: '#EAFBF3', text: '#047857' }, // Mint / Green
+  { bg: '#FDECEC', text: '#DC2626' }, // Pink / Red
+  { bg: '#F3EEFF', text: '#7C3AED' }, // Lavender / Purple
+  { bg: '#FFF4E8', text: '#C2410C' }, // Peach / Orange
+  { bg: '#FEFBEA', text: '#A16207' }, // Yellow
+  { bg: '#E6FBF8', text: '#0F766E' }, // Teal
+  { bg: '#FFF0F6', text: '#BE185D' }, // Rose
+  { bg: '#EEF1FF', text: '#4338CA' }, // Indigo
+  { bg: '#F2FCE8', text: '#4D7C0F' }, // Lime / Green
+  { bg: '#E8FBFF', text: '#0369A1' }, // Cyan
+  { bg: '#FBF3EA', text: '#92400E' }, // Tan / Brown
+];
+
+const getEmployeeAvatarColors = (name) => {
+  const trimmed = (name || '').trim();
+  const firstLetter = trimmed ? trimmed[0].toUpperCase() : 'W';
+  const code = firstLetter.charCodeAt(0);
+  const paletteLen = AVATAR_COLOR_PALETTE.length;
+  const index = ((code - 65) % paletteLen + paletteLen) % paletteLen;
+  return AVATAR_COLOR_PALETTE[index];
+};
 
 export default function App1() {
   // Root of the API - controllers live directly under /api/<Controller>
@@ -745,6 +778,61 @@ const paymentService = {
     };
   }, []);
 
+  // ===== Keyboard-open detection (used to hide the bottom nav bar) =====
+  // The visualViewport shrinks whenever the on-screen keyboard opens, on both
+  // web and inside a Capacitor WebView. We track the tallest viewport height
+  // seen -- that's the "no keyboard" baseline -- and treat any big drop below
+  // it as the keyboard being open. The baseline resets on orientation/size
+  // changes (tracked via width) so rotating the device doesn't get mistaken
+  // for a keyboard opening.
+  const maxViewportHeightRef = useRef(viewportHeightPx);
+  const lastViewportWidthRef = useRef(typeof window !== 'undefined' ? window.innerWidth : 0);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const currentWidth = typeof window !== 'undefined' ? window.innerWidth : lastViewportWidthRef.current;
+    if (currentWidth !== lastViewportWidthRef.current) {
+      lastViewportWidthRef.current = currentWidth;
+      maxViewportHeightRef.current = viewportHeightPx;
+    } else if (viewportHeightPx > maxViewportHeightRef.current) {
+      maxViewportHeightRef.current = viewportHeightPx;
+    }
+    setIsKeyboardOpen((maxViewportHeightRef.current - viewportHeightPx) > 120);
+  }, [viewportHeightPx]);
+
+  // ===== Vertical scroll indicator (scrollbar) visibility, app-wide =====
+  // Injected once into <head> instead of per-screen, so every current and
+  // future scrollable container (Home, My Projects, Attendance, Payments,
+  // Employee List, Add/Edit Employee, Add/Edit Project, Settings,
+  // Subscription, modals, etc.) picks it up automatically -- nothing to
+  // repeat per screen. This only styles the scrollbar itself (thin, fading,
+  // matching native platform look) and never touches overflow, height,
+  // padding, or any other layout property, so existing scroll behaviour and
+  // UI layout are unaffected.
+  useEffect(() => {
+    const styleId = 'app-vertical-scrollbar-visibility';
+    if (document.getElementById(styleId)) return;
+    const styleEl = document.createElement('style');
+    styleEl.id = styleId;
+    styleEl.textContent = `
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(100, 116, 139, 0.5) transparent;
+      }
+      *::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      *::-webkit-scrollbar-thumb {
+        background-color: rgba(100, 116, 139, 0.5);
+        border-radius: 999px;
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }, []);
+
   // Project list search / dropdown / sort
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
   const [selectedProjectDropdown, setSelectedProjectDropdown] = useState('');
@@ -760,6 +848,7 @@ const paymentService = {
   const [industry, setIndustry] = useState('General');
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
+  const [isNewProjectNameDuplicate, setIsNewProjectNameDuplicate] = useState(false);
   const [tempWorkersList, setTempWorkersList] = useState([]);
   const [isWorkerSubFormOpen, setIsWorkerSubFormOpen] = useState(false);
   const [isSavingWorker, setIsSavingWorker] = useState(false);
@@ -817,6 +906,20 @@ const paymentService = {
   const [recordPaymentDate, setRecordPaymentDate] = useState('');
   const [recordPaymentNote, setRecordPaymentNote] = useState('');
   const [activePaymentForm, setActivePaymentForm] = useState(null);
+
+  // ===== Auto-scroll the Pay Amount / Add Bonus form into view when the =====
+  // keyboard opens, so the user sees the form (with Quick Actions still
+  // visible above it) instead of having to scroll manually.
+  const paymentFormRef = useRef(null);
+  useEffect(() => {
+    if (isKeyboardOpen && activePaymentForm && paymentFormRef.current) {
+      const timer = setTimeout(() => {
+        paymentFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isKeyboardOpen, activePaymentForm]);
+
   const [isPaymentDatePickerOpen, setIsPaymentDatePickerOpen] = useState(false);
   const [paymentDateCalendarMonth, setPaymentDateCalendarMonth] = useState(() => new Date());
   const [paymentFormValidationMsg, setPaymentFormValidationMsg] = useState('');
@@ -912,6 +1015,8 @@ const paymentService = {
   const closeTopmostScreenRef = useRef(() => false);
   closeTopmostScreenRef.current = closeTopmostScreen;
 
+  const backButtonListenerRef = useRef(null);
+
   useEffect(() => {
   if (!isUserAuthenticated) return;
 
@@ -922,12 +1027,12 @@ const paymentService = {
     }
   };
 
-  const backButtonListener = App.addListener('backButton', () => {
+  App.addListener('backButton', () => {
     handleBackPressed();
-  });
+  }).then((handle) => { backButtonListenerRef.current = handle; });
 
   return () => {
-    backButtonListener.remove();
+    backButtonListenerRef.current?.remove();
   };
 }, [isUserAuthenticated]);
 
@@ -1089,6 +1194,7 @@ const paymentService = {
 
   const handleOpenAttendanceScreen = (project) => {
     setPendingAttendanceByDate({});
+    setPendingAdvanceByDate({});
     setSelectedAttendanceDates([]);
     setAttendanceWorkerSearchQuery('');
     setCurrentAttendanceDateIndex(0);
@@ -1104,6 +1210,22 @@ const paymentService = {
         seeded[emp.id] = { status: currentRecord.status || '' };
       });
       return { ...prev, [dateStr]: seeded };
+    });
+    // Also seed the Advance field from any advance already recorded for this
+    // worker on this date (via this same attendance screen), so re-opening a
+    // saved date shows the previously entered amount instead of a blank
+    // field. Only pre-fills; the field stays fully editable either way.
+    setPendingAdvanceByDate(prev => {
+      if (prev[dateStr]) return prev;
+      const seededAdvance = {};
+      project.employees.forEach(emp => {
+        const existingAdvance = (emp.advancePayments || []).find(
+          p => p.date === dateStr && p.note === 'Recorded from Attendance'
+        );
+        if (existingAdvance) seededAdvance[emp.id] = String(existingAdvance.amount);
+      });
+      if (Object.keys(seededAdvance).length === 0) return prev;
+      return { ...prev, [dateStr]: seededAdvance };
     });
   };
 
@@ -1470,7 +1592,7 @@ const paymentService = {
     if (!currentProject) return;
 
     if (selectedAttendanceDates.length === 0) {
-      showAlert(t('selectDateFromCalendar'));
+      showAlert(t('selectDateToSaveAttendance'));
       return;
     }
 
@@ -1509,13 +1631,21 @@ const paymentService = {
     // Same deal for any advances entered on this screen -- collect the
     // (worker, date, amount) triples so each can be recorded via
     // paymentService.recordAdvance (POST /api/payments/advance).
+    // If an advance was already recorded for this worker/date from this same
+    // screen (e.g. the field was pre-filled from a previously saved amount),
+    // treat this as an edit: skip it if the amount is unchanged, otherwise
+    // carry along the existing entry's id so it gets replaced rather than
+    // duplicated.
     const advancesToSave = [];
     Object.entries(pendingAdvanceByDate).forEach(([dateStr, advanceForDate]) => {
       (currentProject.employees || []).forEach(emp => {
         const amount = parseFloat(advanceForDate[emp.id]);
-        if (amount && amount > 0) {
-          advancesToSave.push({ workerId: emp.id, dateStr, amount });
-        }
+        if (!amount || amount <= 0) return;
+        const existingAdvance = (emp.advancePayments || []).find(
+          p => p.date === dateStr && p.note === 'Recorded from Attendance'
+        );
+        if (existingAdvance && existingAdvance.amount === amount) return; // unchanged, nothing to save
+        advancesToSave.push({ workerId: emp.id, dateStr, amount, existingAdvanceId: existingAdvance?.id });
       });
     });
 
@@ -1527,6 +1657,12 @@ const paymentService = {
         await attendanceService.markAttendance(record);
       }
       for (const adv of advancesToSave) {
+        // The backend has no update endpoint for advances, so an edit is a
+        // delete of the old row followed by recording the new amount --
+        // same pattern used for editing advances from the Payments page.
+        if (adv.existingAdvanceId) {
+          await paymentService.deleteAdvance(adv.existingAdvanceId);
+        }
         const result = await paymentService.recordAdvance({
           workerId: adv.workerId,
           advanceDate: adv.dateStr,
@@ -1558,24 +1694,40 @@ const paymentService = {
           const newAdvanceEntries = [];
           Object.entries(pendingAdvanceByDate).forEach(([dateStr, advanceForDate]) => {
             const amount = parseFloat(advanceForDate[emp.id]);
-            if (amount && amount > 0) {
-              newAdvanceEntries.push({
-                id: savedAdvanceIds[`${emp.id}|${dateStr}`],
-                amount,
-                date: dateStr,
-                method: 'Cash',
-                note: 'Recorded from Attendance',
-              });
-            }
+            if (!amount || amount <= 0) return;
+            const existingAdvance = (emp.advancePayments || []).find(
+              p => p.date === dateStr && p.note === 'Recorded from Attendance'
+            );
+            if (existingAdvance && existingAdvance.amount === amount) return; // unchanged, keep as-is
+            newAdvanceEntries.push({
+              id: savedAdvanceIds[`${emp.id}|${dateStr}`] || existingAdvance?.id,
+              amount,
+              date: dateStr,
+              method: 'Cash',
+              note: 'Recorded from Attendance',
+              replacesId: existingAdvance?.id,
+            });
           });
-          const advanceTotalAdded = newAdvanceEntries.reduce((sum, e) => sum + e.amount, 0);
+          // Entries that are edits replace the prior record (rather than
+          // sitting alongside it), and only the difference between the new
+          // and old amount should move the running advance total -- not the
+          // full new amount, which would double-count the original portion.
+          const replacedIds = new Set(newAdvanceEntries.map(e => e.replacesId).filter(Boolean));
+          const retainedAdvancePayments = (emp.advancePayments || []).filter(p => !replacedIds.has(p.id));
+          const advanceTotalDelta = newAdvanceEntries.reduce((sum, e) => {
+            const oldAmount = e.replacesId
+              ? (emp.advancePayments || []).find(p => p.id === e.replacesId)?.amount || 0
+              : 0;
+            return sum + (e.amount - oldAmount);
+          }, 0);
+          const cleanedNewEntries = newAdvanceEntries.map(({ replacesId, ...rest }) => rest);
 
           return {
             ...emp,
             attendance: mergedAttendance,
-            advancePayments: newAdvanceEntries.length > 0 ? [...(emp.advancePayments || []), ...newAdvanceEntries] : emp.advancePayments,
-            advance: advanceTotalAdded > 0 ? (emp.advance || 0) + advanceTotalAdded : emp.advance,
-            lastUpdatedAt: advanceTotalAdded > 0 ? Date.now() : emp.lastUpdatedAt,
+            advancePayments: newAdvanceEntries.length > 0 ? [...retainedAdvancePayments, ...cleanedNewEntries] : emp.advancePayments,
+            advance: advanceTotalDelta !== 0 ? (emp.advance || 0) + advanceTotalDelta : emp.advance,
+            lastUpdatedAt: newAdvanceEntries.length > 0 ? Date.now() : emp.lastUpdatedAt,
           };
         });
         const presentCountToday = updatedEmployees.filter(emp => {
@@ -2723,6 +2875,19 @@ useEffect(() => {
     setIsWorkerSubFormOpen(false);
   };
 
+  // Checked as soon as the project-name field loses focus, so the user finds
+  // out about a duplicate name right away instead of after filling in every
+  // employee and hitting "Create Project".
+  const handleProjectNameBlur = () => {
+    const trimmedName = newSiteName.trim();
+    if (!trimmedName) { setIsNewProjectNameDuplicate(false); return; }
+    const isDuplicate = projects.some(p => p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    setIsNewProjectNameDuplicate(isDuplicate);
+    if (isDuplicate) {
+      showAlert(t('projectNameDuplicateInline'));
+    }
+  };
+
   const handleCreateProjectFinalSubmission = async (e) => {
   e.preventDefault();
   if (loading) return; // guard against re-entrant double submits
@@ -2754,6 +2919,7 @@ useEffect(() => {
         bonus: w.bonus || 0,
       })));
       setNewSiteName('');
+      setIsNewProjectNameDuplicate(false);
       setTempWorkersList([]);
       setIsAddProjectOpen(false);
       if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
@@ -2845,7 +3011,7 @@ useEffect(() => {
           });
 
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1650, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1650, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
               <div style={{ backgroundColor: '#ffffff', padding: '20px 16px', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -2929,15 +3095,26 @@ useEffect(() => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                           <div
                             onClick={openAttendanceCalendarPicker}
-                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', flexShrink: 0, gap: '2px' }}
+                            style={{
+                              display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', flexShrink: 0, gap: '2px',
+                              padding: '5px 12px', borderRadius: '12px',
+                              ...(!currentDisplayedDate ? {
+                                backgroundColor: '#FFF4E5',
+                                border: '1.5px solid #F59E0B',
+                                animation: 'attendanceDatePulse 1.6s ease-in-out infinite',
+                              } : { border: '1.5px solid transparent' }),
+                            }}
                           >
                             <span style={{ fontSize: '22px', lineHeight: 1, pointerEvents: 'none', display: 'block' }}>&#128197;</span>
-                            <span style={{ fontSize: '10px', fontWeight: '700', color: '#1E293B', margin: 0, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+                            <span style={{ fontSize: '10px', fontWeight: '700', color: !currentDisplayedDate ? '#B45309' : '#1E293B', margin: 0, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
                               {t('selectDate')}
                             </span>
                           </div>
                         </div>
                       </div>
+                      {!currentDisplayedDate && (
+                        <style>{'@keyframes attendanceDatePulse { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,0.45); } 70% { box-shadow: 0 0 0 9px rgba(245,158,11,0); } 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } }'}</style>
+                      )}
 
                       {currentDisplayedDate && (
                         <div style={{ padding: '14px 16px 4px 16px', backgroundColor: '#ffffff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px' }}>
@@ -2985,8 +3162,26 @@ useEffect(() => {
                       <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>{t('bulkMark')}</span>
-                          <button onClick={() => handleBulkAttendanceChange('P')} style={{ backgroundColor: '#10B981', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>{t('allPresent')}</button>
-                          <button onClick={() => handleBulkAttendanceChange('A')} style={{ backgroundColor: '#EF4444', color: '#ffffff', border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>{t('allAbsent')}</button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange('P')}
+                            disabled={!currentDisplayedDate}
+                            style={{
+                              backgroundColor: currentDisplayedDate ? '#10B981' : '#E2E8F0',
+                              color: currentDisplayedDate ? '#ffffff' : '#94A3B8',
+                              border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+                              cursor: currentDisplayedDate ? 'pointer' : 'not-allowed',
+                            }}
+                          >{t('allPresent')}</button>
+                          <button
+                            onClick={() => handleBulkAttendanceChange('A')}
+                            disabled={!currentDisplayedDate}
+                            style={{
+                              backgroundColor: currentDisplayedDate ? '#EF4444' : '#E2E8F0',
+                              color: currentDisplayedDate ? '#ffffff' : '#94A3B8',
+                              border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+                              cursor: currentDisplayedDate ? 'pointer' : 'not-allowed',
+                            }}
+                          >{t('allAbsent')}</button>
                         </div>
                       </div>
 
@@ -3013,14 +3208,13 @@ useEffect(() => {
                               const record = primaryDateAttendance[worker.id] || { status: '' };
                               const effectiveWage = getEffectiveWage(worker, currentDisplayedDate || latestSelectedDate);
                               const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
-                              const bgColors = ['#0070F3', '#10B981', '#7C3AED', '#F59E0B', '#EF4444'];
-                              const assignedBg = bgColors[worker.id % bgColors.length];
+                              const avatarColors = getEmployeeAvatarColors(worker.name);
 
                               return (
                                 <div key={worker.id} style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '10px', border: '1px solid #F1F5F9' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: assignedBg, color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', flexShrink: 0 }}>{initials}</div>
+                                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: avatarColors.bg, color: avatarColors.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', flexShrink: 0, boxShadow: 'none', cursor: 'default' }}>{initials}</div>
                                       <div style={{ minWidth: 0 }}>
                                         <h5 style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{worker.name}</h5>
                                         <p style={{ margin: '1px 0 0 0', fontSize: '11px', color: '#64748B' }}>{`\u20B9${effectiveWage}/day`}</p>
@@ -3029,7 +3223,7 @@ useEffect(() => {
                                     <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
                                       <button
                                         onClick={() => handleOpenEditWage(worker)}
-                                        style={{ backgroundColor: '#EFF6FF', color: '#0B3C9B', border: 'none', padding: '5px 10px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                        style={{ backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', padding: '6px 12px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}
                                       >
                                         &#9998; {t('editWage')}
                                       </button>
@@ -3063,18 +3257,26 @@ useEffect(() => {
                                         );
                                       })}
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flex: 1, minWidth: '64px', maxWidth: '92px', border: '1.5px solid #FBBF24', borderRadius: '7px', padding: '0 6px', backgroundColor: '#FFFBEB', boxShadow: '0 0 0 1px rgba(251, 191, 36, 0.15)', boxSizing: 'border-box' }}>
-                                      <span style={{ fontSize: '11px', color: '#B45309', fontWeight: '700', flexShrink: 0 }}>&#8377;</span>
+                                    <div style={{
+                                      display: 'flex', alignItems: 'center', gap: '3px', flex: 1, minWidth: '64px', maxWidth: '92px',
+                                      border: currentDisplayedDate ? '1.5px solid #FBBF24' : '1.5px solid #E2E8F0',
+                                      borderRadius: '7px', padding: '0 6px',
+                                      backgroundColor: currentDisplayedDate ? '#FFFBEB' : '#F1F5F9',
+                                      boxShadow: currentDisplayedDate ? '0 0 0 1px rgba(251, 191, 36, 0.15)' : 'none',
+                                      boxSizing: 'border-box',
+                                    }}>
+                                      <span style={{ fontSize: '11px', color: currentDisplayedDate ? '#B45309' : '#94A3B8', fontWeight: '700', flexShrink: 0 }}>&#8377;</span>
                                       <input
                                         type="text"
                                         inputMode="numeric"
                                         pattern="[0-9]*"
                                         placeholder={t('advance')}
+                                        readOnly={!currentDisplayedDate}
                                         value={pendingAdvanceByDate[currentDisplayedDate]?.[worker.id] ?? ''}
                                         onFocus={handleAdvanceInputFocus}
                                         onClick={handleAdvanceInputFocus}
                                         onChange={(e) => handleIndividualAdvanceChange(worker.id, e.target.value)}
-                                        style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: '#92400E', boxSizing: 'border-box' }}
+                                        style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: currentDisplayedDate ? '#92400E' : '#94A3B8', boxSizing: 'border-box', cursor: currentDisplayedDate ? 'text' : 'pointer' }}
                                       />
                                     </div>
                                   </div>
@@ -3090,7 +3292,18 @@ useEffect(() => {
                       </div>
 
                       <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderTop: '1px solid #E2E8F0', flexShrink: 0, boxSizing: 'border-box' }}>
-                        <button onClick={handleSaveAttendanceData} disabled={isSavingAttendance} style={{ width: '100%', minHeight: '48px', padding: '14px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontWeight: '600', fontSize: '15px', cursor: isSavingAttendance ? 'default' : 'pointer', opacity: isSavingAttendance ? 0.7 : 1, boxSizing: 'border-box', flexShrink: 0 }}>{isSavingAttendance ? '...' : t('saveAttendance')}</button>
+                        <button
+                          onClick={handleSaveAttendanceData}
+                          disabled={isSavingAttendance}
+                          style={{
+                            width: '100%', minHeight: '48px', padding: '14px',
+                            backgroundColor: !currentDisplayedDate ? '#E2E8F0' : '#0B3C9B',
+                            color: !currentDisplayedDate ? '#94A3B8' : '#ffffff',
+                            border: 'none', borderRadius: '12px', fontWeight: '600', fontSize: '15px',
+                            cursor: isSavingAttendance ? 'default' : 'pointer',
+                            opacity: isSavingAttendance ? 0.7 : 1, boxSizing: 'border-box', flexShrink: 0,
+                          }}
+                        >{isSavingAttendance ? '...' : t('saveAttendance')}</button>
                       </div>
 
                       {/* ============ ATTENDANCE TRACKER PAGE ============ */}
@@ -3657,20 +3870,27 @@ useEffect(() => {
                   {sortedWorkers.length > 0 ? (
                     sortedWorkers.map((worker) => {
                       const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
-                      const bgColors = ['#0070F3', '#10B981', '#7C3AED', '#F59E0B', '#EF4444'];
-                      const assignedBg = bgColors[worker.id % bgColors.length];
+                      const avatarColors = getEmployeeAvatarColors(worker.name);
                       return (
                         <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #F1F5F9', flexShrink: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: assignedBg, color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700' }}>{initials}</div>
+                            <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: avatarColors.bg, color: avatarColors.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', boxShadow: 'none', cursor: 'default' }}>{initials}</div>
                             <div>
                               <h5 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>{worker.name}</h5>
                               <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748B' }}>{worker.role || t('labor')} &bull; <span style={{ color: '#94A3B8' }}>{t('joined')} {worker.joiningDate ? new Date(worker.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '01 Jul'}</span></p>
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span onClick={() => handleEditWorkerInline(currentProject, worker)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px', filter: 'grayscale(1)' }} title={t('edit')}>&#9999;&#65039;</span>
-                            <span onClick={() => handleDeleteWorkerInline(currentProject.id, worker.id)} style={{ cursor: 'pointer', fontSize: '14px', padding: '4px', filter: 'grayscale(1)' }} title={t('delete')}>&#128465;&#65039;</span>
+                            <span
+                              onClick={() => handleEditWorkerInline(currentProject, worker)}
+                              style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                              title={t('edit')}
+                            >&#9999;&#65039;</span>
+                            <span
+                              onClick={() => handleDeleteWorkerInline(currentProject.id, worker.id)}
+                              style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#FEF2F2', color: '#F87171' }}
+                              title={t('delete')}
+                            >&#128465;&#65039;</span>
                           </div>
                         </div>
                       );
@@ -3801,7 +4021,7 @@ useEffect(() => {
 
           return (
             <div style={{
-              position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)',
+              position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)',
               backgroundColor: '#f4f6f9', zIndex: 1660, display: 'flex', flexDirection: 'column',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden'
             }}>
@@ -3862,8 +4082,7 @@ useEffect(() => {
                       const absoluteBalance = Math.abs(netOutstandingBalance);
 
                       const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
-                      const themeBgColors = ['#0070F3', '#10B981', '#7C3AED', '#F59E0B', '#EF4444'];
-                      const avatarColor = themeBgColors[worker.id % themeBgColors.length];
+                      const avatarColors = getEmployeeAvatarColors(worker.name);
 
                       return (
                         <div 
@@ -3878,9 +4097,10 @@ useEffect(() => {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
                             <div style={{
                               width: '36px', height: '36px', borderRadius: '50%',
-                              backgroundColor: avatarColor, color: '#ffffff',
+                              backgroundColor: avatarColors.bg, color: avatarColors.text,
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '12px', fontWeight: '700', flexShrink: 0
+                              fontSize: '12px', fontWeight: '700', flexShrink: 0,
+                              boxShadow: 'none', cursor: 'default'
                             }}>
                               {initials}
                             </div>
@@ -4007,7 +4227,7 @@ useEffect(() => {
                 const balanceForRange = dueForRange - advanceAmount - wagePaymentsForRange;
 
                 return (
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1000, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexShrink: 0, position: 'relative' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
                         <button onClick={() => setSelectedPaymentWorkerId(null)} style={{ background: 'none', border: 'none', fontSize: '24px', color: '#1E293B', cursor: 'pointer', padding: 0, flexShrink: 0 }}>&lsaquo;</button>
@@ -4023,6 +4243,7 @@ useEffect(() => {
                       <div style={{ flexShrink: 0, minWidth: '20px' }} />
                     </div>
 
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                     <div style={{ padding: '10px 14px 6px 14px', flexShrink: 0 }}>
                       <div style={{ backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '14px', marginBottom: '8px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '7px 2px' }}>
@@ -4059,7 +4280,7 @@ useEffect(() => {
                       </div>
 
                       {activePaymentForm && (
-                        <div style={{ backgroundColor: '#ffffff', border: `1px solid ${txnTypeMeta[activePaymentForm].color}33`, borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
+                        <div ref={paymentFormRef} style={{ backgroundColor: '#ffffff', border: `1px solid ${txnTypeMeta[activePaymentForm].color}33`, borderRadius: '12px', padding: '14px', marginBottom: '14px' }}>
                           <h3 style={{ fontSize: '13px', fontWeight: '700', color: txnTypeMeta[activePaymentForm].color, margin: '0 0 10px 0' }}>
                             {activePaymentForm === 'payment' ? t('payAmount') : t('addBonus')}
                           </h3>
@@ -4175,7 +4396,7 @@ useEffect(() => {
                       })()}
                     </div>
 
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 16px 64px 16px' }}>
+                    <div style={{ padding: '0 16px 64px 16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', paddingTop: '10px', marginBottom: '10px' }}>
                         <h3 style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('paymentHistory')}</h3>
                         <button
@@ -4237,6 +4458,7 @@ useEffect(() => {
                         <p style={{ fontSize: '12px', color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>{t('noTransactions')}</p>
                       )}
                     </div>
+                    </div>
                   </div>
                 );
               })()}
@@ -4244,13 +4466,23 @@ useEffect(() => {
           );
         })()}
         {isAddProjectOpen && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
             <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', borderBottom: '1px solid #F1F5F9' }}>
-              <button onClick={() => { setIsAddProjectOpen(false); setNewSiteName(''); setTempWorkersList([]); }} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
+              <button onClick={() => { setIsAddProjectOpen(false); setNewSiteName(''); setTempWorkersList([]); setIsNewProjectNameDuplicate(false); }} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
             </div>
             <div style={{ flex: 1, padding: '20px', overflowY: 'auto' }}>
               <div style={{ marginBottom: '24px' }}>
-                <input type="text" placeholder={t('enterProjectName')} value={newSiteName} onChange={(e) => setNewSiteName(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '14px', color: '#1E293B', backgroundColor: '#F8FAFC', outline: 'none', boxSizing: 'border-box' }} />
+                <input
+                  type="text"
+                  placeholder={t('enterProjectName')}
+                  value={newSiteName}
+                  onChange={(e) => { setNewSiteName(e.target.value); if (isNewProjectNameDuplicate) setIsNewProjectNameDuplicate(false); }}
+                  onBlur={handleProjectNameBlur}
+                  style={{ width: '100%', padding: '14px', borderRadius: '10px', border: isNewProjectNameDuplicate ? '1.5px solid #EF4444' : '1px solid #CBD5E1', fontSize: '14px', color: '#1E293B', backgroundColor: '#F8FAFC', outline: 'none', boxSizing: 'border-box' }}
+                />
+                {isNewProjectNameDuplicate && (
+                  <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#DC2626', fontWeight: '600' }}>{t('projectNameDuplicateInline')}</p>
+                )}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <span style={{ fontSize: '14px', fontWeight: '700', color: '#1E293B' }}>{t('employees')}</span>
@@ -4489,10 +4721,13 @@ useEffect(() => {
         </div>
 
         {(() => {
-          const isHomeTabActive = !activeSiteViewId && !isProjectPickerOpen && !isSubscribePageOpen;
           const isAttendanceTabActive = isAttendanceModalOpen || (isProjectPickerOpen && projectPickerPurpose === 'attendance');
           const isPaymentsTabActive = isPaymentsPageOpen || (isProjectPickerOpen && projectPickerPurpose === 'payments');
           const isSubscribeTabActive = isSubscribePageOpen;
+          // Home stays highlighted for anything that belongs to the Home section
+          // (including viewing an individual project via "My Projects"), and only
+          // yields to another tab when that tab is genuinely active.
+          const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive && !isSubscribeTabActive;
 
           const goHome = () => {
             setActiveSiteViewId(null);
@@ -4516,6 +4751,8 @@ useEffect(() => {
             setProjectPickerDropdown('');
             setIsProjectPickerOpen(true);
           };
+
+          if (isKeyboardOpen) return null;
 
           return (
             <div style={themeStyles.bottomDockNavBar}>
@@ -4555,7 +4792,7 @@ useEffect(() => {
             }
           };
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
               <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ ...themeStyles.searchBarContainer, flex: 1 }}>
                   <span style={themeStyles.searchIconMarker}>&#128269;</span>
@@ -4617,7 +4854,7 @@ useEffect(() => {
             }
           ];
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
               <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                 <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscribe now</h2>
                 <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>Pick a plan that fits how many projects and employees you manage</p>
@@ -5168,8 +5405,11 @@ const themeStyles = {
   payoutLabel: { fontSize: '11px', color: '#94A3B8', fontWeight: '500' },
   payoutPercentageText: { fontSize: '11px', color: '#475569', fontWeight: '600' },
   bottomDockNavBar: { position: 'fixed', bottom: 0, left: 0, width: '100%', height: '64px', backgroundColor: '#ffffff', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-around', alignItems: 'center', boxSizing: 'border-box', zIndex: 1600 },
-  navItemTab: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8' },
-  navItemTabActive: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', background: 'none', border: 'none', cursor: 'pointer', color: '#0B3C9B' },
+  // Unselected tabs keep their normal, full-color look (no greying out) — they
+  // just sit on a transparent background. The selected tab gets a light-blue
+  // pill behind it so it's clearly the active one, without dulling the rest.
+  navItemTab: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', background: 'none', border: 'none', cursor: 'pointer', color: '#334155', padding: '6px 14px', borderRadius: '16px', transition: 'background-color 0.15s ease, color 0.15s ease' },
+  navItemTabActive: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', background: '#DBEAFE', border: 'none', cursor: 'pointer', color: '#0B3C9B', padding: '6px 14px', borderRadius: '16px', transition: 'background-color 0.15s ease, color 0.15s ease' },
   navTabIcon: { fontSize: '18px' },
   navTabLabel: { fontSize: '10px', fontWeight: '600' }
 };

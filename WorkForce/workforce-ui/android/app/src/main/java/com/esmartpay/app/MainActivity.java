@@ -1,4 +1,4 @@
-package com.akash.workforce;
+package com.esmartpay.app;
 
 import com.getcapacitor.BridgeActivity;
 
