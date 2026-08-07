@@ -28,6 +28,10 @@ const translations = {
     navAttendance: 'Attendance', 
     navPayments: 'Payments', 
     navSubscribe: 'Subscribe',
+    navHelp: 'Help',
+    helpPageTitle: 'Help & Support',
+    helpPageSubtitle: 'Stuck somewhere? Call our support team directly.',
+    helpCallNow: 'Tap a number to call',
     watchVideo: 'Video',
     
     // Dashboard
@@ -234,6 +238,10 @@ const translations = {
     navAttendance: 'उपस्थिति',
     navPayments: 'भुगतान',
     navSubscribe: 'सदस्यता',
+    navHelp: 'सहायता',
+    helpPageTitle: 'सहायता और समर्थन',
+    helpPageSubtitle: 'कहीं अटक गए हैं? सीधे हमारी सहायता टीम को कॉल करें।',
+    helpCallNow: 'कॉल करने के लिए नंबर पर टैप करें',
     watchVideo: 'वीडियो',
     
     // Dashboard
@@ -938,6 +946,7 @@ const paymentService = {
   const [projectPickerDropdown, setProjectPickerDropdown] = useState('');
   const [isSubscribePageOpen, setIsSubscribePageOpen] = useState(false);
   const [selectedSubscriptionPlan, setSelectedSubscriptionPlan] = useState('pro');
+  const [isHelpPageOpen, setIsHelpPageOpen] = useState(false);
 
   const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
   const [editProjectNameInput, setEditProjectNameInput] = useState('');
@@ -1000,6 +1009,10 @@ const paymentService = {
       setIsSubscribePageOpen(false);
       return true;
     }
+    if (isHelpPageOpen) {
+      setIsHelpPageOpen(false);
+      return true;
+    }
     return false;
   };
 
@@ -1051,7 +1064,8 @@ const paymentService = {
                           isAttendanceModalOpen || 
                           isPaymentsPageOpen || 
                           activeSiteViewId || 
-                          isSubscribePageOpen;
+                          isSubscribePageOpen ||
+                          isHelpPageOpen;
 
     if (hasOpenScreens) {
       window.history.pushState({ appGuard: true, timestamp: Date.now() }, '');
@@ -1069,7 +1083,8 @@ const paymentService = {
       isAttendanceModalOpen, 
       isPaymentsPageOpen, 
       activeSiteViewId, 
-      isSubscribePageOpen]);
+      isSubscribePageOpen,
+      isHelpPageOpen]);
 
   useEffect(() => {
     if (!isUserAuthenticated) return;
@@ -4724,10 +4739,11 @@ useEffect(() => {
           const isAttendanceTabActive = isAttendanceModalOpen || (isProjectPickerOpen && projectPickerPurpose === 'attendance');
           const isPaymentsTabActive = isPaymentsPageOpen || (isProjectPickerOpen && projectPickerPurpose === 'payments');
           const isSubscribeTabActive = isSubscribePageOpen;
+          const isHelpTabActive = isHelpPageOpen;
           // Home stays highlighted for anything that belongs to the Home section
           // (including viewing an individual project via "My Projects"), and only
           // yields to another tab when that tab is genuinely active.
-          const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive && !isSubscribeTabActive;
+          const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive && !isSubscribeTabActive && !isHelpTabActive;
 
           const goHome = () => {
             setActiveSiteViewId(null);
@@ -4739,6 +4755,7 @@ useEffect(() => {
             setIsEditWageModalOpen(false);
             setIsProjectPickerOpen(false);
             setIsSubscribePageOpen(false);
+            setIsHelpPageOpen(false);
           };
           const openPicker = (purpose) => {
             setActiveSiteViewId(null);
@@ -4746,6 +4763,7 @@ useEffect(() => {
             setIsAttendanceModalOpen(false);
             setIsAddProjectOpen(false);
             setIsSubscribePageOpen(false);
+            setIsHelpPageOpen(false);
             setProjectPickerPurpose(purpose);
             setProjectPickerSearch('');
             setProjectPickerDropdown('');
@@ -4768,9 +4786,13 @@ useEffect(() => {
                 <span style={themeStyles.navTabIcon}>&#128176;</span>
                 <span style={themeStyles.navTabLabel}>{t('navPayments')}</span>
               </button>
-              <button style={isSubscribeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsSubscribePageOpen(true); }}>
+              <button style={isSubscribeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsHelpPageOpen(false); setIsSubscribePageOpen(true); }}>
                 <span style={themeStyles.navTabIcon}>&#11088;</span>
                 <span style={themeStyles.navTabLabel}>{t('navSubscribe')}</span>
+              </button>
+              <button style={isHelpTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsSubscribePageOpen(false); setIsHelpPageOpen(true); }}>
+                <span style={themeStyles.navTabIcon}>&#128222;</span>
+                <span style={themeStyles.navTabLabel}>{t('navHelp')}</span>
               </button>
             </div>
           );
@@ -4918,7 +4940,41 @@ useEffect(() => {
           );
         })()}
 
-       
+        {isHelpPageOpen && (() => {
+          const helpNumbers = ['+91 8237580362', '+91 9325461043'];
+          return (
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
+                <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('helpPageTitle')}</h2>
+                <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>{t('helpPageSubtitle')}</p>
+              </div>
+
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px' }}>
+                <p style={{ fontSize: '12px', color: '#94A3B8', fontWeight: '600', margin: '0 0 10px 4px', textTransform: 'uppercase', letterSpacing: '0.02em' }}>{t('helpCallNow')}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {helpNumbers.map((number) => (
+                    <a
+                      key={number}
+                      href={`tel:${number.replace(/\s+/g, '')}`}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '14px',
+                        backgroundColor: '#ffffff', borderRadius: '16px', padding: '16px',
+                        border: '1px solid #F1F5F9', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                        textDecoration: 'none', cursor: 'pointer',
+                      }}
+                    >
+                      <span style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#E4EAFC', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <FiPhone size={18} color="#0B3C9B" />
+                      </span>
+                      <span style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A' }}>{number}</span>
+                      <span style={{ marginLeft: 'auto', color: '#94A3B8', fontSize: '14px' }}>&#8250;</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {isProfileModalOpen && (
           <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px', boxSizing: 'border-box' }}>
