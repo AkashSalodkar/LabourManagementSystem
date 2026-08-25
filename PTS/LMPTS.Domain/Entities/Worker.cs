@@ -32,6 +32,11 @@ namespace LMPTS.Domain.Entities
         [Column(TypeName = "datetime")]
         public DateTime LastUpdatedAt { get; set; } = DateTime.UtcNow;
 
+        // Employment status — distinct from the inherited BaseEntity.IsActive, which is
+        // the soft-delete flag. This tracks whether the worker is currently active or has
+        // been deactivated (e.g. on leave), independent of whether their record was deleted.
+        public bool IsCurrentlyActive { get; set; } = true;
+
         [Required]
         public int ProjectId { get; set; }
 
@@ -45,5 +50,6 @@ namespace LMPTS.Domain.Entities
         public virtual ICollection<WorkerAdvance> Advances { get; set; } = new List<WorkerAdvance>();
         public virtual ICollection<WorkerBonus> Bonuses { get; set; } = new List<WorkerBonus>();
         public virtual ICollection<WorkerMonthlyStatement> MonthlyStatements { get; set; } = new List<WorkerMonthlyStatement>();
+        public virtual ICollection<WorkerInactivePeriod> InactivePeriods { get; set; } = new List<WorkerInactivePeriod>();
     }
 }

@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using LMPTS.Application.DTOs;
 using LMPTS.Domain.Entities;
 using LMPTS.Infrastructure.Data;
+using LMPTS.Infrastructure.Sms;
+using FirebaseAdmin.Auth;
 
 namespace LMPTS.API.Controllers
 {
@@ -12,11 +14,50 @@ namespace LMPTS.API.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AuthController> _logger;
+        private readonly ISmsService _smsService;
 
-        public AuthController(ApplicationDbContext context, ILogger<AuthController> logger)
+        public AuthController(ApplicationDbContext context, ILogger<AuthController> logger, ISmsService smsService)
         {
             _context = context;
             _logger = logger;
+            _smsService = smsService;
+        }
+
+        // Verifies the Firebase ID token and confirms the phone number Firebase verified
+        // actually matches the mobile number the client claims to be registering/logging in with.
+        // Returns null on success, or an IActionResult to return immediately on failure.
+        private async Task<IActionResult?> VerifyFirebasePhoneAsync(string idToken, string expectedMobileNumber)
+        {
+            if (string.IsNullOrWhiteSpace(idToken))
+            {
+                return BadRequest(new { message = "Verification token is required." });
+            }
+
+            FirebaseToken decodedToken;
+            try
+            {
+                decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(idToken);
+            }
+            catch (FirebaseAuthException ex)
+            {
+                _logger.LogWarning(ex, "Firebase ID token verification failed");
+                return Unauthorized(new { message = "Invalid or expired verification. Please request a new OTP." });
+            }
+
+            if (!decodedToken.Claims.TryGetValue("phone_number", out var phoneClaim) || phoneClaim == null)
+            {
+                return Unauthorized(new { message = "This verification is not associated with a phone number." });
+            }
+
+            var verifiedPhone = phoneClaim.ToString() ?? string.Empty;
+            var normalizedVerifiedPhone = verifiedPhone.StartsWith("+91") ? verifiedPhone.Substring(3) : verifiedPhone;
+
+            if (normalizedVerifiedPhone != expectedMobileNumber)
+            {
+                return Unauthorized(new { message = "Verified phone number does not match the number provided." });
+            }
+
+            return null;
         }
 
         [HttpPost("send-otp")]
@@ -72,12 +113,20 @@ namespace LMPTS.API.Controllers
 
                 await _context.SaveChangesAsync();
 
-                _logger.LogInformation($"OTP generated for {mobileNumber}: {generatedOtp}");
+                _logger.LogInformation("OTP generated for {Mobile}", mobileNumber);
+
+                var smsSent = await _smsService.SendOtpAsync(mobileNumber, generatedOtp);
+
+                if (!smsSent)
+                {
+                    _logger.LogError("Failed to send OTP SMS to {Mobile}", mobileNumber);
+                    return StatusCode(502, new { message = "Could not send OTP SMS. Please try again shortly." });
+                }
 
                 return Ok(new OtpResponseDto
                 {
-                    Message = "OTP sent successfully.",
-                    DebugOtp = generatedOtp // Remove in production
+                    Message = "OTP sent successfully."
+                    // ✅ DebugOtp removed - never return the OTP itself in the API response in production.
                 });
             }
             catch (Exception ex)
@@ -109,18 +158,11 @@ namespace LMPTS.API.Controllers
                     return BadRequest(new { message = "This mobile number is already registered." });
                 }
 
-                // Verify OTP
-                var validOtp = await _context.UserOtps
-                    .FirstOrDefaultAsync(o => o.MobileNumber == mobileNumber && o.OtpCode == request.Otp);
-
-                if (validOtp == null)
+                // Verify the Firebase ID token instead of matching a stored OTP.
+                var verificationError = await VerifyFirebasePhoneAsync(request.IdToken, mobileNumber);
+                if (verificationError != null)
                 {
-                    return BadRequest(new { message = "Invalid OTP. Please request a new code." });
-                }
-
-                if (validOtp.ExpiryTime < DateTime.UtcNow)
-                {
-                    return BadRequest(new { message = "OTP has expired. Please request a new code." });
+                    return verificationError;
                 }
 
                 // Create user
@@ -136,9 +178,6 @@ namespace LMPTS.API.Controllers
                 };
 
                 await _context.Users.AddAsync(user);
-
-                // Remove used OTP
-                _context.UserOtps.Remove(validOtp);
 
                 await _context.SaveChangesAsync();
 
@@ -162,7 +201,8 @@ namespace LMPTS.API.Controllers
                     MobileNumber = user.MobileNumber,
                     Industry = user.Industry,
                     Role = user.Role.ToString(),
-                    IsVerified = user.IsVerified
+                    IsVerified = user.IsVerified,
+                    ProfileImage = user.ProfileImage
                 });
             }
             catch (Exception ex)
@@ -186,18 +226,11 @@ namespace LMPTS.API.Controllers
                 var mobileNumber = request.MobileNumber.Trim();
                 if (mobileNumber.StartsWith("+91")) mobileNumber = mobileNumber.Substring(3);
 
-                // Verify OTP
-                var validOtp = await _context.UserOtps
-                    .FirstOrDefaultAsync(o => o.MobileNumber == mobileNumber && o.OtpCode == request.Otp);
-
-                if (validOtp == null)
+                // Verify the Firebase ID token instead of matching a stored OTP.
+                var verificationError = await VerifyFirebasePhoneAsync(request.IdToken, mobileNumber);
+                if (verificationError != null)
                 {
-                    return BadRequest(new { message = "Invalid OTP. Please request a new code." });
-                }
-
-                if (validOtp.ExpiryTime < DateTime.UtcNow)
-                {
-                    return BadRequest(new { message = "OTP has expired. Please request a new code." });
+                    return verificationError;
                 }
 
                 // Find user
@@ -209,8 +242,57 @@ namespace LMPTS.API.Controllers
                     return Unauthorized(new { message = "Account not found. Please register first." });
                 }
 
-                // Remove used OTP
-                _context.UserOtps.Remove(validOtp);
+                return Ok(new AuthResponseDto
+                {
+                    UserId = user.Id,
+                    FullName = user.FullName,
+                    MobileNumber = user.MobileNumber,
+                    Industry = user.Industry,
+                    Role = user.Role.ToString(),
+                    IsVerified = user.IsVerified,
+                    ProfileImage = user.ProfileImage
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error logging in");
+                return StatusCode(500, new { message = "An error occurred during login." });
+            }
+        }
+
+        [HttpPut("profile/{userId}")]
+        public async Task<IActionResult> UpdateProfile(int userId, [FromBody] UpdateProfileRequestDto request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.FullName))
+            {
+                return BadRequest(new { message = "Full name is required." });
+            }
+
+            // Stop-gap size guard: a base64 data URL over ~2MB shouldn't be stored inline in the
+            // Users table. For real production use, swap this for upload-to-blob-storage-and-store-URL.
+            const int maxBase64Length = 2 * 1024 * 1024;
+            if (request.ProfileImage != null && request.ProfileImage.Length > maxBase64Length)
+            {
+                return BadRequest(new { message = "Profile image is too large. Please choose a smaller photo." });
+            }
+
+            try
+            {
+                var user = await _context.Users.FindAsync(userId);
+                if (user == null)
+                {
+                    return NotFound(new { message = "User not found." });
+                }
+
+                user.FullName = request.FullName.Trim();
+
+                // Empty string means "no change" (client didn't pick a new photo);
+                // an explicit new data URL replaces the stored photo.
+                if (!string.IsNullOrEmpty(request.ProfileImage))
+                {
+                    user.ProfileImage = request.ProfileImage;
+                }
+
                 await _context.SaveChangesAsync();
 
                 return Ok(new AuthResponseDto
@@ -220,13 +302,14 @@ namespace LMPTS.API.Controllers
                     MobileNumber = user.MobileNumber,
                     Industry = user.Industry,
                     Role = user.Role.ToString(),
-                    IsVerified = user.IsVerified
+                    IsVerified = user.IsVerified,
+                    ProfileImage = user.ProfileImage
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error logging in");
-                return StatusCode(500, new { message = "An error occurred during login." });
+                _logger.LogError(ex, "Error updating profile for user {UserId}", userId);
+                return StatusCode(500, new { message = "An error occurred while updating your profile." });
             }
         }
 

@@ -38,8 +38,7 @@ namespace LMPTS.Application.DTOs
         public string? Industry { get; set; }
 
         [Required]
-        [MaxLength(6)]
-        public string Otp { get; set; } = string.Empty;
+        public string IdToken { get; set; } = string.Empty;
     }
 
     public class LoginRequestDto
@@ -49,8 +48,7 @@ namespace LMPTS.Application.DTOs
         public string MobileNumber { get; set; } = string.Empty;
 
         [Required]
-        [MaxLength(6)]
-        public string Otp { get; set; } = string.Empty;
+        public string IdToken { get; set; } = string.Empty;
     }
 
     public class AuthResponseDto
@@ -62,6 +60,18 @@ namespace LMPTS.Application.DTOs
         public string Role { get; set; } = string.Empty;
         public bool IsVerified { get; set; }
         public string? Token { get; set; }
+        public string? ProfileImage { get; set; }
+    }
+
+    public class UpdateProfileRequestDto
+    {
+        [Required]
+        [MaxLength(100)]
+        public string FullName { get; set; } = string.Empty;
+
+        // Base64 data URL (e.g. "data:image/jpeg;base64,...") sent from the client,
+        // or null/empty to leave the existing photo unchanged.
+        public string? ProfileImage { get; set; }
     }
 
     public class OtpResponseDto

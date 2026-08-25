@@ -31,6 +31,7 @@ namespace LMPTS.API.Controllers
                     .Include(w => w.Payments)
                     .Include(w => w.Advances)
                     .Include(w => w.Bonuses)
+                    .Include(w => w.InactivePeriods)
                     .Select(w => MapToWorkerResponse(w))
                     .ToListAsync();
 
@@ -54,6 +55,7 @@ namespace LMPTS.API.Controllers
                     .Include(w => w.Payments)
                     .Include(w => w.Advances)
                     .Include(w => w.Bonuses)
+                    .Include(w => w.InactivePeriods)
                     .FirstOrDefaultAsync(w => w.Id == id && w.IsActive);
 
                 if (worker == null)
@@ -109,6 +111,7 @@ namespace LMPTS.API.Controllers
                     .Include(w => w.Payments)
                     .Include(w => w.Advances)
                     .Include(w => w.Bonuses)
+                    .Include(w => w.InactivePeriods)
                     .FirstOrDefaultAsync(w => w.Id == worker.Id);
 
                 return CreatedAtAction(nameof(GetWorker), new { id = worker.Id }, MapToWorkerResponse(createdWorker));
@@ -215,6 +218,84 @@ namespace LMPTS.API.Controllers
             }
         }
 
+        [HttpPut("{id}/deactivate")]
+        public async Task<IActionResult> DeactivateWorker(int id, [FromBody] DeactivateWorkerRequestDto request)
+        {
+            try
+            {
+                var worker = await _context.Workers
+                    .Include(w => w.InactivePeriods)
+                    .FirstOrDefaultAsync(w => w.Id == id && w.IsActive);
+
+                if (worker == null)
+                {
+                    return NotFound(new { message = "Worker not found." });
+                }
+
+                worker.IsCurrentlyActive = false;
+                worker.LastUpdatedAt = DateTime.UtcNow;
+
+                var period = new WorkerInactivePeriod
+                {
+                    WorkerId = id,
+                    DeactivatedOn = request.DeactivationDate.Date,
+                    ReactivatedOn = null
+                };
+                _context.WorkerInactivePeriods.Add(period);
+
+                _context.Workers.Update(worker);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Worker deactivated successfully." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error deactivating worker {id}");
+                return StatusCode(500, new { message = "An error occurred while deactivating the worker." });
+            }
+        }
+
+        [HttpPut("{id}/activate")]
+        public async Task<IActionResult> ActivateWorker(int id, [FromBody] ActivateWorkerRequestDto request)
+        {
+            try
+            {
+                var worker = await _context.Workers
+                    .Include(w => w.InactivePeriods)
+                    .FirstOrDefaultAsync(w => w.Id == id && w.IsActive);
+
+                if (worker == null)
+                {
+                    return NotFound(new { message = "Worker not found." });
+                }
+
+                worker.IsCurrentlyActive = true;
+                worker.LastUpdatedAt = DateTime.UtcNow;
+
+                // Close out the most recent open inactive period — mirrors the
+                // frontend's own "last open period" logic so both stay in sync.
+                var openPeriod = worker.InactivePeriods
+                    .Where(p => p.ReactivatedOn == null)
+                    .OrderByDescending(p => p.DeactivatedOn)
+                    .FirstOrDefault();
+
+                if (openPeriod != null)
+                {
+                    openPeriod.ReactivatedOn = request.ActivationDate.Date;
+                }
+
+                _context.Workers.Update(worker);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Worker activated successfully." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Error activating worker {id}");
+                return StatusCode(500, new { message = "An error occurred while activating the worker." });
+            }
+        }
+
         // Helper Methods
         private WorkerResponseDto MapToWorkerResponse(Worker worker)
         {
@@ -236,7 +317,17 @@ namespace LMPTS.API.Controllers
                 Advance = worker.Advance,
                 Bonus = worker.Bonus,
                 LastUpdatedAt = worker.LastUpdatedAt.ToString("yyyy-MM-dd"),
-                IsActive = worker.IsActive,
+                // NOTE: worker.IsActive is the soft-delete flag (see DeleteWorker) — it must
+                // never be surfaced here. IsCurrentlyActive is the deactivate/activate status
+                // this endpoint pair manages, and is what the frontend's `isActive` field means.
+                IsActive = worker.IsCurrentlyActive,
+                InactivePeriods = worker.InactivePeriods?
+                    .OrderBy(p => p.DeactivatedOn)
+                    .Select(p => new InactivePeriodDto
+                    {
+                        DeactivatedOn = p.DeactivatedOn.ToString("yyyy-MM-dd"),
+                        ReactivatedOn = p.ReactivatedOn?.ToString("yyyy-MM-dd")
+                    }).ToList() ?? new List<InactivePeriodDto>(),
                 ProjectId = worker.ProjectId,
                 Attendance = attendance,
                 WageOverrides = worker.WageOverrides?.Select(w => new WorkerWageOverrideDto

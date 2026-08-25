@@ -38,6 +38,8 @@ namespace LMPTS.API.Controllers
                         .ThenInclude(w => w.Advances)
                     .Include(p => p.Workers)
                         .ThenInclude(w => w.Bonuses)
+                    .Include(p => p.Workers)
+                        .ThenInclude(w => w.InactivePeriods)
                     .ToListAsync();
 
                 _logger.LogInformation($"Found {projects.Count} projects for user {userId}");
@@ -90,6 +92,8 @@ namespace LMPTS.API.Controllers
                         .ThenInclude(w => w.Advances)
                     .Include(p => p.Workers)
                         .ThenInclude(w => w.Bonuses)
+                    .Include(p => p.Workers)
+                        .ThenInclude(w => w.InactivePeriods)
                     .FirstOrDefaultAsync(p => p.Id == id && p.IsActive);
 
                 if (project == null)
@@ -263,7 +267,18 @@ namespace LMPTS.API.Controllers
                 Advance = worker.Advance,
                 Bonus = worker.Bonus,
                 LastUpdatedAt = worker.LastUpdatedAt.ToString("yyyy-MM-dd"),
-                IsActive = worker.IsActive,
+                // NOTE: worker.IsActive is the soft-delete flag (see WorkerController.DeleteWorker)
+                // — it must never be surfaced here. IsCurrentlyActive is the deactivate/activate
+                // status managed by WorkerController's deactivate/activate endpoints, and is what
+                // the frontend's `isActive` field means.
+                IsActive = worker.IsCurrentlyActive,
+                InactivePeriods = worker.InactivePeriods?
+                    .OrderBy(p => p.DeactivatedOn)
+                    .Select(p => new InactivePeriodDto
+                    {
+                        DeactivatedOn = p.DeactivatedOn.ToString("yyyy-MM-dd"),
+                        ReactivatedOn = p.ReactivatedOn?.ToString("yyyy-MM-dd")
+                    }).ToList() ?? new List<InactivePeriodDto>(),
                 ProjectId = worker.ProjectId,
                 Attendance = attendance,
                 WageOverrides = worker.WageOverrides?.Select(w => new WorkerWageOverrideDto

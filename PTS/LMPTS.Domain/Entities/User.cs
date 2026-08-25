@@ -17,6 +17,10 @@ namespace LMPTS.Domain.Entities
         [MaxLength(50)]
         public string? Industry { get; set; }
 
+        // Base64 data URL of the user's profile photo (e.g. "data:image/jpeg;base64,...").
+        // Stored inline for now - move to blob storage + URL if this needs to scale.
+        public string? ProfileImage { get; set; }
+
         public bool IsVerified { get; set; } = false;
 
         public UserRole Role { get; set; } = UserRole.Supervisor;

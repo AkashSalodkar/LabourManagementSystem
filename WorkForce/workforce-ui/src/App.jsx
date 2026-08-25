@@ -6646,49 +6646,14 @@ const paymentService = {
     };
   }, []);
 
-  // ✅ Checks with the backend whether a mobile number is already registered.
-  // Used right after the user types the number - BEFORE we ever call Firebase to
-  // send an OTP - so a duplicate (on Register) or unknown (on Login) number is
-  // caught immediately instead of after the user goes through the whole OTP flow.
-  // NOTE: this expects a backend endpoint `GET {API_BASE_URL}/check-mobile/{mobileNumber}`
-  // that returns JSON like { "exists": true } / { "exists": false }. Adjust the path/
-  // response field below if your backend route or shape differs.
-  const checkMobileNumberExists = async (number) => {
-    const response = await fetch(`${API_BASE_URL}/check-mobile/${number}`, {
-      method: 'GET',
-      credentials: 'include',
-    });
-    if (!response.ok) { throw new Error('Could not verify mobile number. Please try again.'); }
-    const data = await response.json();
-    return !!data.exists;
-  };
-
+  // Registration-status ("already registered" / "not registered") is now enforced
+  // by the backend's register/login endpoints themselves after OTP verification,
+  // rather than via a separate pre-check call before sending the OTP.
   const handleSendOtp = async () => {
     if (!isLoginView && !isRegistrationFormValid()) { showAlert('Please fill all registration details accurately.'); return; }
     if (!mobileNumber || !isValidMobileNumber(mobileNumber)) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
-      // 0. Registration-status check happens first, before any OTP is sent.
-      let numberExists;
-      try {
-        numberExists = await checkMobileNumberExists(mobileNumber.trim());
-      } catch (checkError) {
-        console.error('Mobile check error:', checkError);
-        showAlert(checkError?.message || 'Could not verify mobile number. Please try again.');
-        setSendingOtp(false);
-        return;
-      }
-      if (!isLoginView && numberExists) {
-        showAlert('This mobile number is already registered.');
-        setSendingOtp(false);
-        return;
-      }
-      if (isLoginView && !numberExists) {
-        showAlert('This mobile number is not registered. Please register first.');
-        setSendingOtp(false);
-        return;
-      }
-
       if (Capacitor.getPlatform() === 'web') {
         // @capacitor-firebase/authentication's signInWithPhoneNumber only supports
         // Android/iOS - on web we talk to the Firebase JS SDK directly instead.

@@ -11,6 +11,7 @@ namespace LMPTS.Application.DTOs
         public decimal DailyWage { get; set; }
         public string Role { get; set; }
         public bool IsActive { get; set; }
+        public List<InactivePeriodDto> InactivePeriods { get; set; }
         public decimal Advance { get; set; }
         public decimal Bonus { get; set; }
         public int ProjectId { get; set; }
