@@ -1187,18 +1187,14 @@ const paymentService = {
   const renderImageCropperModal = () => {
     if (!imageCropper) return null;
     const cropTitle = imageCropper.key === 'signatureImg' ? 'Crop Signature' : 'Crop Photo';
-    const cropHint = imageCropper.key === 'signatureImg' ? ' \u2014 like removing extra white space.' : ' \u2014 like just your face.';
     // zIndex explicitly bumped above the shared modalOverlay (2000) so the cropper
     // always sits on top of whichever modal launched it - e.g. Update Profile (9999).
     return (
       <div style={{ ...customerModuleStyles.modalOverlay, zIndex: 10000 }} onClick={closeImageCropper}>
         <div style={{ background: '#ffffff', width: 'calc(100% - 40px)', maxWidth: '460px', borderRadius: '24px', padding: '20px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
-          <h3 style={{ fontSize: '17px', fontWeight: '700', color: '#0F172A', margin: '0 0 4px' }}>
+          <h3 style={{ fontSize: '17px', fontWeight: '700', color: '#0F172A', margin: '0 0 14px', textAlign: 'center' }}>
             {cropTitle}
           </h3>
-          <p style={{ fontSize: '12.5px', color: '#64748B', margin: '0 0 12px', lineHeight: '1.4' }}>
-            Drag the handles to keep only the part you want{cropHint}
-          </p>
           <div
             ref={cropContainerRef}
             style={{ position: 'relative', width: '100%', height: '300px', background: '#F1F5F9', borderRadius: '14px', overflow: 'hidden', touchAction: 'none' }}
@@ -1243,9 +1239,9 @@ const paymentService = {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
-            <button type="button" onClick={handleResetImageCrop} style={{ flex: 1, height: '46px', borderRadius: '14px', border: '1.5px solid #E2E8F0', background: '#ffffff', color: '#334155', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>Reset</button>
-            <button type="button" onClick={handleConfirmImageCrop} style={businessInfoStyles.modalSaveBtn}>Use Crop</button>
+          <div style={{ display: 'flex', gap: '14px', marginTop: '14px' }}>
+            <button type="button" onClick={closeImageCropper} style={{ flex: 1.3, height: '46px', borderRadius: '14px', border: '1.5px solid #E2E8F0', background: '#ffffff', color: '#334155', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+            <button type="button" onClick={handleConfirmImageCrop} style={{ ...businessInfoStyles.modalSaveBtn, width: 'auto', flex: 0.7, marginTop: 0 }}>Crop</button>
           </div>
         </div>
       </div>
@@ -16033,7 +16029,7 @@ const moduleHomeStyles = {
   greetTitle: { fontSize: '22px', fontWeight: '800', color: '#0F172A', margin: '0 0 4px 0', letterSpacing: '-0.3px' },
   greetSubtitle: { fontSize: '13.5px', color: '#64748B', margin: 0, fontWeight: '500' },
 
-  panel: { background: '#F3F5F9', borderRadius: '26px', padding: '18px 16px 20px', boxSizing: 'border-box' },
+  panel: { background: '#F1F2F6', borderRadius: '26px', padding: '18px 16px 20px', boxSizing: 'border-box' },
   panelLabel: { fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 14px 4px' },
 
   tileGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' },
@@ -16054,8 +16050,8 @@ const moduleHomeStyles = {
   tileSubtitle: { fontSize: '11.5px', fontWeight: '500', color: '#94A3B8', lineHeight: '1.35' },
   tilePlayBadge: {
     position: 'absolute', top: '10px', right: '10px', width: '26px', height: '26px', borderRadius: '50%',
-    background: 'rgba(15, 23, 42, 0.85)', border: 'none', cursor: 'pointer', color: '#ffffff',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', padding: 0, zIndex: 2,
+    background: 'transparent', border: 'none', cursor: 'pointer', color: '#F59E0B',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', padding: 0, zIndex: 2,
   },
 
   quickActionBtn: {
