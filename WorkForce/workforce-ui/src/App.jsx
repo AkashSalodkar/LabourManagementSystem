@@ -92,12 +92,19 @@ const translations = {
     navAttendance: 'Attendance', 
     navPayments: 'Payments', 
     navSubscribe: 'Subscribe',
+<<<<<<< HEAD
     navHelp: 'Contact Us',
     helpPageTitle: 'Contact Us',
     helpPageSubtitle: 'For any custom requirement or any issue related to the app, please contact us.',
     helpCallNow: 'Tap a number to call',
     letsChat: "Let's Chat",
     contactAppName: 'SmartManage',
+=======
+    navHelp: 'Help',
+    helpPageTitle: 'Help & Support',
+    helpPageSubtitle: 'Stuck somewhere? Call our support team directly.',
+    helpCallNow: 'Tap a number to call',
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
     watchVideo: 'Video',
     
     // Dashboard
@@ -305,12 +312,19 @@ const translations = {
     navAttendance: 'उपस्थिति',
     navPayments: 'भुगतान',
     navSubscribe: 'सदस्यता',
+<<<<<<< HEAD
     navHelp: 'संपर्क करें',
     helpPageTitle: 'संपर्क करें',
     helpPageSubtitle: 'ऐप से संबंधित किसी भी कस्टम आवश्यकता या समस्या के लिए, कृपया हमसे संपर्क करें।',
     helpCallNow: 'कॉल करने के लिए नंबर पर टैप करें',
     letsChat: 'चैट करें',
     contactAppName: 'SmartManage',
+=======
+    navHelp: 'सहायता',
+    helpPageTitle: 'सहायता और समर्थन',
+    helpPageSubtitle: 'कहीं अटक गए हैं? सीधे हमारी सहायता टीम को कॉल करें।',
+    helpCallNow: 'कॉल करने के लिए नंबर पर टैप करें',
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
     watchVideo: 'वीडियो',
     
     // Dashboard
@@ -5152,6 +5166,7 @@ const paymentService = {
       setIsHelpPageOpen(false);
       return true;
     }
+<<<<<<< HEAD
     // Quotations module: hardware back closes an open sheet/picker before stepping out of a sub-screen.
     if (showStatePicker) { setShowStatePicker(false); return true; }
     // Quotations module: hardware back steps out of a sub-screen before leaving the module.
@@ -5164,6 +5179,8 @@ const paymentService = {
       setActiveModule(null);
       return true;
     }
+=======
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
     return false;
   };
 
@@ -15546,10 +15563,19 @@ useEffect(() => {
         {(() => {
           const isAttendanceTabActive = isAttendanceModalOpen || (isProjectPickerOpen && projectPickerPurpose === 'attendance');
           const isPaymentsTabActive = isPaymentsPageOpen || (isProjectPickerOpen && projectPickerPurpose === 'payments');
+<<<<<<< HEAD
           // Home stays highlighted for anything that belongs to the Home section
           // (including viewing an individual project via "My Projects"), and only
           // yields to another tab when that tab is genuinely active.
           const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive;
+=======
+          const isSubscribeTabActive = isSubscribePageOpen;
+          const isHelpTabActive = isHelpPageOpen;
+          // Home stays highlighted for anything that belongs to the Home section
+          // (including viewing an individual project via "My Projects"), and only
+          // yields to another tab when that tab is genuinely active.
+          const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive && !isSubscribeTabActive && !isHelpTabActive;
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
 
           const goHome = () => {
             setActiveSiteViewId(null);
@@ -15560,12 +15586,22 @@ useEffect(() => {
             setIsWorkerSubFormOpen(false);
             setIsEditWageModalOpen(false);
             setIsProjectPickerOpen(false);
+<<<<<<< HEAD
+=======
+            setIsSubscribePageOpen(false);
+            setIsHelpPageOpen(false);
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
           };
           const openPicker = (purpose) => {
             setActiveSiteViewId(null);
             setIsPaymentsPageOpen(false);
             setIsAttendanceModalOpen(false);
             setIsAddProjectOpen(false);
+<<<<<<< HEAD
+=======
+            setIsSubscribePageOpen(false);
+            setIsHelpPageOpen(false);
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
             setProjectPickerPurpose(purpose);
             setProjectPickerSearch('');
             setProjectPickerDropdown('');
@@ -15588,6 +15624,17 @@ useEffect(() => {
                 <span style={themeStyles.navTabIcon}>&#128176;</span>
                 <span style={themeStyles.navTabLabel}>{t('navPayments')}</span>
               </button>
+<<<<<<< HEAD
+=======
+              <button style={isSubscribeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsHelpPageOpen(false); setIsSubscribePageOpen(true); }}>
+                <span style={themeStyles.navTabIcon}>&#11088;</span>
+                <span style={themeStyles.navTabLabel}>{t('navSubscribe')}</span>
+              </button>
+              <button style={isHelpTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsSubscribePageOpen(false); setIsHelpPageOpen(true); }}>
+                <span style={themeStyles.navTabIcon}>&#128222;</span>
+                <span style={themeStyles.navTabLabel}>{t('navHelp')}</span>
+              </button>
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
             </div>
           );
         })()}
@@ -15654,8 +15701,230 @@ useEffect(() => {
           );
         })()}
 
+<<<<<<< HEAD
         {renderProfileModal()}
           {renderImageCropperModal()}
+=======
+         {isSubscribePageOpen && (() => {
+          const plans = [
+            {
+              key: 'free', name: 'Free', price: 0, tagline: 'Try it out',
+              features: ['1 active project', 'Up to 5 workers', 'Manual attendance marking', 'Basic payment tracking']
+            },
+            {
+              key: 'pro', name: 'Pro', price: 299, tagline: 'For growing supervisors', popular: true,
+              features: ['Unlimited projects', 'Unlimited workers', 'Wage history & wage edits', 'Payment tracking + PDF statements', 'Priority email support']
+            },
+            {
+              key: 'business', name: 'Business', price: 799, tagline: 'For multi-site teams',
+              features: ['Everything in Pro', 'Multiple supervisor logins', 'Data export (CSV/Excel)', 'Dedicated priority support', 'Early access to new features']
+            }
+          ];
+          return (
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
+                <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscribe now</h2>
+                <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>Pick a plan that fits how many projects and employees you manage</p>
+              </div>
+
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {plans.map(plan => {
+                    const isSelected = selectedSubscriptionPlan === plan.key;
+                    return (
+                      <div key={plan.key} style={{
+                        backgroundColor: '#ffffff', borderRadius: '16px', padding: '18px',
+                        border: isSelected ? '2px solid #0B3C9B' : '1px solid #F1F5F9',
+                        boxShadow: plan.popular ? '0 4px 16px rgba(11,60,155,0.12)' : '0 2px 4px rgba(0,0,0,0.02)',
+                        position: 'relative'
+                      }}>
+                        {plan.popular && (
+                          <span style={{ position: 'absolute', top: '-10px', right: '18px', backgroundColor: '#0B3C9B', color: '#ffffff', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '20px' }}>MOST POPULAR</span>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{plan.name}</h3>
+                            <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>{plan.tagline}</p>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0B3C9B' }}>{plan.price === 0 ? 'Free' : `\u20B9${plan.price}`}</p>
+                            {plan.price > 0 && <span style={{ fontSize: '11px', color: '#94A3B8' }}>per month</span>}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '14px 0' }}>
+                          {plan.features.map((feature, idx) => (
+                            <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                              <span style={{ color: '#10B981', fontSize: '13px', marginTop: '1px' }}>&#10003;</span>
+                              <span style={{ fontSize: '13px', color: '#475569' }}>{feature}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setSelectedSubscriptionPlan(plan.key);
+                            showAlert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
+                          }}
+                          style={{
+                            width: '100%', padding: '13px', borderRadius: '12px', fontWeight: '600', fontSize: '14px', cursor: 'pointer',
+                            border: isSelected ? 'none' : '1px solid #0B3C9B',
+                            backgroundColor: isSelected ? '#0B3C9B' : '#ffffff',
+                            color: isSelected ? '#ffffff' : '#0B3C9B'
+                          }}
+                        >
+                          {isSelected ? 'Current plan' : plan.price === 0 ? 'Use Free plan' : `Choose ${plan.name}`}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'center', margin: '16px 0 4px 0' }}>Prices shown are illustrative. You can change or cancel your plan anytime.</p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {isHelpPageOpen && (() => {
+          const helpNumbers = ['+91 8237580362', '+91 9325461043'];
+          return (
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+              <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
+                <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('helpPageTitle')}</h2>
+                <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>{t('helpPageSubtitle')}</p>
+              </div>
+
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px' }}>
+                <p style={{ fontSize: '12px', color: '#94A3B8', fontWeight: '600', margin: '0 0 10px 4px', textTransform: 'uppercase', letterSpacing: '0.02em' }}>{t('helpCallNow')}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {helpNumbers.map((number) => (
+                    <a
+                      key={number}
+                      href={`tel:${number.replace(/\s+/g, '')}`}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '14px',
+                        backgroundColor: '#ffffff', borderRadius: '16px', padding: '16px',
+                        border: '1px solid #F1F5F9', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                        textDecoration: 'none', cursor: 'pointer',
+                      }}
+                    >
+                      <span style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#E4EAFC', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <FiPhone size={18} color="#0B3C9B" />
+                      </span>
+                      <span style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A' }}>{number}</span>
+                      <span style={{ marginLeft: 'auto', color: '#94A3B8', fontSize: '14px' }}>&#8250;</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {isProfileModalOpen && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px', boxSizing: 'border-box' }}>
+            <div style={{ backgroundColor: '#ffffff', padding: '28px 24px 24px 24px', borderRadius: '24px', width: '100%', maxWidth: '360px', boxSizing: 'border-box', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.3)' }}>
+              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', marginBottom: '22px' }}>
+                <h3 style={{ margin: 0, fontSize: '21px', fontWeight: '800', color: '#0F172A', textAlign: 'center' }}>{t('updateProfile')}</h3>
+                <button onClick={() => setIsProfileModalOpen(false)} style={{ position: 'absolute', right: 0, top: 0, background: '#F1F5F9', border: 'none', width: '28px', height: '28px', borderRadius: '50%', fontSize: '16px', cursor: 'pointer', color: '#64748B', padding: 0, lineHeight: 1, flexShrink: 0 }}>&times;</button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '22px' }}>
+                <label htmlFor="user-avatar-file-input" style={{ position: 'relative', cursor: 'pointer' }}>
+                  <div style={{ width: '96px', height: '96px', borderRadius: '50%', backgroundColor: '#F8FAFC', border: '3px solid #EFF4FF', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.12)' }}>
+                    {profileImg ? (<img src={profileImg} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : (
+                      loggedInUser?.fullName
+                        ? <span style={{ fontSize: '30px', fontWeight: '700', color: '#0B3C9B' }}>{loggedInUser.fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}</span>
+                        : <span style={{ fontSize: '30px' }}>&#128100;</span>
+                    )}
+                  </div>
+                  <div style={{ position: 'absolute', bottom: '2px', right: '2px', backgroundColor: '#0B3C9B', color: '#ffffff', borderRadius: '50%', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', border: '2.5px solid #ffffff', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}>&#128247;</div>
+                </label>
+                <input id="user-avatar-file-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setProfileImg(reader.result); // base64 data URL - safe to persist
+                  reader.readAsDataURL(file);
+                }} />
+                <span style={{ fontSize: '12px', color: '#64748B', marginTop: '10px', fontWeight: '500' }}>{t('tapToChangePhoto')}</span>
+              </div>
+
+              <div style={{ marginBottom: '22px' }}>
+                <label style={{ display: 'block', fontSize: '10.5px', fontWeight: '700', color: '#64748B', marginBottom: '7px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('yourName')}</label>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '0 14px', backgroundColor: '#F8FAFC' }}>
+                  <span style={{ fontSize: '15px', color: '#94A3B8', marginRight: '10px' }}>&#128100;</span>
+                  <input type="text" value={userName ?? loggedInUser?.fullName ?? ''} onChange={(e) => setUserName(e.target.value)} style={{ flex: 1, padding: '13px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '14.5px', color: '#1E293B' }} />
+                </div>
+              </div>
+
+              <button
+                disabled={isSavingProfile}
+                onClick={async () => {
+                  const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
+                  if (!trimmedName) { showAlert(t('yourName') + ' is required.'); return; }
+
+                  // No server-side user (e.g. dev/mock session) - fall back to local-only save.
+                  if (!loggedInUser?.userId) {
+                    setLoggedInUser(prev => {
+                      const updatedUser = { ...prev, fullName: trimmedName, profileImg };
+                      try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                      return updatedUser;
+                    });
+                    setIsProfileModalOpen(false);
+                    return;
+                  }
+
+                  setIsSavingProfile(true);
+                  try {
+                    const response = await fetch(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ fullName: trimmedName, profileImage: profileImg }),
+                    });
+                    const responseText = await response.text();
+                    let data = {};
+                    if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
+
+                    if (!response.ok) {
+                      showAlert(data.message || 'Failed to update profile. Please try again.');
+                      return;
+                    }
+
+                    const updatedUser = { ...loggedInUser, fullName: data.fullName, industry: data.industry, profileImg: data.profileImage };
+                    try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                    setLoggedInUser(updatedUser);
+                    setUserName(data.fullName);
+                    setProfileImg(data.profileImage || null);
+                    setIsProfileModalOpen(false);
+                  } catch (err) {
+                    showAlert('Could not reach the server. Please check your connection and try again.');
+                  } finally {
+                    setIsSavingProfile(false);
+                  }
+                }}
+                style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
+                <span>&#128190;</span>{isSavingProfile ? t('loading') || 'Saving...' : t('saveChanges')}
+              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '18px 0' }}>
+                <div style={{ flex: 1, height: '1px', backgroundColor: '#E2E8F0' }} />
+                <span style={{ fontSize: '11px', color: '#94A3B8', fontWeight: '600' }}>OR</span>
+                <div style={{ flex: 1, height: '1px', backgroundColor: '#E2E8F0' }} />
+              </div>
+
+              <button onClick={() => { setIsProfileModalOpen(false); handleFullLogout(); }} style={{ width: '100%', padding: '14px', backgroundColor: '#ffffff', color: '#DC2626', border: '1.5px solid #FCA5A5', borderRadius: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span>&#8618;</span>{t('signOut')}
+              </button>
+
+              <p style={{ margin: '16px 0 0 0', fontSize: '11px', color: '#94A3B8', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+                <span>&#128737;&#65039;</span>{t('yourDataIsSecure')}
+              </p>
+            </div>
+          </div>
+        )}
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
 
         {/* ============ EXIT CONFIRMATION ============ */}
         {renderExitConfirmPopup()}
@@ -16043,6 +16312,7 @@ const themeStyles = {
   navTabIcon: { fontSize: '18px' },
   navTabLabel: { fontSize: '10px', fontWeight: '600' }
 };
+<<<<<<< HEAD
 
 const moduleHomeStyles = {
   screen: {
@@ -16505,3 +16775,5 @@ const makeQuotationStyles = {
     fontSize: '15px', fontWeight: '700', color: '#0F172A', cursor: 'pointer',
   },
 };
+=======
+>>>>>>> d1de585a6c7714dac61dfe3ff77ecb3fa14dd053
