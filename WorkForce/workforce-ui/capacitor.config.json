@@ -1,5 +1,11 @@
 {
   "appId": "com.esmartpay.app",
-  "appName": "SmartManager",
-  "webDir": "dist"
+  "appName": "SmartManage",
+  "webDir": "dist",
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": false,
+      "providers": ["phone"]
+    }
+  }
 }

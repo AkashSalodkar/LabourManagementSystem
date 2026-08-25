@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">SmartManager</string>
-    <string name="title_activity_main">SmartManager</string>
+    <string name="app_name">SmartManage</string>
+    <string name="title_activity_main">SmartManage</string>
     <string name="package_name">com.esmartpay.app</string>
     <string name="custom_url_scheme">com.esmartpay.app</string>
 </resources>

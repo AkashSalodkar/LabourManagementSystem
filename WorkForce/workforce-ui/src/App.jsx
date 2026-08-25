@@ -1,15 +1,16 @@
 import './firebase';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber as firebaseSignInWithPhoneNumber } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Network } from '@capacitor/network';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
-import { FaEye, FaEyeSlash } from 'react-icons/fa';
-import { FiUser, FiPhone, FiChevronDown, FiArrowRight } from 'react-icons/fi';
+import { FaEye, FaEyeSlash, FaAddressBook, FaWhatsapp } from 'react-icons/fa';
+import { HiOutlineMail } from 'react-icons/hi';
+import { FiUser, FiPhone, FiChevronDown, FiArrowRight, FiArrowLeft, FiFileText, FiChevronRight, FiBox, FiClipboard, FiSearch, FiPlus, FiTrash2, FiHash, FiList, FiTag, FiDollarSign, FiTruck, FiCreditCard, FiFilter, FiCheck, FiCamera, FiImage, FiEdit3, FiEye } from 'react-icons/fi';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
-import { HiOutlineUserGroup, HiOutlineCalendar, HiOutlineWallet } from 'react-icons/hi2';
+import { HiOutlineUserGroup, HiOutlineCalendar, HiOutlineWallet, HiOutlineBuildingOffice2, HiOutlineLightBulb, HiOutlinePencil, HiOutlineCog6Tooth } from 'react-icons/hi2';
 import smartpayLogo from './assets/icon.png';
 import { jsPDF } from 'jspdf';
 
@@ -19,15 +20,84 @@ const SUPPORTED_LANGUAGES = [
   { code: 'hi', label: 'हिंदी' },
 ];
 const LANGUAGE_STORAGE_KEY = 'workforce_app_language';
+const BUSINESS_INFO_STORAGE_KEY = 'workforce_app_business_info';
+const QUOTATION_SETTINGS_STORAGE_KEY = 'workforce_app_quotation_settings';
+const INVOICE_SETTINGS_STORAGE_KEY = 'workforce_app_invoice_settings';
+const PURCHASE_ORDER_SETTINGS_STORAGE_KEY = 'workforce_app_purchase_order_settings';
+const PROFORMA_INVOICE_SETTINGS_STORAGE_KEY = 'workforce_app_proforma_invoice_settings';
+const DELIVERY_NOTE_SETTINGS_STORAGE_KEY = 'workforce_app_delivery_note_settings';
+const RECEIPT_SETTINGS_STORAGE_KEY = 'workforce_app_receipt_settings';
+const COLUMN_HEADING_SETTINGS_STORAGE_KEY = 'workforce_app_column_heading_settings';
+const CUSTOMERS_STORAGE_KEY = 'workforce_app_customers';
+const PRODUCTS_STORAGE_KEY = 'workforce_app_products';
+const TERMS_STORAGE_KEY = 'workforce_app_terms'; // legacy shared key - kept only to migrate existing data into the per-type keys below
+const QUOTATION_TERMS_STORAGE_KEY = 'workforce_app_terms_quotation';
+const PURCHASE_ORDER_TERMS_STORAGE_KEY = 'workforce_app_terms_purchase_order';
+const PROFORMA_INVOICE_TERMS_STORAGE_KEY = 'workforce_app_terms_proforma_invoice';
+const DELIVERY_NOTE_TERMS_STORAGE_KEY = 'workforce_app_terms_delivery_note';
+const INVOICE_TERMS_STORAGE_KEY = 'workforce_app_terms_invoice';
+const QUOTATIONS_STORAGE_KEY = 'workforce_app_quotations';
+const INVOICES_STORAGE_KEY = 'workforce_app_invoices';
+const PURCHASE_ORDERS_STORAGE_KEY = 'workforce_app_purchase_orders';
+const PROFORMA_INVOICES_STORAGE_KEY = 'workforce_app_proforma_invoices';
+const DELIVERY_NOTES_STORAGE_KEY = 'workforce_app_delivery_notes';
+const RECEIPTS_STORAGE_KEY = 'workforce_app_receipts';
+const RECEIPT_PAYMENT_MODES = ['Cash', 'UPI', 'Bank Transfer', 'Cheque', 'Card'];
 
+// ===== Image cropper helpers (logo / signature crop tool) =====
+// Given a container's rendered size and an image's natural size, computes how the image
+// is actually laid out inside the container when using `object-fit: contain` (i.e. the
+// visible image rect, accounting for letterboxing on one axis).
+function computeContainedLayout(containerW, containerH, imgW, imgH) {
+  if (!containerW || !containerH || !imgW || !imgH) {
+    return { renderW: containerW || 0, renderH: containerH || 0, offsetX: 0, offsetY: 0 };
+  }
+  const containerRatio = containerW / containerH;
+  const imgRatio = imgW / imgH;
+  let renderW, renderH;
+  if (imgRatio > containerRatio) {
+    renderW = containerW;
+    renderH = containerW / imgRatio;
+  } else {
+    renderH = containerH;
+    renderW = containerH * imgRatio;
+  }
+  return {
+    renderW, renderH,
+    offsetX: (containerW - renderW) / 2,
+    offsetY: (containerH - renderH) / 2,
+  };
+}
+const CROP_BOX_MIN_SIZE = 32;
+// Keeps a crop box's edges within the visible image rect and enforces a minimum size.
+function clampCropBox(box, layout) {
+  if (!layout) return box;
+  const minX = layout.offsetX;
+  const minY = layout.offsetY;
+  const maxX = layout.offsetX + layout.renderW;
+  const maxY = layout.offsetY + layout.renderH;
+  let { x, y, w, h } = box;
+  w = Math.max(CROP_BOX_MIN_SIZE, Math.min(w, maxX - minX));
+  h = Math.max(CROP_BOX_MIN_SIZE, Math.min(h, maxY - minY));
+  x = Math.min(Math.max(x, minX), maxX - w);
+  y = Math.min(Math.max(y, minY), maxY - h);
+  return { x, y, w, h };
+}
 
 const translations = {
   en: {
     // Navigation
     navHome: 'Home', 
+    navProjectsTab: 'Projects',
     navAttendance: 'Attendance', 
     navPayments: 'Payments', 
     navSubscribe: 'Subscribe',
+    navHelp: 'Contact Us',
+    helpPageTitle: 'Contact Us',
+    helpPageSubtitle: 'For any custom requirement or any issue related to the app, please contact us.',
+    helpCallNow: 'Tap a number to call',
+    letsChat: "Let's Chat",
+    contactAppName: 'SmartManage',
     watchVideo: 'Video',
     
     // Dashboard
@@ -231,9 +301,16 @@ const translations = {
   hi: {
     // Navigation
     navHome: 'होम',
+    navProjectsTab: 'प्रोजेक्ट्स',
     navAttendance: 'उपस्थिति',
     navPayments: 'भुगतान',
     navSubscribe: 'सदस्यता',
+    navHelp: 'संपर्क करें',
+    helpPageTitle: 'संपर्क करें',
+    helpPageSubtitle: 'ऐप से संबंधित किसी भी कस्टम आवश्यकता या समस्या के लिए, कृपया हमसे संपर्क करें।',
+    helpCallNow: 'कॉल करने के लिए नंबर पर टैप करें',
+    letsChat: 'चैट करें',
+    contactAppName: 'SmartManage',
     watchVideo: 'वीडियो',
     
     // Dashboard
@@ -451,7 +528,7 @@ function AppPopup({ open, tone = 'info', title, message, confirmLabel, cancelLab
   const icon = POPUP_ICONS[tone] || POPUP_ICONS.info;
   const isConfirm = !!cancelLabel;
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9000 }}>
       <style>{'@keyframes appPopupIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }'}</style>
       <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', padding: '28px 24px', width: '85%', maxWidth: '320px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', animation: 'appPopupIn 0.18s ease-out' }}>
         <div style={{ width: '52px', height: '52px', borderRadius: '50%', backgroundColor: icon.bg, color: icon.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 14px auto' }}>{icon.glyph}</div>
@@ -485,6 +562,36 @@ function AppPopup({ open, tone = 'info', title, message, confirmLabel, cancelLab
   );
 }
 
+// Persistent-label form field: label always shown above the value, so a
+// filled-in field never becomes unreadable/ambiguous the way a bare
+// `placeholder`-only input does once it has a value. Used throughout the
+// single shared Add/Edit Customer form (all 6 document tiles + Manage ->
+// Customers all render the exact same form/component, so this applies
+// everywhere at once).
+function LabeledField({ label, as = 'input', error, rightElement, boxStyle, inputStyle, children, ...fieldProps }) {
+  const box = { ...customerModuleStyles.labeledFieldBox, ...(error ? customerModuleStyles.labeledFieldBoxError : null), ...boxStyle };
+  return (
+    <div>
+      <div style={box}>
+        <label style={customerModuleStyles.labeledFieldLabel}>{label}</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {as === 'textarea' ? (
+            <textarea {...fieldProps} style={{ ...customerModuleStyles.labeledFieldInput, resize: 'vertical', minHeight: '64px', ...inputStyle }} />
+          ) : as === 'button' ? (
+            <button type="button" {...fieldProps} style={{ ...customerModuleStyles.labeledFieldButton, ...inputStyle }}>
+              {children}
+            </button>
+          ) : (
+            <input {...fieldProps} style={{ ...customerModuleStyles.labeledFieldInput, ...inputStyle }} />
+          )}
+          {rightElement}
+        </div>
+      </div>
+      {error && typeof error === 'string' && <p style={customerModuleStyles.fieldErrorText}>{error}</p>}
+    </div>
+  );
+}
+
 // ===== EMPLOYEE AVATAR COLORS =====
 // Light pastel background + darker readable text, keyed off the employee's
 // first-name initial so the same letter always gets the same color across
@@ -514,7 +621,70 @@ const getEmployeeAvatarColors = (name) => {
   return AVATAR_COLOR_PALETTE[index];
 };
 
+// ===== Indian States / Union Territories list (for "Select State" pickers) =====
+// Standard GST-portal state list, used wherever a customer's State is captured.
+const INDIAN_STATE_LIST = [
+  'ANDAMAN AND NICOBAR ISLANDS', 'ANDHRA PRADESH', 'ANDHRA PRADESH(BEFORE DIVISION)',
+  'ARUNACHAL PRADESH', 'ASSAM', 'BIHAR', 'CENTRE JURISDICTION', 'CHANDIGARH',
+  'CHHATTISGARH', 'DADRA AND NAGAR HAVELI AND DAMAN AND DIU', 'DELHI', 'GOA',
+  'GUJARAT', 'HARYANA', 'HIMACHAL PRADESH', 'JAMMU AND KASHMIR', 'JHARKHAND',
+  'KARNATAKA', 'KERALA', 'LADAKH', 'LAKSHADWEEP', 'MADHYA PRADESH', 'MAHARASHTRA',
+  'MANIPUR', 'MEGHALAYA', 'MIZORAM', 'NAGALAND', 'ODISHA', 'OTHER TERRITORY',
+  'PUDUCHERRY', 'PUNJAB', 'RAJASTHAN', 'SIKKIM', 'TAMIL NADU', 'TELANGANA',
+  'TRIPURA', 'UTTAR PRADESH', 'UTTARAKHAND', 'WEST BENGAL',
+];
+
+// Displays a state name in Title Case (e.g. "ANDHRA PRADESH" -> "Andhra Pradesh")
+// without altering the underlying stored/matched value, which stays uppercase.
+const toTitleCase = (str) => (str || '').toLowerCase().replace(/(^|[^a-zA-Z])([a-zA-Z])/g, (m, p1, p2) => p1 + p2.toUpperCase());
+
+// ===== GSTIN validation =====
+// Standard 15-character GSTIN format: 2-digit state code, 10-char PAN,
+// 1-digit entity number, fixed 'Z', and a final checksum char.
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const isValidGSTIN = (value) => GSTIN_REGEX.test((value || '').trim().toUpperCase());
+
+// ===== Mobile number validation =====
+// Standard Indian mobile: exactly 10 digits, starting 6-9. Also rejects obviously
+// fake/placeholder numbers - all-same-digit (0000000000) and simple runs (1234567890) -
+// which pass a plain "10 digits" check but aren't real numbers.
+const MOBILE_REGEX = /^[6-9]\d{9}$/;
+const FAKE_MOBILE_NUMBERS = new Set(['0123456789', '1234567890', '9876543210', '0987654321']);
+const isValidMobileNumber = (value) => {
+  const digits = (value || '').replace(/\D/g, '');
+  if (!MOBILE_REGEX.test(digits)) return false;
+  if (/^(\d)\1{9}$/.test(digits)) return false;
+  if (FAKE_MOBILE_NUMBERS.has(digits)) return false;
+  return true;
+};
+
+// ===== Email validation =====
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const isValidEmailAddress = (value) => EMAIL_REGEX.test((value || '').trim());
+
+// ===== HSN code validation =====
+// HSN/SAC codes on Indian tax documents are numeric, 4/6/8 digits long.
+const HSN_REGEX = /^\d{4}(\d{2}){0,2}$/;
+const isValidHSN = (value) => HSN_REGEX.test((value || '').trim());
+
+// ===== PAN validation =====
+// Standard 10-character PAN format: 5 letters, 4 digits, 1 letter.
+const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+const isValidPAN = (value) => PAN_REGEX.test((value || '').trim().toUpperCase());
+
+// ===== IFSC code validation =====
+// Standard 11-character IFSC format: 4 letters (bank code), fixed '0', then
+// 6 alphanumeric characters (branch code).
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const isValidIFSC = (value) => IFSC_REGEX.test((value || '').trim().toUpperCase());
+
+// ===== UPI ID validation =====
+// e.g. "name@bankhandle" - handle part before @ plus a short alphabetic bank/app suffix.
+const UPI_REGEX = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+const isValidUPI = (value) => UPI_REGEX.test((value || '').trim());
+
 export default function App1() {
+  
   // Root of the API - controllers live directly under /api/<Controller>
   // (e.g. /api/projects, /api/workers, /api/attendance, /api/payments).
   // Auth endpoints live under /api/auth, so we keep that as a derived constant
@@ -568,7 +738,37 @@ const api = {
       throw new Error(error.message || `API Error: ${response.status}`);
     }
     return response.json();
+  },
+  patch: async (endpoint, data) => {
+    const response = await fetch(`${API_ROOT}${endpoint}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || `API Error: ${response.status}`);
+    }
+    return response.json();
   }
+};
+
+// ===== DOCUMENTS SERVICE (Quotations, Invoices, Purchase Orders, Proforma =====
+// ===== Invoices, Delivery Notes, Receipts, Terms & Settings) =====
+// Backed by DocumentsController.cs. Field names in QuotationRequestDto /
+// QuotationResponseDto already camelCase-match the local `quotationForm` /
+// `quotations[]` shape used throughout the UI (date, quotationNo, otherInfo,
+// customerId, products[], otherCharges[], termsIds[], grandTotal, status,
+// createdAt, updatedAt, customer* snapshot fields) so API responses can be
+// used directly as quotation objects without extra mapping.
+const documentService = {
+  getQuotations: (userId) => api.get(`/documents/quotations?userId=${userId}`),
+  getQuotation: (id) => api.get(`/documents/quotations/${id}`),
+  createQuotation: (userId, data) => api.post(`/documents/quotations?userId=${userId}`, data),
+  updateQuotation: (id, data) => api.put(`/documents/quotations/${id}`, data),
+  updateQuotationStatus: (id, status) => api.patch(`/documents/quotations/${id}/status`, status),
+  deleteQuotation: (id) => api.delete(`/documents/quotations/${id}`),
 };
 
 // ===== DTO <-> UI SHAPE MAPPERS =====
@@ -677,6 +877,26 @@ const loadUserProjects = async (userId) => {
   }
 };
 
+// Add this state near other state declarations
+const [loadingQuotations, setLoadingQuotations] = useState(false);
+// Loads this user's quotations from the server and replaces local state +
+// the localStorage cache with what the DB actually has, the same pattern
+// used for loadUserProjects above.
+const loadUserQuotations = async (userId) => {
+  try {
+    setLoadingQuotations(true);
+    const response = await documentService.getQuotations(userId);
+    setQuotations(response);
+    try { localStorage.setItem(QUOTATIONS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading quotations:', error);
+    // Keep whatever was already loaded from the localStorage cache on failure,
+    // so the user can still see their last-known quotations while offline.
+  } finally {
+    setLoadingQuotations(false);
+  }
+};
+
 // Re-fetches a single project from the server and merges it back into local
 // state. Used after any mutation (add/edit/delete worker, attendance, wage,
 // payments...) so the UI always reflects what's actually in the DB instead of
@@ -735,6 +955,3933 @@ const paymentService = {
   const [profileImg, setProfileImg] = useState(persistedUser?.profileImg || null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  // Shared initials fallback (e.g. "Nilendra Gokhe" -> "NG") used everywhere the
+  // profile photo is missing/removed - keeps the header avatar and the Update
+  // Profile modal avatar consistent.
+  const getInitials = (fullName) => {
+    if (!fullName || !fullName.trim()) return '';
+    return fullName.trim().split(/\s+/).map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  };
+  // ===== Module home screen: null = show module picker, 'attendance' | 'quotations' = inside that module =====
+  const [activeModule, setActiveModule] = useState(null);
+  // ===== Sub-screen inside the Quotations module (e.g. 'business' = Update Business Info) =====
+  const [quotationSubView, setQuotationSubView] = useState(null);
+  // Where the product-picker screen ("Select Product") should return to on Back - captured at
+  // the moment it's opened, since it can be reached either directly from a document's PRODUCTS
+  // row or from that document's Add Product line form (when changing an already-picked product).
+  const [productPickerReturnView, setProductPickerReturnView] = useState(null);
+  const [businessInfo, setBusinessInfo] = useState(() => {
+    try {
+      const saved = localStorage.getItem(BUSINESS_INFO_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      logoImg: null, signatureImg: null,
+      businessName: (loggedInUser?.industry || '').toLowerCase(),
+      contactName: '', email: '',
+      phone: loggedInUser?.mobileNumber ? `+91 ${loggedInUser.mobileNumber}` : '',
+      addressLine1: '', addressLine2: '', addressLine3: '',
+      otherInfo: '', businessCategory: '',
+      taxLabel: 'GSTIN', taxNumber: '', state: '',
+      bankAccountName: '', bankAccountNumber: '', bankName: '', ifscCode: '', upiId: '',
+    };
+  });
+  const [isBankDetailsModalOpen, setIsBankDetailsModalOpen] = useState(false);
+  const [businessInfoErrors, setBusinessInfoErrors] = useState({});
+  const updateBusinessField = (key, value) => {
+    setBusinessInfo(prev => ({ ...prev, [key]: value }));
+    if (businessInfoErrors[key]) setBusinessInfoErrors(prev => ({ ...prev, [key]: false }));
+  };
+  const handleUpdateBusinessInfo = () => {
+    const errors = {};
+    if (businessInfo.email.trim() && !isValidEmailAddress(businessInfo.email)) errors.email = 'Enter a valid email address';
+    if (businessInfo.phone.trim() && !isValidMobileNumber(businessInfo.phone)) errors.phone = 'Enter a valid 10-digit mobile number';
+    if (businessInfo.taxNumber.trim()) {
+      if (businessInfo.taxLabel === 'GSTIN' && !isValidGSTIN(businessInfo.taxNumber)) errors.taxNumber = 'Enter a valid GSTIN';
+      if (businessInfo.taxLabel === 'PAN' && !isValidPAN(businessInfo.taxNumber)) errors.taxNumber = 'Enter a valid PAN';
+    }
+    if (businessInfo.upiId.trim() && !isValidUPI(businessInfo.upiId)) errors.upiId = 'Enter a valid UPI ID';
+    if (businessInfo.ifscCode.trim() && !isValidIFSC(businessInfo.ifscCode)) errors.ifscCode = 'Enter a valid 11-character IFSC code';
+    if (Object.keys(errors).length > 0) {
+      setBusinessInfoErrors(errors);
+      showAlert('Please correct the highlighted fields.', 'error');
+      return;
+    }
+    setBusinessInfoErrors({});
+    try {
+      localStorage.setItem(BUSINESS_INFO_STORAGE_KEY, JSON.stringify(businessInfo));
+      showSuccess('Business info updated.');
+    } catch {
+      showAlert('Could not save business info on this device.');
+    }
+  };
+  const handleCloseBankDetailsModal = () => {
+    if (businessInfo.ifscCode.trim() && !isValidIFSC(businessInfo.ifscCode)) {
+      setBusinessInfoErrors(prev => ({ ...prev, ifscCode: 'Enter a valid 11-character IFSC code' }));
+      showAlert('Please enter a valid IFSC code.', 'error');
+      return;
+    }
+    setIsBankDetailsModalOpen(false);
+  };
+  const handleBusinessImagePick = (key, file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => openImageCropper(key, reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  // ===== Business Info: Logo / Signature image action sheet, viewer, and signature drawing pad =====
+  const [imageActionSheet, setImageActionSheet] = useState(null); // 'logo' | 'signature' | null
+  const [imageViewerSrc, setImageViewerSrc] = useState(null);
+  const [isSignaturePadOpen, setIsSignaturePadOpen] = useState(false);
+  const [signaturePadKey, setSignaturePadKey] = useState(0);
+  const logoCameraInputRef = useRef(null);
+  const logoPhotoInputRef = useRef(null);
+  const signatureCameraInputRef = useRef(null);
+  const signaturePhotoInputRef = useRef(null);
+  const signatureCanvasRef = useRef(null);
+  const signatureDrawingRef = useRef(false);
+  const openImageActionSheet = (type) => setImageActionSheet(type);
+  const closeImageActionSheet = () => setImageActionSheet(null);
+  const handleRemoveBusinessImage = (key) => {
+    updateBusinessField(key, null);
+    closeImageActionSheet();
+  };
+  const openSignaturePad = () => {
+    setSignaturePadKey((k) => k + 1);
+    setIsSignaturePadOpen(true);
+    closeImageActionSheet();
+  };
+  const getSignatureCanvasPoint = (e) => {
+    const canvas = signatureCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  };
+  const handleSignaturePointerDown = (e) => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    signatureDrawingRef.current = true;
+    const ctx = canvas.getContext('2d');
+    const { x, y } = getSignatureCanvasPoint(e);
+    ctx.strokeStyle = '#0F172A';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+  const handleSignaturePointerMove = (e) => {
+    if (!signatureDrawingRef.current) return;
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const { x, y } = getSignatureCanvasPoint(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+  const handleSignaturePointerUp = () => {
+    signatureDrawingRef.current = false;
+  };
+  const handleClearSignaturePad = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  };
+  const handleSaveSignaturePad = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    updateBusinessField('signatureImg', canvas.toDataURL('image/png'));
+    setIsSignaturePadOpen(false);
+  };
+
+  // ===== Business Info: Logo / Signature crop tool =====
+  // Lets the user pick a rectangle from a picked photo and keep only that part - e.g. just
+  // their face for the logo tile, or just the ink for a signature photo with a white margin.
+  const [imageCropper, setImageCropper] = useState(null); // { key: 'logoImg' | 'signatureImg', src }
+  const [cropBox, setCropBox] = useState(null); // { x, y, w, h } in crop-container CSS px
+  const [cropImgLayout, setCropImgLayout] = useState(null); // { renderW, renderH, offsetX, offsetY }
+  const cropContainerRef = useRef(null);
+  const cropImgElRef = useRef(null);
+  const cropDragRef = useRef(null); // { mode: 'move'|'nw'|'ne'|'sw'|'se', startPointerX, startPointerY, startBox }
+  const openImageCropper = (key, src) => {
+    setCropBox(null);
+    setCropImgLayout(null);
+    setImageCropper({ key, src });
+  };
+  const closeImageCropper = () => {
+    setImageCropper(null);
+    setCropBox(null);
+    setCropImgLayout(null);
+    cropDragRef.current = null;
+  };
+  const handleCropImageLoad = () => {
+    const img = cropImgElRef.current;
+    const container = cropContainerRef.current;
+    if (!img || !container) return;
+    const rect = container.getBoundingClientRect();
+    const layout = computeContainedLayout(rect.width, rect.height, img.naturalWidth, img.naturalHeight);
+    setCropImgLayout(layout);
+    // Default to the full image so tapping "Use Crop" without adjusting keeps everything.
+    setCropBox({ x: layout.offsetX, y: layout.offsetY, w: layout.renderW, h: layout.renderH });
+  };
+  const handleCropPointerDown = (e, mode) => {
+    if (!cropBox) return;
+    e.stopPropagation();
+    e.preventDefault();
+    cropDragRef.current = { mode, startPointerX: e.clientX, startPointerY: e.clientY, startBox: { ...cropBox } };
+    e.target.setPointerCapture?.(e.pointerId);
+  };
+  const handleCropPointerMove = (e) => {
+    const drag = cropDragRef.current;
+    if (!drag || !cropImgLayout) return;
+    const dx = e.clientX - drag.startPointerX;
+    const dy = e.clientY - drag.startPointerY;
+    const next = { ...drag.startBox };
+    if (drag.mode === 'move') {
+      next.x = drag.startBox.x + dx;
+      next.y = drag.startBox.y + dy;
+    } else {
+      if (drag.mode.includes('e')) next.w = drag.startBox.w + dx;
+      if (drag.mode.includes('s')) next.h = drag.startBox.h + dy;
+      if (drag.mode.includes('w')) { next.x = drag.startBox.x + dx; next.w = drag.startBox.w - dx; }
+      if (drag.mode.includes('n')) { next.y = drag.startBox.y + dy; next.h = drag.startBox.h - dy; }
+    }
+    setCropBox(clampCropBox(next, cropImgLayout));
+  };
+  const handleCropPointerUp = () => {
+    cropDragRef.current = null;
+  };
+  const handleResetImageCrop = () => {
+    if (!cropImgLayout) return;
+    setCropBox({ x: cropImgLayout.offsetX, y: cropImgLayout.offsetY, w: cropImgLayout.renderW, h: cropImgLayout.renderH });
+  };
+  const handleConfirmImageCrop = () => {
+    const img = cropImgElRef.current;
+    if (!img || !cropBox || !cropImgLayout || !imageCropper) return;
+    const scale = img.naturalWidth / cropImgLayout.renderW;
+    const sx = (cropBox.x - cropImgLayout.offsetX) * scale;
+    const sy = (cropBox.y - cropImgLayout.offsetY) * scale;
+    const sw = cropBox.w * scale;
+    const sh = cropBox.h * scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(sw));
+    canvas.height = Math.max(1, Math.round(sh));
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/png');
+    if (imageCropper.key === 'profileImg') {
+      setProfileImg(dataUrl);
+    } else {
+      updateBusinessField(imageCropper.key, dataUrl);
+    }
+    closeImageCropper();
+  };
+
+  // Shared crop tool UI - used for the Business Info logo/signature pickers AND the
+  // Update Profile avatar picker, so every "pick a photo" flow in the app crops the same way.
+  const renderImageCropperModal = () => {
+    if (!imageCropper) return null;
+    const cropTitle = imageCropper.key === 'signatureImg' ? 'Crop Signature' : 'Crop Photo';
+    const cropHint = imageCropper.key === 'signatureImg' ? ' \u2014 like removing extra white space.' : ' \u2014 like just your face.';
+    // zIndex explicitly bumped above the shared modalOverlay (2000) so the cropper
+    // always sits on top of whichever modal launched it - e.g. Update Profile (9999).
+    return (
+      <div style={{ ...customerModuleStyles.modalOverlay, zIndex: 10000 }} onClick={closeImageCropper}>
+        <div style={{ background: '#ffffff', width: 'calc(100% - 40px)', maxWidth: '460px', borderRadius: '24px', padding: '20px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+          <h3 style={{ fontSize: '17px', fontWeight: '700', color: '#0F172A', margin: '0 0 4px' }}>
+            {cropTitle}
+          </h3>
+          <p style={{ fontSize: '12.5px', color: '#64748B', margin: '0 0 12px', lineHeight: '1.4' }}>
+            Drag the handles to keep only the part you want{cropHint}
+          </p>
+          <div
+            ref={cropContainerRef}
+            style={{ position: 'relative', width: '100%', height: '300px', background: '#F1F5F9', borderRadius: '14px', overflow: 'hidden', touchAction: 'none' }}
+            onPointerMove={handleCropPointerMove}
+            onPointerUp={handleCropPointerUp}
+            onPointerLeave={handleCropPointerUp}
+          >
+            <img
+              ref={cropImgElRef}
+              src={imageCropper.src}
+              alt="To crop"
+              onLoad={handleCropImageLoad}
+              draggable={false}
+              style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'contain', userSelect: 'none', pointerEvents: 'none' }}
+            />
+            {cropBox && (
+              <div
+                onPointerDown={(e) => handleCropPointerDown(e, 'move')}
+                style={{
+                  position: 'absolute', left: `${cropBox.x}px`, top: `${cropBox.y}px`,
+                  width: `${cropBox.w}px`, height: `${cropBox.h}px`,
+                  border: '2px solid #0F766E', boxShadow: '0 0 0 2000px rgba(15, 23, 42, 0.5)',
+                  cursor: 'move', boxSizing: 'border-box',
+                }}
+              >
+                {['nw', 'ne', 'sw', 'se'].map((corner) => (
+                  <div
+                    key={corner}
+                    onPointerDown={(e) => handleCropPointerDown(e, corner)}
+                    style={{
+                      position: 'absolute', width: '22px', height: '22px', background: '#0F766E',
+                      borderRadius: '50%', border: '2px solid #ffffff', boxSizing: 'border-box',
+                      top: corner.includes('n') ? '-11px' : 'auto',
+                      bottom: corner.includes('s') ? '-11px' : 'auto',
+                      left: corner.includes('w') ? '-11px' : 'auto',
+                      right: corner.includes('e') ? '-11px' : 'auto',
+                      cursor: `${corner}-resize`,
+                      touchAction: 'none',
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
+            <button type="button" onClick={handleResetImageCrop} style={{ flex: 1, height: '46px', borderRadius: '14px', border: '1.5px solid #E2E8F0', background: '#ffffff', color: '#334155', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>Reset</button>
+            <button type="button" onClick={handleConfirmImageCrop} style={businessInfoStyles.modalSaveBtn}>Use Crop</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ===== Quotations module: Quotation Settings =====
+  const [quotationSettings, setQuotationSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(QUOTATION_SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      numberPrefix: 'Quote-',
+      serialNumber: '5',
+      discountType: 'No Discount',
+      taxType: 'No Tax',
+      showProductHSN: 'No',
+      showShippingAddress: 'No',
+      topMessage: 'Dear Sir/Mam,\nThank you for your valuable inquiry. We are pleased to quote as below:',
+      bottomMessage: 'We hope you find our offer to be in line with your requirement.',
+      showBankInfo: 'Yes',
+      showUpiInfo: 'Yes',
+      showSignature: 'Yes',
+    };
+  });
+  const [activeSettingsSheet, setActiveSettingsSheet] = useState(null);
+  const updateQuotationSettingField = (key, value) => setQuotationSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdateQuotationSettings = () => {
+    try {
+      localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(quotationSettings));
+      showSuccess('Quotation settings updated.');
+    } catch {
+      showAlert('Could not save quotation settings on this device.');
+    }
+  };
+
+  // ===== Quotations module: Invoice Settings =====
+  const [invoiceSettings, setInvoiceSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(INVOICE_SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      numberPrefix: 'INV-',
+      serialNumber: '2',
+      discountType: 'No Discount',
+      taxType: 'No Tax',
+      showProductHSN: 'No',
+      topMessage: '',
+      bottomMessage: '',
+      showBankInfo: 'Yes',
+      showUpiInfo: 'Yes',
+      showSignature: 'Yes',
+    };
+  });
+  const updateInvoiceSettingField = (key, value) => setInvoiceSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdateInvoiceSettings = () => {
+    try {
+      localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(invoiceSettings));
+      showSuccess('Invoice settings updated.');
+    } catch {
+      showAlert('Could not save invoice settings on this device.');
+    }
+  };
+
+  // ===== Quotations module: Purchase Order Settings =====
+  const [purchaseOrderSettings, setPurchaseOrderSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      numberPrefix: 'PO-',
+      serialNumber: '1',
+      discountType: 'No Discount',
+      taxType: 'No Tax',
+      showProductHSN: 'No',
+      topMessage: 'Dear Sir/Mam,\nWe are pleased to submit the purchase order as below.',
+      bottomMessage: 'Your prompt attention to this order is greatly appreciated, and we look forward to a successful transaction.',
+      showBankInfo: 'No',
+      showUpiInfo: 'No',
+      showSignature: 'Yes',
+    };
+  });
+  const updatePurchaseOrderSettingField = (key, value) => setPurchaseOrderSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdatePurchaseOrderSettings = () => {
+    try {
+      localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(purchaseOrderSettings));
+      showSuccess('Purchase order settings updated.');
+    } catch {
+      showAlert('Could not save purchase order settings on this device.');
+    }
+  };
+
+  // ===== Quotations module: Proforma Invoice Settings =====
+  const [proformaInvoiceSettings, setProformaInvoiceSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      numberPrefix: 'PI-',
+      serialNumber: '1',
+      discountType: 'No Discount',
+      taxType: 'No Tax',
+      showProductHSN: 'No',
+      topMessage: 'Dear Sir/Mam,\nWe are pleased to submit the proforma invoice as below.',
+      bottomMessage: 'Your prompt attention to this order is greatly appreciated, and we look forward to a successful transaction.',
+      showBankInfo: 'No',
+      showUpiInfo: 'No',
+      showSignature: 'Yes',
+    };
+  });
+  const updateProformaInvoiceSettingField = (key, value) => setProformaInvoiceSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdateProformaInvoiceSettings = () => {
+    try {
+      localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(proformaInvoiceSettings));
+      showSuccess('Proforma invoice settings updated.');
+    } catch {
+      showAlert('Could not save proforma invoice settings on this device.');
+    }
+  };
+
+  // ===== Quotations module: Delivery Note Settings =====
+  const [deliveryNoteSettings, setDeliveryNoteSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      numberPrefix: 'DN-',
+      serialNumber: '1',
+      showProductHSN: 'No',
+      topMessage: '',
+      bottomMessage: '',
+      showSignature: 'Yes',
+    };
+  });
+  const updateDeliveryNoteSettingField = (key, value) => setDeliveryNoteSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdateDeliveryNoteSettings = () => {
+    try {
+      localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(deliveryNoteSettings));
+      showSuccess('Delivery note settings updated.');
+    } catch {
+      showAlert('Could not save delivery note settings on this device.');
+    }
+  };
+
+  // ===== Quotations module: Receipt Settings =====
+  const [receiptSettings, setReceiptSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(RECEIPT_SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      numberPrefix: 'RECEIPT-',
+      serialNumber: '1',
+      receiptType: 'Simple',
+      showSignature: 'Yes',
+    };
+  });
+  const updateReceiptSettingField = (key, value) => setReceiptSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdateReceiptSettings = () => {
+    try {
+      localStorage.setItem(RECEIPT_SETTINGS_STORAGE_KEY, JSON.stringify(receiptSettings));
+      showSuccess('Receipt settings updated.');
+    } catch {
+      showAlert('Could not save receipt settings on this device.');
+    }
+  };
+
+  // ===== Quotations module: Column Heading Settings =====
+  const [columnHeadingSettings, setColumnHeadingSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(COLUMN_HEADING_SETTINGS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return {
+      taxLabel: 'GST',
+      hsnLabel: 'HSN',
+      otherChargesLabel: 'Other Charges',
+      showQty2Column: false,
+    };
+  });
+  const updateColumnHeadingSettingField = (key, value) => setColumnHeadingSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdateColumnHeadingSettings = () => {
+    try {
+      localStorage.setItem(COLUMN_HEADING_SETTINGS_STORAGE_KEY, JSON.stringify(columnHeadingSettings));
+      showSuccess('Column heading settings updated.');
+    } catch {
+      showAlert('Could not save column heading settings on this device.');
+    }
+  };
+
+  // ===== Quotations module: Customer List / Add Customer =====
+  const emptyCustomerForm = {
+    name: '', companyName: '', email: '', mobile: '',
+    addressLine1: '', addressLine2: '', addressLine3: '', otherInfo: '', gstin: '', state: '',
+    shippingAddress: '', billingAddress: '',
+  };
+  const [customers, setCustomers] = useState(() => {
+    try {
+      const saved = localStorage.getItem(CUSTOMERS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return [];
+  });
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
+  const [editingCustomerId, setEditingCustomerId] = useState(null);
+  const updateCustomerField = (key, value) => setCustomerForm(prev => ({ ...prev, [key]: value }));
+  const [customerGstinError, setCustomerGstinError] = useState(false);
+  const [customerMobileError, setCustomerMobileError] = useState(false);
+  const [customerEmailError, setCustomerEmailError] = useState(false);
+  const [showStatePicker, setShowStatePicker] = useState(false);
+  const [stateSearchQuery, setStateSearchQuery] = useState('');
+  // Which form the shared State picker below should write its selection into -
+  // 'customer' (Add/Edit Customer) or 'business' (Update Business Info).
+  const [stateFieldTarget, setStateFieldTarget] = useState('customer');
+  const filteredStateList = INDIAN_STATE_LIST.filter((s) =>
+    s.toLowerCase().includes(stateSearchQuery.trim().toLowerCase())
+  );
+  const persistCustomers = (next) => {
+    setCustomers(next);
+    try { localStorage.setItem(CUSTOMERS_STORAGE_KEY, JSON.stringify(next)); } catch {
+      // Ignore write failures (e.g. storage full/unavailable) - state still updates in memory.
+    }
+  };
+  const openAddCustomer = (returnView = 'customerList') => {
+    setCustomerForm(emptyCustomerForm);
+    setEditingCustomerId(null);
+    setCustomerFormReturnView(returnView);
+    setCustomerGstinError(false);
+    setCustomerMobileError(false);
+    setCustomerEmailError(false);
+    setStateSearchQuery('');
+    setQuotationSubView('addCustomer');
+  };
+  const openEditCustomer = (customer, returnView = 'customerList') => {
+    setCustomerForm({ ...emptyCustomerForm, ...customer });
+    setEditingCustomerId(customer.id);
+    setCustomerFormReturnView(returnView);
+    setCustomerGstinError(false);
+    setCustomerMobileError(false);
+    setCustomerEmailError(false);
+    setStateSearchQuery('');
+    setQuotationSubView('addCustomer');
+  };
+  const handleSaveCustomer = () => {
+    if (!customerForm.name.trim()) {
+      showAlert('Please enter the customer name.');
+      return;
+    }
+    if (customerForm.mobile.trim() && !isValidMobileNumber(customerForm.mobile)) {
+      setCustomerMobileError(true);
+      showAlert('Please enter a valid 10-digit mobile number.', 'error');
+      return;
+    }
+    setCustomerMobileError(false);
+    if (customerForm.email.trim() && !isValidEmailAddress(customerForm.email)) {
+      setCustomerEmailError(true);
+      showAlert('Please enter a valid email address.', 'error');
+      return;
+    }
+    setCustomerEmailError(false);
+    if (customerForm.gstin.trim() && !isValidGSTIN(customerForm.gstin)) {
+      setCustomerGstinError(true);
+      showAlert('Please enter correct GST number.', 'error');
+      return;
+    }
+    setCustomerGstinError(false);
+    if (editingCustomerId) {
+      persistCustomers(customers.map((c) => (c.id === editingCustomerId ? { ...customerForm, id: editingCustomerId } : c)));
+      showSuccess('Customer updated successfully.');
+    } else {
+      const newCustomer = { ...customerForm, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
+      persistCustomers([...customers, newCustomer]);
+      showSuccess('Customer added successfully.');
+    }
+    setQuotationSubView(customerFormReturnView);
+  };
+  const handleDeleteCustomer = (customer) => {
+    showConfirm(`Delete customer "${customer.name}"?`, () => {
+      persistCustomers(customers.filter((c) => c.id !== customer.id));
+      if (quotationForm.customerId === customer.id) {
+        setQuotationForm((prev) => ({ ...prev, customerId: null }));
+      }
+      if (invoiceForm.customerId === customer.id) {
+        setInvoiceForm((prev) => ({ ...prev, customerId: null }));
+      }
+      showSuccess('Customer deleted.');
+    });
+  };
+  const filteredCustomers = customers.filter((c) => {
+    const q = customerSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (c.name || '').toLowerCase().includes(q) || (c.companyName || '').toLowerCase().includes(q);
+  });
+
+  // ===== Quotations module: Product List / Add Product =====
+  const emptyProductForm = {
+    name: '', price: '', gst: '', description: '', unit: '', hsn: '',
+  };
+  const [products, setProducts] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PRODUCTS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return [];
+  });
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [productForm, setProductForm] = useState(emptyProductForm);
+  const [editingProductId, setEditingProductId] = useState(null);
+  const [productHsnError, setProductHsnError] = useState(false);
+  const [productGstError, setProductGstError] = useState(false);
+  const updateProductField = (key, value) => setProductForm(prev => ({ ...prev, [key]: value }));
+  const persistProducts = (next) => {
+    setProducts(next);
+    try { localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(next)); } catch {
+      // Ignore write failures (e.g. storage full/unavailable) - state still updates in memory.
+    }
+  };
+  const openAddProduct = (returnView = 'productList') => {
+    setProductForm(emptyProductForm);
+    setEditingProductId(null);
+    setProductFormReturnView(returnView);
+    setProductHsnError(false);
+    setProductGstError(false);
+    setQuotationSubView('addProduct');
+  };
+  const openEditProduct = (product, returnView = 'productList') => {
+    setProductForm({ ...emptyProductForm, ...product });
+    setEditingProductId(product.id);
+    setProductFormReturnView(returnView);
+    setProductHsnError(false);
+    setProductGstError(false);
+    setQuotationSubView('addProduct');
+  };
+  const handleSaveProduct = () => {
+    if (!productForm.name.trim()) {
+      showAlert('Please enter the product name.');
+      return;
+    }
+    if (String(productForm.gst).trim() !== '' && (isNaN(Number(productForm.gst)) || Number(productForm.gst) < 0 || Number(productForm.gst) > 100)) {
+      setProductGstError(true);
+      showAlert('Please enter a valid GST percentage (0-100).', 'error');
+      return;
+    }
+    setProductGstError(false);
+    if (productForm.hsn.trim() && !isValidHSN(productForm.hsn)) {
+      setProductHsnError(true);
+      showAlert('Please enter a valid HSN code (4, 6, or 8 digits).', 'error');
+      return;
+    }
+    setProductHsnError(false);
+    if (editingProductId) {
+      persistProducts(products.map((p) => (p.id === editingProductId ? { ...productForm, id: editingProductId } : p)));
+      showSuccess('Product updated successfully.');
+    } else {
+      const newProduct = { ...productForm, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
+      persistProducts([...products, newProduct]);
+      showSuccess('Product added successfully.');
+    }
+    setQuotationSubView(productFormReturnView);
+  };
+  const handleDeleteProduct = (product) => {
+    showConfirm(`Delete product "${product.name}"?`, () => {
+      persistProducts(products.filter((p) => p.id !== product.id));
+      setQuotationForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== product.id) }));
+      setInvoiceForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== product.id) }));
+      showSuccess('Product deleted.');
+    });
+  };
+  const filteredProducts = products.filter((p) => {
+    const q = productSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (p.name || '').toLowerCase().includes(q);
+  });
+
+  // ===== Quotations module: Make Quotation =====
+  const genId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const formatQuotationDate = (d) => {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  };
+  // Parses a 'DD/MM/YYYY' string (as produced by formatQuotationDate) back into a Date object.
+  const parseQuotationDate = (str) => {
+    if (!str) return null;
+    const parts = str.split('/');
+    if (parts.length !== 3) return null;
+    const [dd, mm, yyyy] = parts.map(Number);
+    if (!dd || !mm || !yyyy) return null;
+    return new Date(yyyy, mm - 1, dd);
+  };
+  const emptyQuotationForm = () => ({
+    date: formatQuotationDate(new Date()),
+    quotationNo: '',
+    otherInfo: '',
+    customerId: null,
+    products: [], // { productId, name, price, gst, qty }
+    otherCharges: [], // { id, label, amount, taxable }
+    termsIds: [],
+  });
+  const [quotationForm, setQuotationForm] = useState(emptyQuotationForm);
+
+  // ===== Quotations module: List & Detail Views =====
+  const [quotations, setQuotations] = useState(() => {
+    try {
+      const saved = localStorage.getItem(QUOTATIONS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [selectedQuotationId, setSelectedQuotationId] = useState(null);
+  const [showConvertSheet, setShowConvertSheet] = useState(false);
+  const [showQuotationMoreSheet, setShowQuotationMoreSheet] = useState(false);
+  const [quotationSearchQuery, setQuotationSearchQuery] = useState('');
+
+  // ===== Quotations module: shared list sorting (Quotation, Invoice, Purchase Order, =====
+  // ===== Proforma Invoice, Delivery Note, Receipt) — sorts by actual createdAt time =====
+  const [documentSortOrder, setDocumentSortOrder] = useState('newest'); // 'newest' | 'oldest'
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+
+  const sortDocumentsByCreated = (list) => {
+    return [...list].sort((a, b) => {
+      const ta = new Date(a.createdAt || a.date || 0).getTime();
+      const tb = new Date(b.createdAt || b.date || 0).getTime();
+      return documentSortOrder === 'newest' ? tb - ta : ta - tb;
+    });
+  };
+
+  // Reusable Filter/Sort icon + dropdown menu, used in the header of every
+  // document list screen (Quotation, Invoice, Purchase Order, Proforma Invoice,
+  // Delivery Note, Receipt) so behaviour and appearance stay consistent.
+  const renderSortMenu = () => (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => setSortMenuOpen((prev) => !prev)}
+        aria-label="Filter"
+        style={{ ...customerModuleStyles.headerIconBtn, background: 'transparent' }}
+      >
+        <FiFilter size={19} color="#ffffff" />
+      </button>
+      {sortMenuOpen && (
+        <>
+          <div
+            onClick={() => setSortMenuOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 90 }}
+          />
+          <div style={customerModuleStyles.sortMenu}>
+            <button
+              type="button"
+              onClick={() => { setDocumentSortOrder('newest'); setSortMenuOpen(false); }}
+              style={customerModuleStyles.sortMenuItem}
+            >
+              <span style={documentSortOrder === 'newest' ? customerModuleStyles.sortMenuItemLabelActive : customerModuleStyles.sortMenuItemLabel}>
+                Newest to Oldest
+              </span>
+              {documentSortOrder === 'newest' && <FiCheck size={16} color="#0F766E" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDocumentSortOrder('oldest'); setSortMenuOpen(false); }}
+              style={customerModuleStyles.sortMenuItem}
+            >
+              <span style={documentSortOrder === 'oldest' ? customerModuleStyles.sortMenuItemLabelActive : customerModuleStyles.sortMenuItemLabel}>
+                Oldest to Newest
+              </span>
+              {documentSortOrder === 'oldest' && <FiCheck size={16} color="#0F766E" />}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  // ===== Quotations module: shared name sorting (Customer List, Product List) =====
+  const [nameSortOrder, setNameSortOrder] = useState('az'); // 'az' | 'za'
+  const [nameSortMenuOpen, setNameSortMenuOpen] = useState(false);
+
+  const sortByName = (list, getName) => {
+    return [...list].sort((a, b) => {
+      const na = (getName(a) || '').toLowerCase();
+      const nb = (getName(b) || '').toLowerCase();
+      if (na < nb) return nameSortOrder === 'az' ? -1 : 1;
+      if (na > nb) return nameSortOrder === 'az' ? 1 : -1;
+      return 0;
+    });
+  };
+
+  // Reusable Filter/Sort icon + dropdown menu (A to Z / Z to A), used in the
+  // header of Customer List and Product List so behaviour and appearance
+  // stay consistent with the document list screens' filter menu.
+  const renderNameSortMenu = () => (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => setNameSortMenuOpen((prev) => !prev)}
+        aria-label="Filter"
+        style={{ ...customerModuleStyles.headerIconBtn, background: 'transparent' }}
+      >
+        <FiFilter size={19} color="#ffffff" />
+      </button>
+      {nameSortMenuOpen && (
+        <>
+          <div
+            onClick={() => setNameSortMenuOpen(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 90 }}
+          />
+          <div style={customerModuleStyles.sortMenu}>
+            <button
+              type="button"
+              onClick={() => { setNameSortOrder('az'); setNameSortMenuOpen(false); }}
+              style={customerModuleStyles.sortMenuItem}
+            >
+              <span style={nameSortOrder === 'az' ? customerModuleStyles.sortMenuItemLabelActive : customerModuleStyles.sortMenuItemLabel}>
+                A to Z
+              </span>
+              {nameSortOrder === 'az' && <FiCheck size={16} color="#0F766E" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setNameSortOrder('za'); setNameSortMenuOpen(false); }}
+              style={customerModuleStyles.sortMenuItem}
+            >
+              <span style={nameSortOrder === 'za' ? customerModuleStyles.sortMenuItemLabelActive : customerModuleStyles.sortMenuItemLabel}>
+                Z to A
+              </span>
+              {nameSortOrder === 'za' && <FiCheck size={16} color="#0F766E" />}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  // Helper to persist quotations to LocalStorage
+  const persistQuotations = (next) => {
+    setQuotations(next);
+    try { localStorage.setItem(QUOTATIONS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  // Which screen "Add/Edit Customer" and "Add/Edit Product" should return to once saved.
+  const [customerFormReturnView, setCustomerFormReturnView] = useState('customerList');
+  const [productFormReturnView, setProductFormReturnView] = useState('productList');
+
+  // Next quotation number = 1 higher than the highest number already used,
+  // so numbering stays sequential (1, 2, 3, ...) even if quotations are deleted.
+  const getNextQuotationNumber = () => {
+    const prefix = quotationSettings.numberPrefix || 'Quote-';
+    const maxNum = quotations.reduce((max, q) => {
+      const match = String(q.quotationNo || '').match(/(\d+)\s*$/);
+      const n = match ? parseInt(match[1], 10) : 0;
+      return n > max ? n : max;
+    }, 0);
+    return `${prefix}${maxNum + 1}`;
+  };
+
+  const openMakeQuotation = () => {
+    setEditingQuotationId(null);
+    setQuotationForm({ ...emptyQuotationForm(), quotationNo: getNextQuotationNumber() });
+    setQuotationSubView('makeQuotation');
+  };
+
+  const openSelectCustomerForQuotation = () => {
+    setCustomerSearchQuery('');
+    setCustomerFormReturnView('selectCustomerForQuotation');
+    setQuotationSubView('selectCustomerForQuotation');
+  };
+  const handleSelectCustomerForQuotation = (customer) => {
+    setQuotationForm((prev) => ({ ...prev, customerId: customer.id }));
+    setQuotationSubView('makeQuotation');
+  };
+  const selectedQuotationCustomer = customers.find((c) => c.id === quotationForm.customerId) || null;
+
+  // Per-product quantity the user has typed/stepped to on the "Select Product" screen, before tapping Add.
+  const [productQtyDrafts, setProductQtyDrafts] = useState({});
+  const getProductQtyDraft = (productId) => (productQtyDrafts[productId] !== undefined ? productQtyDrafts[productId] : '1');
+  const setProductQtyDraft = (productId, value) => setProductQtyDrafts((prev) => ({ ...prev, [productId]: value }));
+  // Adds `qty` of `product` to the quotation in one go (instead of requiring one tap per unit).
+  const handleSelectProductForQuotation = (product, qty = 1) => {
+    const addQty = Number(qty) > 0 ? Number(qty) : 1;
+    setQuotationForm((prev) => {
+      const existing = prev.products.find((p) => p.productId === product.id);
+      const products = existing
+        ? prev.products.map((p) => (p.productId === product.id ? { ...p, qty: p.qty + addQty } : p))
+        : [...prev.products, { productId: product.id, name: product.name, price: Number(product.price) || 0, gst: Number(product.gst) || 0, qty: addQty, unit: product.unit || '', hsn: product.hsn || '' }];
+      return { ...prev, products };
+    });
+  };
+  const removeQuotationProductLine = (productId) => {
+    setQuotationForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== productId) }));
+  };
+
+  // ===== Add Quotation Product (dedicated per-line form: Product / Quantity / Price / Description) =====
+  const emptyQuotationProductLineForm = { productId: null, name: '', price: '', gst: 0, unit: '', hsn: '', qty: '1', description: '' };
+  const [quotationProductLineForm, setQuotationProductLineForm] = useState(emptyQuotationProductLineForm);
+  const [editingQuotationProductLineId, setEditingQuotationProductLineId] = useState(null);
+  const openAddQuotationProductLine = () => {
+    setQuotationProductLineForm(emptyQuotationProductLineForm);
+    setEditingQuotationProductLineId(null);
+    setQuotationSubView('addQuotationProductLine');
+  };
+  // Opens the same Add/Edit form pre-filled with an existing quotation line's data, so the
+  // user can revise its quantity, price, or description and re-save it via "Add To Quotation".
+  const openEditQuotationProductLine = (p) => {
+    setQuotationProductLineForm({
+      productId: p.productId,
+      name: p.name,
+      price: p.price !== undefined && p.price !== null ? String(p.price) : '',
+      gst: Number(p.gst) || 0,
+      unit: p.unit || '',
+      hsn: p.hsn || '',
+      qty: p.qty !== undefined && p.qty !== null ? String(p.qty) : '1',
+      description: p.description || '',
+    });
+    setEditingQuotationProductLineId(p.productId);
+    setQuotationSubView('addQuotationProductLine');
+  };
+  const openPickProductForQuotationLine = () => {
+    setProductSearchQuery('');
+    setProductPickerReturnView(quotationSubView);
+    setQuotationSubView('pickProductForQuotationLine');
+  };
+  const handlePickProductForQuotationLine = (product) => {
+    setQuotationProductLineForm((prev) => ({
+      ...prev,
+      productId: product.id,
+      name: product.name,
+      price: product.price !== undefined && product.price !== null && product.price !== '' ? String(product.price) : prev.price,
+      gst: Number(product.gst) || 0,
+      unit: product.unit || '',
+      hsn: product.hsn || '',
+      description: product.description || prev.description,
+      qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked,
+                // instead of carrying over whatever quantity was typed for the previous pick.
+    }));
+    setQuotationSubView('addQuotationProductLine');
+  };
+  const handleAddQuotationProductLine = () => {
+    if (!quotationProductLineForm.productId) {
+      showAlert('Please select a product.');
+      return;
+    }
+    const qty = Number(quotationProductLineForm.qty) > 0 ? Number(quotationProductLineForm.qty) : 1;
+    const price = Number(quotationProductLineForm.price) || 0;
+    setQuotationForm((prev) => {
+      // If we're editing an existing line, drop it first so the save below fully replaces
+      // its quantity/price/description instead of adding on top of the old quantity.
+      const baseProducts = editingQuotationProductLineId
+        ? prev.products.filter((p) => p.productId !== editingQuotationProductLineId)
+        : prev.products;
+      const existing = baseProducts.find((p) => p.productId === quotationProductLineForm.productId);
+      const products = existing
+        ? baseProducts.map((p) => (p.productId === quotationProductLineForm.productId
+            ? { ...p, qty: p.qty + qty, price, gst: Number(quotationProductLineForm.gst) || 0, description: quotationProductLineForm.description }
+            : p))
+        : [...baseProducts, {
+            productId: quotationProductLineForm.productId,
+            name: quotationProductLineForm.name,
+            price,
+            gst: Number(quotationProductLineForm.gst) || 0,
+            qty,
+            unit: quotationProductLineForm.unit || '',
+            hsn: quotationProductLineForm.hsn || '',
+            description: quotationProductLineForm.description || '',
+          }];
+      return { ...prev, products };
+    });
+    setEditingQuotationProductLineId(null);
+    setQuotationSubView('makeQuotation');
+  };
+
+  const [isOtherChargeModalOpen, setIsOtherChargeModalOpen] = useState(false);
+  const [otherChargeForm, setOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const openOtherChargeModal = () => {
+    setOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setIsOtherChargeModalOpen(true);
+  };
+  const handleSaveOtherCharge = () => {
+    if (!otherChargeForm.amount || Number(otherChargeForm.amount) <= 0) {
+      showAlert('Please enter a valid other charge amount.');
+      return;
+    }
+    const newCharge = { ...otherChargeForm, id: genId() };
+    setQuotationForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    setIsOtherChargeModalOpen(false);
+  };
+  const removeQuotationOtherCharge = (id) => {
+    setQuotationForm((prev) => ({ ...prev, otherCharges: prev.otherCharges.filter((c) => c.id !== id) }));
+  };
+  // Removes a term from THIS quotation's selection only (does not delete the term
+  // from the quotation terms catalog - that is handled separately by handleDeleteTerm).
+  const removeQuotationSelectedTerm = (termId) => {
+    setQuotationForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== termId) }));
+  };
+
+  // ===== Terms & Conditions: one independent catalog per document type =====
+  // Each document type manages its own list of Terms & Conditions entries, so adding,
+  // editing, or deleting a term in one document type never affects any other type.
+  const loadTermsCatalog = (perTypeKey) => {
+    try {
+      const saved = localStorage.getItem(perTypeKey);
+      if (saved) return JSON.parse(saved);
+      // One-time migration: older versions of the app stored a single shared catalog.
+      // Seed this document type's catalog from it so existing terms aren't lost, after
+      // which each type is edited and persisted completely independently.
+      const legacy = localStorage.getItem(TERMS_STORAGE_KEY);
+      if (legacy) return JSON.parse(legacy);
+    } catch {
+      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+    }
+    return [];
+  };
+  const [quotationTerms, setQuotationTerms] = useState(() => loadTermsCatalog(QUOTATION_TERMS_STORAGE_KEY));
+  const persistQuotationTerms = (next) => {
+    setQuotationTerms(next);
+    try { localStorage.setItem(QUOTATION_TERMS_STORAGE_KEY, JSON.stringify(next)); } catch {
+      // Ignore write failures (e.g. storage full/unavailable) - state still updates in memory.
+    }
+  };
+  const [purchaseOrderTerms, setPurchaseOrderTerms] = useState(() => loadTermsCatalog(PURCHASE_ORDER_TERMS_STORAGE_KEY));
+  const persistPurchaseOrderTerms = (next) => {
+    setPurchaseOrderTerms(next);
+    try { localStorage.setItem(PURCHASE_ORDER_TERMS_STORAGE_KEY, JSON.stringify(next)); } catch {
+      // Ignore write failures (e.g. storage full/unavailable) - state still updates in memory.
+    }
+  };
+  const [proformaInvoiceTerms, setProformaInvoiceTerms] = useState(() => loadTermsCatalog(PROFORMA_INVOICE_TERMS_STORAGE_KEY));
+  const persistProformaInvoiceTerms = (next) => {
+    setProformaInvoiceTerms(next);
+    try { localStorage.setItem(PROFORMA_INVOICE_TERMS_STORAGE_KEY, JSON.stringify(next)); } catch {
+      // Ignore write failures (e.g. storage full/unavailable) - state still updates in memory.
+    }
+  };
+  const [deliveryNoteTerms, setDeliveryNoteTerms] = useState(() => loadTermsCatalog(DELIVERY_NOTE_TERMS_STORAGE_KEY));
+  const persistDeliveryNoteTerms = (next) => {
+    setDeliveryNoteTerms(next);
+    try { localStorage.setItem(DELIVERY_NOTE_TERMS_STORAGE_KEY, JSON.stringify(next)); } catch {
+      // Ignore write failures (e.g. storage full/unavailable) - state still updates in memory.
+    }
+  };
+  const [invoiceTerms, setInvoiceTerms] = useState(() => loadTermsCatalog(INVOICE_TERMS_STORAGE_KEY));
+  const persistInvoiceTerms = (next) => {
+    setInvoiceTerms(next);
+    try { localStorage.setItem(INVOICE_TERMS_STORAGE_KEY, JSON.stringify(next)); } catch {
+      // Ignore write failures (e.g. storage full/unavailable) - state still updates in memory.
+    }
+  };
+  // Looks up the right catalog/persist-function for a given "termsModalContext" value
+  // ('quotation' | 'invoice' | 'purchaseOrder' | 'proformaInvoice' | 'deliveryNote').
+  const getTermsCatalogByContext = (context) => {
+    if (context === 'invoice') return invoiceTerms;
+    if (context === 'purchaseOrder') return purchaseOrderTerms;
+    if (context === 'proformaInvoice') return proformaInvoiceTerms;
+    if (context === 'deliveryNote') return deliveryNoteTerms;
+    return quotationTerms;
+  };
+  const persistTermsByContext = (context, next) => {
+    if (context === 'invoice') { persistInvoiceTerms(next); return; }
+    if (context === 'purchaseOrder') { persistPurchaseOrderTerms(next); return; }
+    if (context === 'proformaInvoice') { persistProformaInvoiceTerms(next); return; }
+    if (context === 'deliveryNote') { persistDeliveryNoteTerms(next); return; }
+    persistQuotationTerms(next);
+  };
+  const [termsDraftSelectedIds, setTermsDraftSelectedIds] = useState([]);
+  const openSelectTermsForQuotation = () => {
+    setTermsDraftSelectedIds(quotationForm.termsIds);
+    setQuotationSubView('selectTermsForQuotation');
+  };
+  const toggleTermsDraftSelection = (id) => {
+    setTermsDraftSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const handleDoneSelectTerms = () => {
+    setQuotationForm((prev) => ({ ...prev, termsIds: termsDraftSelectedIds }));
+    setQuotationSubView('makeQuotation');
+  };
+  const [isAddTermsModalOpen, setIsAddTermsModalOpen] = useState(false);
+  const [newTermText, setNewTermText] = useState('');
+  const [termsModalContext, setTermsModalContext] = useState('quotation'); // 'quotation' | 'invoice' | 'purchaseOrder' | 'proformaInvoice' | 'deliveryNote'
+  const openAddTermsModal = (context = 'quotation') => {
+    setNewTermText('');
+    setTermsModalContext(context);
+    setIsAddTermsModalOpen(true);
+  };
+  const handleAddTerm = () => {
+    if (!newTermText.trim()) {
+      showAlert('Please enter the terms and condition text.');
+      return;
+    }
+    const newTerm = { id: genId(), text: newTermText.trim() };
+    const catalog = getTermsCatalogByContext(termsModalContext);
+    persistTermsByContext(termsModalContext, [...catalog, newTerm]);
+    if (termsModalContext === 'invoice') {
+      setInvoiceTermsDraftSelectedIds((prev) => [...prev, newTerm.id]);
+    } else if (termsModalContext === 'purchaseOrder') {
+      setPurchaseOrderTermsDraftSelectedIds((prev) => [...prev, newTerm.id]);
+    } else if (termsModalContext === 'proformaInvoice') {
+      setProformaInvoiceTermsDraftSelectedIds((prev) => [...prev, newTerm.id]);
+    } else if (termsModalContext === 'deliveryNote') {
+      setDeliveryNoteTermsDraftSelectedIds((prev) => [...prev, newTerm.id]);
+    } else {
+      setTermsDraftSelectedIds((prev) => [...prev, newTerm.id]);
+    }
+    setIsAddTermsModalOpen(false);
+  };
+  const selectedQuotationTerms = quotationTerms.filter((term) => quotationForm.termsIds.includes(term.id));
+  // Deletes a term from exactly one document type's own catalog/selection - the other
+  // 4 document types' catalogs and selected terms are left completely untouched.
+  const handleDeleteTerm = (term, context = 'quotation') => {
+    showConfirm('Delete this term and condition?', () => {
+      const catalog = getTermsCatalogByContext(context);
+      persistTermsByContext(context, catalog.filter((t) => t.id !== term.id));
+      if (context === 'invoice') {
+        setInvoiceTermsDraftSelectedIds((prev) => prev.filter((id) => id !== term.id));
+        setInvoiceForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== term.id) }));
+      } else if (context === 'purchaseOrder') {
+        setPurchaseOrderTermsDraftSelectedIds((prev) => prev.filter((id) => id !== term.id));
+        setPurchaseOrderForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== term.id) }));
+      } else if (context === 'proformaInvoice') {
+        setProformaInvoiceTermsDraftSelectedIds((prev) => prev.filter((id) => id !== term.id));
+        setProformaInvoiceForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== term.id) }));
+      } else if (context === 'deliveryNote') {
+        setDeliveryNoteTermsDraftSelectedIds((prev) => prev.filter((id) => id !== term.id));
+        setDeliveryNoteForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== term.id) }));
+      } else {
+        setTermsDraftSelectedIds((prev) => prev.filter((id) => id !== term.id));
+        setQuotationForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== term.id) }));
+      }
+      showSuccess('Term deleted.');
+    });
+  };
+
+
+  const quotationProductsTotal = quotationForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
+  const quotationOtherChargesTotal = quotationForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const quotationAmountDue = Math.round(quotationProductsTotal + quotationOtherChargesTotal);
+
+  const handleGenerateQuotation = async () => {
+    if (!quotationForm.customerId) {
+      showAlert('Please select a customer.');
+      return;
+    }
+    if (quotationForm.products.length === 0) {
+      showAlert('Please add at least one product.');
+      return;
+    }
+    if (!loggedInUser?.userId) {
+      showAlert('You need to be signed in to save a quotation.');
+      return;
+    }
+
+    const customerSnapshot = {
+      customerName: selectedQuotationCustomer?.name || 'Unknown',
+      customerCompany: selectedQuotationCustomer?.companyName || '',
+      customerMobile: selectedQuotationCustomer?.mobile || '',
+      customerEmail: selectedQuotationCustomer?.email || '',
+      customerAddressLine1: selectedQuotationCustomer?.addressLine1 || '',
+      customerAddressLine2: selectedQuotationCustomer?.addressLine2 || '',
+      customerAddressLine3: selectedQuotationCustomer?.addressLine3 || '',
+      customerBillingAddress: selectedQuotationCustomer?.billingAddress || '',
+      customerShippingAddress: selectedQuotationCustomer?.shippingAddress || '',
+    };
+
+    // Payload matches QuotationRequestDto - quotationNo is required by the
+    // entity (MaxLength 50, Required), and Date is parsed server-side with
+    // DateTime.TryParse against whatever culture the server is running under,
+    // so keep sending it in the same 'dd/MM/yyyy' shape the form already uses.
+    const payload = { ...quotationForm, ...customerSnapshot };
+
+    if (editingQuotationId) {
+      // Optimistically update the list so the UI feels instant, then reconcile
+      // with whatever the server actually persisted (grandTotal, updatedAt, and
+      // any snapshot fields are authoritative from the server).
+      const optimistic = quotations.map((q) => (
+        q.id === editingQuotationId
+          ? { ...q, ...payload, grandTotal: quotationAmountDue, updatedAt: new Date().toISOString() }
+          : q
+      ));
+      setQuotations(optimistic);
+      try {
+        const saved = await documentService.updateQuotation(editingQuotationId, payload);
+        persistQuotations(quotations.map((q) => (q.id === editingQuotationId ? saved : q)));
+        showSuccess('Quotation updated successfully.');
+        setEditingQuotationId(null);
+        setQuotationSubView('quotationDetail');
+      } catch (error) {
+        console.error('Error updating quotation:', error);
+        persistQuotations(quotations); // revert the optimistic change
+        showAlert('Could not update the quotation on the server. Please try again.');
+      }
+      return;
+    }
+
+    try {
+      const created = await documentService.createQuotation(loggedInUser.userId, payload);
+      persistQuotations([...quotations, created]);
+      showSuccess('Quotation generated successfully.');
+      setQuotationSubView('quotationList'); // Navigate to list instead of null
+    } catch (error) {
+      console.error('Error creating quotation:', error);
+      showAlert('Could not save the quotation to the server. Please try again.');
+    }
+  };
+
+
+  // ===== Quotations module: Make Purchase Order =====
+  const emptyPurchaseOrderForm = () => ({
+    date: formatQuotationDate(new Date()),
+    purchaseOrderNo: '',
+    otherInfo: '',
+    customerId: null,
+    products: [], // { productId, name, price, gst, qty }
+    otherCharges: [], // { id, label, amount, taxable }
+    termsIds: [],
+  });
+  const [purchaseOrderForm, setPurchaseOrderForm] = useState(emptyPurchaseOrderForm);
+
+  // ===== Purchase Order module: List & Detail Views =====
+  const [purchaseOrders, setPurchaseOrders] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PURCHASE_ORDERS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [selectedPurchaseOrderId, setSelectedPurchaseOrderId] = useState(null);
+  const [purchaseOrderSearchQuery, setPurchaseOrderSearchQuery] = useState('');
+
+  const persistPurchaseOrders = (next) => {
+    setPurchaseOrders(next);
+    try { localStorage.setItem(PURCHASE_ORDERS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  const getNextPurchaseOrderNumber = () => {
+    const prefix = purchaseOrderSettings.numberPrefix || 'PO-';
+    const maxNum = purchaseOrders.reduce((max, q) => {
+      const match = String(q.purchaseOrderNo || '').match(/(\d+)\s*$/);
+      const n = match ? parseInt(match[1], 10) : 0;
+      return n > max ? n : max;
+    }, 0);
+    return `${prefix}${maxNum + 1}`;
+  };
+
+  const openMakePurchaseOrder = () => {
+    setEditingPurchaseOrderId(null);
+    setPurchaseOrderForm({ ...emptyPurchaseOrderForm(), purchaseOrderNo: getNextPurchaseOrderNumber() });
+    setQuotationSubView('makePurchaseOrder');
+  };
+
+  const openSelectCustomerForPurchaseOrder = () => {
+    setCustomerSearchQuery('');
+    setCustomerFormReturnView('selectCustomerForPurchaseOrder');
+    setQuotationSubView('selectCustomerForPurchaseOrder');
+  };
+  const handleSelectCustomerForPurchaseOrder = (customer) => {
+    setPurchaseOrderForm((prev) => ({ ...prev, customerId: customer.id }));
+    setQuotationSubView('makePurchaseOrder');
+  };
+  const selectedPurchaseOrderCustomer = customers.find((c) => c.id === purchaseOrderForm.customerId) || null;
+
+  const removePurchaseOrderProductLine = (productId) => {
+    setPurchaseOrderForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== productId) }));
+  };
+
+  // ===== Add Purchase Order Product (dedicated per-line form: Product / Quantity / Price / Description) =====
+  const emptyPurchaseOrderProductLineForm = { productId: null, name: '', price: '', gst: 0, unit: '', hsn: '', qty: '1', description: '' };
+  const [purchaseOrderProductLineForm, setPurchaseOrderProductLineForm] = useState(emptyPurchaseOrderProductLineForm);
+  const [editingPurchaseOrderProductLineId, setEditingPurchaseOrderProductLineId] = useState(null);
+  const openAddPurchaseOrderProductLine = () => {
+    setPurchaseOrderProductLineForm(emptyPurchaseOrderProductLineForm);
+    setEditingPurchaseOrderProductLineId(null);
+    setQuotationSubView('addPurchaseOrderProductLine');
+  };
+  const openEditPurchaseOrderProductLine = (p) => {
+    setPurchaseOrderProductLineForm({
+      productId: p.productId,
+      name: p.name,
+      price: p.price !== undefined && p.price !== null ? String(p.price) : '',
+      gst: Number(p.gst) || 0,
+      unit: p.unit || '',
+      hsn: p.hsn || '',
+      qty: p.qty !== undefined && p.qty !== null ? String(p.qty) : '1',
+      description: p.description || '',
+    });
+    setEditingPurchaseOrderProductLineId(p.productId);
+    setQuotationSubView('addPurchaseOrderProductLine');
+  };
+  const openPickProductForPurchaseOrderLine = () => {
+    setProductSearchQuery('');
+    setProductPickerReturnView(quotationSubView);
+    setQuotationSubView('pickProductForPurchaseOrderLine');
+  };
+  const handlePickProductForPurchaseOrderLine = (product) => {
+    setPurchaseOrderProductLineForm((prev) => ({
+      ...prev,
+      productId: product.id,
+      name: product.name,
+      price: product.price !== undefined && product.price !== null && product.price !== '' ? String(product.price) : prev.price,
+      gst: Number(product.gst) || 0,
+      unit: product.unit || '',
+      hsn: product.hsn || '',
+      description: product.description || prev.description,
+      qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
+    }));
+    setQuotationSubView('addPurchaseOrderProductLine');
+  };
+  const handleAddPurchaseOrderProductLine = () => {
+    if (!purchaseOrderProductLineForm.productId) {
+      showAlert('Please select a product.');
+      return;
+    }
+    const qty = Number(purchaseOrderProductLineForm.qty) > 0 ? Number(purchaseOrderProductLineForm.qty) : 1;
+    const price = Number(purchaseOrderProductLineForm.price) || 0;
+    setPurchaseOrderForm((prev) => {
+      const baseProducts = editingPurchaseOrderProductLineId
+        ? prev.products.filter((p) => p.productId !== editingPurchaseOrderProductLineId)
+        : prev.products;
+      const existing = baseProducts.find((p) => p.productId === purchaseOrderProductLineForm.productId);
+      const products = existing
+        ? baseProducts.map((p) => (p.productId === purchaseOrderProductLineForm.productId
+            ? { ...p, qty: p.qty + qty, price, gst: Number(purchaseOrderProductLineForm.gst) || 0, description: purchaseOrderProductLineForm.description }
+            : p))
+        : [...baseProducts, {
+            productId: purchaseOrderProductLineForm.productId,
+            name: purchaseOrderProductLineForm.name,
+            price,
+            gst: Number(purchaseOrderProductLineForm.gst) || 0,
+            qty,
+            unit: purchaseOrderProductLineForm.unit || '',
+            hsn: purchaseOrderProductLineForm.hsn || '',
+            description: purchaseOrderProductLineForm.description || '',
+          }];
+      return { ...prev, products };
+    });
+    setEditingPurchaseOrderProductLineId(null);
+    setQuotationSubView('makePurchaseOrder');
+  };
+
+
+  const [isPurchaseOrderOtherChargeModalOpen, setIsPurchaseOrderOtherChargeModalOpen] = useState(false);
+  const [purchaseOrderOtherChargeForm, setPurchaseOrderOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const openPurchaseOrderOtherChargeModal = () => {
+    setPurchaseOrderOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setIsPurchaseOrderOtherChargeModalOpen(true);
+  };
+  const handleSavePurchaseOrderOtherCharge = () => {
+    if (!purchaseOrderOtherChargeForm.amount || Number(purchaseOrderOtherChargeForm.amount) <= 0) {
+      showAlert('Please enter a valid other charge amount.');
+      return;
+    }
+    const newCharge = { ...purchaseOrderOtherChargeForm, id: genId() };
+    setPurchaseOrderForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    setIsPurchaseOrderOtherChargeModalOpen(false);
+  };
+  const removePurchaseOrderOtherCharge = (id) => {
+    setPurchaseOrderForm((prev) => ({ ...prev, otherCharges: prev.otherCharges.filter((c) => c.id !== id) }));
+  };
+  // Removes a term from THIS purchase order's selection only (does not delete the term
+  // from the purchase order terms catalog - that is handled separately by handleDeleteTerm).
+  const removePurchaseOrderSelectedTerm = (termId) => {
+    setPurchaseOrderForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== termId) }));
+  };
+
+  const [purchaseOrderTermsDraftSelectedIds, setPurchaseOrderTermsDraftSelectedIds] = useState([]);
+  const openSelectTermsForPurchaseOrder = () => {
+    setPurchaseOrderTermsDraftSelectedIds(purchaseOrderForm.termsIds);
+    setQuotationSubView('selectTermsForPurchaseOrder');
+  };
+  const togglePurchaseOrderTermsDraftSelection = (id) => {
+    setPurchaseOrderTermsDraftSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const handleDoneSelectPurchaseOrderTerms = () => {
+    setPurchaseOrderForm((prev) => ({ ...prev, termsIds: purchaseOrderTermsDraftSelectedIds }));
+    setQuotationSubView('makePurchaseOrder');
+  };
+  const selectedPurchaseOrderTerms = purchaseOrderTerms.filter((term) => purchaseOrderForm.termsIds.includes(term.id));
+
+  const purchaseOrderProductsTotal = purchaseOrderForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
+  const purchaseOrderOtherChargesTotal = purchaseOrderForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const purchaseOrderAmountDue = Math.round(purchaseOrderProductsTotal + purchaseOrderOtherChargesTotal);
+
+  const handleGeneratePurchaseOrder = () => {
+    if (!purchaseOrderForm.customerId) {
+      showAlert('Please select a customer.');
+      return;
+    }
+    if (purchaseOrderForm.products.length === 0) {
+      showAlert('Please add at least one product.');
+      return;
+    }
+
+    const customerSnapshot = {
+      customerName: selectedPurchaseOrderCustomer?.name || 'Unknown',
+      customerCompany: selectedPurchaseOrderCustomer?.companyName || '',
+      customerMobile: selectedPurchaseOrderCustomer?.mobile || '',
+      customerEmail: selectedPurchaseOrderCustomer?.email || '',
+      customerAddressLine1: selectedPurchaseOrderCustomer?.addressLine1 || '',
+      customerAddressLine2: selectedPurchaseOrderCustomer?.addressLine2 || '',
+      customerAddressLine3: selectedPurchaseOrderCustomer?.addressLine3 || '',
+      customerBillingAddress: selectedPurchaseOrderCustomer?.billingAddress || '',
+      customerShippingAddress: selectedPurchaseOrderCustomer?.shippingAddress || '',
+    };
+
+    if (editingPurchaseOrderId) {
+      persistPurchaseOrders(purchaseOrders.map((o) => (
+        o.id === editingPurchaseOrderId
+          ? { ...o, ...purchaseOrderForm, grandTotal: purchaseOrderAmountDue, ...customerSnapshot, updatedAt: new Date().toISOString() }
+          : o
+      )));
+      showSuccess('Purchase Order updated successfully.');
+      setEditingPurchaseOrderId(null);
+      setQuotationSubView('purchaseOrderDetail');
+      return;
+    }
+
+    const newId = genId();
+    const newPurchaseOrder = {
+      id: newId,
+      ...purchaseOrderForm,
+      grandTotal: purchaseOrderAmountDue,
+      createdAt: new Date().toISOString(),
+      ...customerSnapshot,
+    };
+
+    persistPurchaseOrders([...purchaseOrders, newPurchaseOrder]);
+
+    showSuccess('Purchase Order generated successfully.');
+    setQuotationSubView('purchaseOrderList');
+  };
+
+  // ===== Quotations module: Make Proforma Invoice =====
+  const emptyProformaInvoiceForm = () => ({
+    date: formatQuotationDate(new Date()),
+    proformaInvoiceNo: '',
+    dueDate: '',
+    poNo: '',
+    otherInfo: '',
+    customerId: null,
+    products: [], // { productId, name, price, gst, qty }
+    otherCharges: [], // { id, label, amount, taxable }
+    termsIds: [],
+    paidInfo: [], // { id, date, amount, note }
+  });
+  const [proformaInvoiceForm, setProformaInvoiceForm] = useState(emptyProformaInvoiceForm);
+
+  // ===== Proforma Invoice module: List & Detail Views =====
+  const [proformaInvoices, setProformaInvoices] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PROFORMA_INVOICES_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [selectedProformaInvoiceId, setSelectedProformaInvoiceId] = useState(null);
+  const [proformaInvoiceSearchQuery, setProformaInvoiceSearchQuery] = useState('');
+
+  const persistProformaInvoices = (next) => {
+    setProformaInvoices(next);
+    try { localStorage.setItem(PROFORMA_INVOICES_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  const getNextProformaInvoiceNumber = () => {
+    const prefix = proformaInvoiceSettings.numberPrefix || 'PI-';
+    const maxNum = proformaInvoices.reduce((max, q) => {
+      const match = String(q.proformaInvoiceNo || '').match(/(\d+)\s*$/);
+      const n = match ? parseInt(match[1], 10) : 0;
+      return n > max ? n : max;
+    }, 0);
+    return `${prefix}${maxNum + 1}`;
+  };
+
+  const openMakeProformaInvoice = () => {
+    setEditingProformaInvoiceId(null);
+    setProformaInvoiceForm({ ...emptyProformaInvoiceForm(), proformaInvoiceNo: getNextProformaInvoiceNumber() });
+    setQuotationSubView('makeProformaInvoice');
+  };
+
+  const openSelectCustomerForProformaInvoice = () => {
+    setCustomerSearchQuery('');
+    setCustomerFormReturnView('selectCustomerForProformaInvoice');
+    setQuotationSubView('selectCustomerForProformaInvoice');
+  };
+  const handleSelectCustomerForProformaInvoice = (customer) => {
+    setProformaInvoiceForm((prev) => ({ ...prev, customerId: customer.id }));
+    setQuotationSubView('makeProformaInvoice');
+  };
+  const selectedProformaInvoiceCustomer = customers.find((c) => c.id === proformaInvoiceForm.customerId) || null;
+
+  const removeProformaInvoiceProductLine = (productId) => {
+    setProformaInvoiceForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== productId) }));
+  };
+
+  // ===== Add Proforma Invoice Product (dedicated per-line form: Product / Quantity / Price / Description) =====
+  const emptyProformaInvoiceProductLineForm = { productId: null, name: '', price: '', gst: 0, unit: '', hsn: '', qty: '1', description: '' };
+  const [proformaInvoiceProductLineForm, setProformaInvoiceProductLineForm] = useState(emptyProformaInvoiceProductLineForm);
+  const [editingProformaInvoiceProductLineId, setEditingProformaInvoiceProductLineId] = useState(null);
+  const openAddProformaInvoiceProductLine = () => {
+    setProformaInvoiceProductLineForm(emptyProformaInvoiceProductLineForm);
+    setEditingProformaInvoiceProductLineId(null);
+    setQuotationSubView('addProformaInvoiceProductLine');
+  };
+  const openEditProformaInvoiceProductLine = (p) => {
+    setProformaInvoiceProductLineForm({
+      productId: p.productId,
+      name: p.name,
+      price: p.price !== undefined && p.price !== null ? String(p.price) : '',
+      gst: Number(p.gst) || 0,
+      unit: p.unit || '',
+      hsn: p.hsn || '',
+      qty: p.qty !== undefined && p.qty !== null ? String(p.qty) : '1',
+      description: p.description || '',
+    });
+    setEditingProformaInvoiceProductLineId(p.productId);
+    setQuotationSubView('addProformaInvoiceProductLine');
+  };
+  const openPickProductForProformaInvoiceLine = () => {
+    setProductSearchQuery('');
+    setProductPickerReturnView(quotationSubView);
+    setQuotationSubView('pickProductForProformaInvoiceLine');
+  };
+  const handlePickProductForProformaInvoiceLine = (product) => {
+    setProformaInvoiceProductLineForm((prev) => ({
+      ...prev,
+      productId: product.id,
+      name: product.name,
+      price: product.price !== undefined && product.price !== null && product.price !== '' ? String(product.price) : prev.price,
+      gst: Number(product.gst) || 0,
+      unit: product.unit || '',
+      hsn: product.hsn || '',
+      description: product.description || prev.description,
+      qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
+    }));
+    setQuotationSubView('addProformaInvoiceProductLine');
+  };
+  const handleAddProformaInvoiceProductLine = () => {
+    if (!proformaInvoiceProductLineForm.productId) {
+      showAlert('Please select a product.');
+      return;
+    }
+    const qty = Number(proformaInvoiceProductLineForm.qty) > 0 ? Number(proformaInvoiceProductLineForm.qty) : 1;
+    const price = Number(proformaInvoiceProductLineForm.price) || 0;
+    setProformaInvoiceForm((prev) => {
+      const baseProducts = editingProformaInvoiceProductLineId
+        ? prev.products.filter((p) => p.productId !== editingProformaInvoiceProductLineId)
+        : prev.products;
+      const existing = baseProducts.find((p) => p.productId === proformaInvoiceProductLineForm.productId);
+      const products = existing
+        ? baseProducts.map((p) => (p.productId === proformaInvoiceProductLineForm.productId
+            ? { ...p, qty: p.qty + qty, price, gst: Number(proformaInvoiceProductLineForm.gst) || 0, description: proformaInvoiceProductLineForm.description }
+            : p))
+        : [...baseProducts, {
+            productId: proformaInvoiceProductLineForm.productId,
+            name: proformaInvoiceProductLineForm.name,
+            price,
+            gst: Number(proformaInvoiceProductLineForm.gst) || 0,
+            qty,
+            unit: proformaInvoiceProductLineForm.unit || '',
+            hsn: proformaInvoiceProductLineForm.hsn || '',
+            description: proformaInvoiceProductLineForm.description || '',
+          }];
+      return { ...prev, products };
+    });
+    setEditingProformaInvoiceProductLineId(null);
+    setQuotationSubView('makeProformaInvoice');
+  };
+
+  const [isProformaInvoiceOtherChargeModalOpen, setIsProformaInvoiceOtherChargeModalOpen] = useState(false);
+  const [proformaInvoiceOtherChargeForm, setProformaInvoiceOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const openProformaInvoiceOtherChargeModal = () => {
+    setProformaInvoiceOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setIsProformaInvoiceOtherChargeModalOpen(true);
+  };
+  const handleSaveProformaInvoiceOtherCharge = () => {
+    if (!proformaInvoiceOtherChargeForm.amount || Number(proformaInvoiceOtherChargeForm.amount) <= 0) {
+      showAlert('Please enter a valid other charge amount.');
+      return;
+    }
+    const newCharge = { ...proformaInvoiceOtherChargeForm, id: genId() };
+    setProformaInvoiceForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    setIsProformaInvoiceOtherChargeModalOpen(false);
+  };
+  const removeProformaInvoiceOtherCharge = (id) => {
+    setProformaInvoiceForm((prev) => ({ ...prev, otherCharges: prev.otherCharges.filter((c) => c.id !== id) }));
+  };
+  // Removes a term from THIS proforma invoice's selection only (does not delete the term
+  // from the proforma invoice terms catalog - that is handled separately by handleDeleteTerm).
+  const removeProformaInvoiceSelectedTerm = (termId) => {
+    setProformaInvoiceForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== termId) }));
+  };
+
+  const [proformaInvoiceTermsDraftSelectedIds, setProformaInvoiceTermsDraftSelectedIds] = useState([]);
+  const openSelectTermsForProformaInvoice = () => {
+    setProformaInvoiceTermsDraftSelectedIds(proformaInvoiceForm.termsIds);
+    setQuotationSubView('selectTermsForProformaInvoice');
+  };
+  const toggleProformaInvoiceTermsDraftSelection = (id) => {
+    setProformaInvoiceTermsDraftSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const handleDoneSelectProformaInvoiceTerms = () => {
+    setProformaInvoiceForm((prev) => ({ ...prev, termsIds: proformaInvoiceTermsDraftSelectedIds }));
+    setQuotationSubView('makeProformaInvoice');
+  };
+  const selectedProformaInvoiceTerms = proformaInvoiceTerms.filter((term) => proformaInvoiceForm.termsIds.includes(term.id));
+
+  // Paid Info (extra field vs. Make Quotation)
+  const emptyProformaPaidInfoForm = () => ({ date: '', amount: '', note: '' });
+  const [isProformaPaidInfoModalOpen, setIsProformaPaidInfoModalOpen] = useState(false);
+  const [proformaPaidInfoForm, setProformaPaidInfoForm] = useState(emptyProformaPaidInfoForm);
+  const [isProformaPaidInfoDatePickerOpen, setIsProformaPaidInfoDatePickerOpen] = useState(false);
+  const [proformaPaidInfoCalendarMonth, setProformaPaidInfoCalendarMonth] = useState(() => new Date());
+  const openAddProformaPaidInfoModal = () => {
+    setProformaPaidInfoForm(emptyProformaPaidInfoForm());
+    setProformaPaidInfoCalendarMonth(new Date());
+    setIsProformaPaidInfoModalOpen(true);
+  };
+  const handleSaveProformaPaidInfo = () => {
+    if (!proformaPaidInfoForm.amount || Number(proformaPaidInfoForm.amount) <= 0) {
+      showAlert('Please enter a valid paid amount.');
+      return;
+    }
+    if (!proformaPaidInfoForm.date) {
+      showAlert(t('selectDateForAdvanceError') || 'Please select the paid date.');
+      return;
+    }
+    const newPaidInfo = { id: genId(), date: proformaPaidInfoForm.date, amount: Number(proformaPaidInfoForm.amount), note: proformaPaidInfoForm.note };
+    setProformaInvoiceForm((prev) => ({ ...prev, paidInfo: [...prev.paidInfo, newPaidInfo] }));
+    setIsProformaPaidInfoModalOpen(false);
+  };
+  const removeProformaPaidInfoLine = (id) => {
+    setProformaInvoiceForm((prev) => ({ ...prev, paidInfo: prev.paidInfo.filter((p) => p.id !== id) }));
+  };
+  // Tap-to-select on Paid Info List entries - mirrors the Select Terms and Conditions
+  // screen's draft-selection pattern (single or multi-select, highlighted card, Done
+  // just closes the screen without any further data change).
+  const [selectedProformaPaidInfoIds, setSelectedProformaPaidInfoIds] = useState([]);
+  const openProformaPaidInfoList = () => {
+    setSelectedProformaPaidInfoIds([]);
+    setQuotationSubView('proformaPaidInfoList');
+  };
+  const toggleProformaPaidInfoSelection = (id) => {
+    setSelectedProformaPaidInfoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const handleDoneProformaPaidInfoList = () => {
+    setSelectedProformaPaidInfoIds([]);
+    setQuotationSubView('makeProformaInvoice');
+  };
+
+  const proformaInvoiceProductsTotal = proformaInvoiceForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
+  const proformaInvoiceOtherChargesTotal = proformaInvoiceForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const proformaInvoiceGrandTotal = Math.round(proformaInvoiceProductsTotal + proformaInvoiceOtherChargesTotal);
+  const proformaInvoicePaidTotal = proformaInvoiceForm.paidInfo.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const proformaInvoiceAmountDue = Math.max(0, proformaInvoiceGrandTotal - proformaInvoicePaidTotal);
+
+  const handleGenerateProformaInvoice = () => {
+    if (!proformaInvoiceForm.customerId) {
+      showAlert('Please select a customer.');
+      return;
+    }
+    if (proformaInvoiceForm.products.length === 0) {
+      showAlert('Please add at least one product.');
+      return;
+    }
+
+    const customerSnapshot = {
+      customerName: selectedProformaInvoiceCustomer?.name || 'Unknown',
+      customerCompany: selectedProformaInvoiceCustomer?.companyName || '',
+      customerMobile: selectedProformaInvoiceCustomer?.mobile || '',
+      customerEmail: selectedProformaInvoiceCustomer?.email || '',
+      customerAddressLine1: selectedProformaInvoiceCustomer?.addressLine1 || '',
+      customerAddressLine2: selectedProformaInvoiceCustomer?.addressLine2 || '',
+      customerAddressLine3: selectedProformaInvoiceCustomer?.addressLine3 || '',
+      customerBillingAddress: selectedProformaInvoiceCustomer?.billingAddress || '',
+      customerShippingAddress: selectedProformaInvoiceCustomer?.shippingAddress || '',
+    };
+
+    if (editingProformaInvoiceId) {
+      persistProformaInvoices(proformaInvoices.map((inv) => (
+        inv.id === editingProformaInvoiceId
+          ? { ...inv, ...proformaInvoiceForm, grandTotal: proformaInvoiceGrandTotal, paidTotal: proformaInvoicePaidTotal, balanceDue: proformaInvoiceAmountDue, ...customerSnapshot, updatedAt: new Date().toISOString() }
+          : inv
+      )));
+      showSuccess('Proforma Invoice updated successfully.');
+      setEditingProformaInvoiceId(null);
+      setQuotationSubView('proformaInvoiceDetail');
+      return;
+    }
+
+    const newId = genId();
+    const newProformaInvoice = {
+      id: newId,
+      ...proformaInvoiceForm,
+      grandTotal: proformaInvoiceGrandTotal,
+      paidTotal: proformaInvoicePaidTotal,
+      balanceDue: proformaInvoiceAmountDue,
+      createdAt: new Date().toISOString(),
+      ...customerSnapshot,
+    };
+
+    persistProformaInvoices([...proformaInvoices, newProformaInvoice]);
+
+    showSuccess('Proforma Invoice generated successfully.');
+    setQuotationSubView('proformaInvoiceList');
+  };
+
+  // ===== Quotations module: Make Delivery Note =====
+  const emptyDeliveryNoteForm = () => ({
+    date: formatQuotationDate(new Date()),
+    deliveryNoteNo: '',
+    refNo: '',
+    otherInfo: '',
+    customerId: null,
+    products: [], // { productId, name, price, gst, qty }
+    termsIds: [],
+  });
+  const [deliveryNoteForm, setDeliveryNoteForm] = useState(emptyDeliveryNoteForm);
+
+  // ===== Delivery Note module: List & Detail Views =====
+  const [deliveryNotes, setDeliveryNotes] = useState(() => {
+    try {
+      const saved = localStorage.getItem(DELIVERY_NOTES_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [selectedDeliveryNoteId, setSelectedDeliveryNoteId] = useState(null);
+  const [deliveryNoteSearchQuery, setDeliveryNoteSearchQuery] = useState('');
+
+  const persistDeliveryNotes = (next) => {
+    setDeliveryNotes(next);
+    try { localStorage.setItem(DELIVERY_NOTES_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  const getNextDeliveryNoteNumber = () => {
+    const prefix = deliveryNoteSettings.numberPrefix || 'DN-';
+    const maxNum = deliveryNotes.reduce((max, q) => {
+      const match = String(q.deliveryNoteNo || '').match(/(\d+)\s*$/);
+      const n = match ? parseInt(match[1], 10) : 0;
+      return n > max ? n : max;
+    }, 0);
+    return `${prefix}${maxNum + 1}`;
+  };
+
+  const openMakeDeliveryNote = () => {
+    setEditingDeliveryNoteId(null);
+    setDeliveryNoteForm({ ...emptyDeliveryNoteForm(), deliveryNoteNo: getNextDeliveryNoteNumber() });
+    setQuotationSubView('makeDeliveryNote');
+  };
+
+  const openSelectCustomerForDeliveryNote = () => {
+    setCustomerSearchQuery('');
+    setCustomerFormReturnView('selectCustomerForDeliveryNote');
+    setQuotationSubView('selectCustomerForDeliveryNote');
+  };
+  const handleSelectCustomerForDeliveryNote = (customer) => {
+    setDeliveryNoteForm((prev) => ({ ...prev, customerId: customer.id }));
+    setQuotationSubView('makeDeliveryNote');
+  };
+  const selectedDeliveryNoteCustomer = customers.find((c) => c.id === deliveryNoteForm.customerId) || null;
+
+  const removeDeliveryNoteProductLine = (productId) => {
+    setDeliveryNoteForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== productId) }));
+  };
+
+  // ===== Add Delivery Note Product (dedicated per-line form: Product / Quantity / Price / Description) =====
+  const emptyDeliveryNoteProductLineForm = { productId: null, name: '', price: '', gst: 0, unit: '', hsn: '', qty: '1', description: '' };
+  const [deliveryNoteProductLineForm, setDeliveryNoteProductLineForm] = useState(emptyDeliveryNoteProductLineForm);
+  const [editingDeliveryNoteProductLineId, setEditingDeliveryNoteProductLineId] = useState(null);
+  const openAddDeliveryNoteProductLine = () => {
+    setDeliveryNoteProductLineForm(emptyDeliveryNoteProductLineForm);
+    setEditingDeliveryNoteProductLineId(null);
+    setQuotationSubView('addDeliveryNoteProductLine');
+  };
+  const openEditDeliveryNoteProductLine = (p) => {
+    setDeliveryNoteProductLineForm({
+      productId: p.productId,
+      name: p.name,
+      price: p.price !== undefined && p.price !== null ? String(p.price) : '',
+      gst: Number(p.gst) || 0,
+      unit: p.unit || '',
+      hsn: p.hsn || '',
+      qty: p.qty !== undefined && p.qty !== null ? String(p.qty) : '1',
+      description: p.description || '',
+    });
+    setEditingDeliveryNoteProductLineId(p.productId);
+    setQuotationSubView('addDeliveryNoteProductLine');
+  };
+  const openPickProductForDeliveryNoteLine = () => {
+    setProductSearchQuery('');
+    setProductPickerReturnView(quotationSubView);
+    setQuotationSubView('pickProductForDeliveryNoteLine');
+  };
+  const handlePickProductForDeliveryNoteLine = (product) => {
+    setDeliveryNoteProductLineForm((prev) => ({
+      ...prev,
+      productId: product.id,
+      name: product.name,
+      price: product.price !== undefined && product.price !== null && product.price !== '' ? String(product.price) : prev.price,
+      gst: Number(product.gst) || 0,
+      unit: product.unit || '',
+      hsn: product.hsn || '',
+      description: product.description || prev.description,
+      qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
+    }));
+    setQuotationSubView('addDeliveryNoteProductLine');
+  };
+  const handleAddDeliveryNoteProductLine = () => {
+    if (!deliveryNoteProductLineForm.productId) {
+      showAlert('Please select a product.');
+      return;
+    }
+    const qty = Number(deliveryNoteProductLineForm.qty) > 0 ? Number(deliveryNoteProductLineForm.qty) : 1;
+    const price = Number(deliveryNoteProductLineForm.price) || 0;
+    setDeliveryNoteForm((prev) => {
+      const baseProducts = editingDeliveryNoteProductLineId
+        ? prev.products.filter((p) => p.productId !== editingDeliveryNoteProductLineId)
+        : prev.products;
+      const existing = baseProducts.find((p) => p.productId === deliveryNoteProductLineForm.productId);
+      const products = existing
+        ? baseProducts.map((p) => (p.productId === deliveryNoteProductLineForm.productId
+            ? { ...p, qty: p.qty + qty, price, gst: Number(deliveryNoteProductLineForm.gst) || 0, description: deliveryNoteProductLineForm.description }
+            : p))
+        : [...baseProducts, {
+            productId: deliveryNoteProductLineForm.productId,
+            name: deliveryNoteProductLineForm.name,
+            price,
+            gst: Number(deliveryNoteProductLineForm.gst) || 0,
+            qty,
+            unit: deliveryNoteProductLineForm.unit || '',
+            hsn: deliveryNoteProductLineForm.hsn || '',
+            description: deliveryNoteProductLineForm.description || '',
+          }];
+      return { ...prev, products };
+    });
+    setEditingDeliveryNoteProductLineId(null);
+    setQuotationSubView('makeDeliveryNote');
+  };
+
+  // Removes a term from THIS delivery note's selection only (does not delete the term
+  // from the delivery note terms catalog - that is handled separately by handleDeleteTerm).
+  const removeDeliveryNoteSelectedTerm = (termId) => {
+    setDeliveryNoteForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== termId) }));
+  };
+
+  const [deliveryNoteTermsDraftSelectedIds, setDeliveryNoteTermsDraftSelectedIds] = useState([]);
+  const openSelectTermsForDeliveryNote = () => {
+    setDeliveryNoteTermsDraftSelectedIds(deliveryNoteForm.termsIds);
+    setQuotationSubView('selectTermsForDeliveryNote');
+  };
+  const toggleDeliveryNoteTermsDraftSelection = (id) => {
+    setDeliveryNoteTermsDraftSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const handleDoneSelectDeliveryNoteTerms = () => {
+    setDeliveryNoteForm((prev) => ({ ...prev, termsIds: deliveryNoteTermsDraftSelectedIds }));
+    setQuotationSubView('makeDeliveryNote');
+  };
+  const selectedDeliveryNoteTerms = deliveryNoteTerms.filter((term) => deliveryNoteForm.termsIds.includes(term.id));
+
+  const handleGenerateDeliveryNote = () => {
+    if (!deliveryNoteForm.customerId) {
+      showAlert('Please select a customer.');
+      return;
+    }
+    if (deliveryNoteForm.products.length === 0) {
+      showAlert('Please add at least one product.');
+      return;
+    }
+
+    const customerSnapshot = {
+      customerName: selectedDeliveryNoteCustomer?.name || 'Unknown',
+      customerCompany: selectedDeliveryNoteCustomer?.companyName || '',
+      customerMobile: selectedDeliveryNoteCustomer?.mobile || '',
+      customerEmail: selectedDeliveryNoteCustomer?.email || '',
+      customerAddressLine1: selectedDeliveryNoteCustomer?.addressLine1 || '',
+      customerAddressLine2: selectedDeliveryNoteCustomer?.addressLine2 || '',
+      customerAddressLine3: selectedDeliveryNoteCustomer?.addressLine3 || '',
+      customerBillingAddress: selectedDeliveryNoteCustomer?.billingAddress || '',
+      customerShippingAddress: selectedDeliveryNoteCustomer?.shippingAddress || '',
+    };
+
+    if (editingDeliveryNoteId) {
+      persistDeliveryNotes(deliveryNotes.map((dn) => (
+        dn.id === editingDeliveryNoteId
+          ? { ...dn, ...deliveryNoteForm, ...customerSnapshot, updatedAt: new Date().toISOString() }
+          : dn
+      )));
+      showSuccess('Delivery Note updated successfully.');
+      setEditingDeliveryNoteId(null);
+      setQuotationSubView('deliveryNoteDetail');
+      return;
+    }
+
+    const newId = genId();
+    const newDeliveryNote = {
+      id: newId,
+      ...deliveryNoteForm,
+      createdAt: new Date().toISOString(),
+      ...customerSnapshot,
+    };
+
+    persistDeliveryNotes([...deliveryNotes, newDeliveryNote]);
+
+    showSuccess('Delivery Note generated successfully.');
+    setQuotationSubView('deliveryNoteList');
+  };
+
+  // ===== Invoices module: Make Invoice =====
+  const emptyInvoiceForm = () => ({
+    date: formatQuotationDate(new Date()),
+    invoiceNo: '',
+    dueDate: '',
+    poNo: '',
+    otherInfo: '',
+    customerId: null,
+    products: [], // { productId, name, price, gst, qty }
+    otherCharges: [], // { id, label, amount, taxable }
+    termsIds: [],
+    paidInfo: [], // { id, date, amount, note }
+  });
+  const [invoiceForm, setInvoiceForm] = useState(emptyInvoiceForm);
+
+  // ===== Invoices module: List & Detail Views =====
+  const [invoices, setInvoices] = useState(() => {
+    try {
+      const saved = localStorage.getItem(INVOICES_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
+  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState('');
+
+  const persistInvoices = (next) => {
+    setInvoices(next);
+    try { localStorage.setItem(INVOICES_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  // Next invoice number = 1 higher than the highest number already used (formatted as INV-n),
+  // so numbering stays sequential even if invoices are deleted.
+  const getNextInvoiceNumber = () => {
+    const prefix = invoiceSettings.numberPrefix || 'INV-';
+    const maxNum = invoices.reduce((max, inv) => {
+      const match = String(inv.invoiceNo || '').match(/(\d+)\s*$/);
+      const n = match ? parseInt(match[1], 10) : 0;
+      return n > max ? n : max;
+    }, 0);
+    return `${prefix}${maxNum + 1}`;
+  };
+
+  const openMakeInvoice = () => {
+    setEditingInvoiceId(null);
+    setInvoiceForm({ ...emptyInvoiceForm(), invoiceNo: getNextInvoiceNumber() });
+    setQuotationSubView('makeInvoice');
+  };
+
+  const openSelectCustomerForInvoice = () => {
+    setCustomerSearchQuery('');
+    setCustomerFormReturnView('selectCustomerForInvoice');
+    setQuotationSubView('selectCustomerForInvoice');
+  };
+  const handleSelectCustomerForInvoice = (customer) => {
+    setInvoiceForm((prev) => ({ ...prev, customerId: customer.id }));
+    setQuotationSubView('makeInvoice');
+  };
+  const selectedInvoiceCustomer = customers.find((c) => c.id === invoiceForm.customerId) || null;
+
+  const removeInvoiceProductLine = (productId) => {
+    setInvoiceForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== productId) }));
+  };
+
+  // ===== Add Invoice Product (dedicated per-line form: Product / Quantity / Price / Description) =====
+  const emptyInvoiceProductLineForm = { productId: null, name: '', price: '', gst: 0, unit: '', hsn: '', qty: '1', description: '' };
+  const [invoiceProductLineForm, setInvoiceProductLineForm] = useState(emptyInvoiceProductLineForm);
+  const [editingInvoiceProductLineId, setEditingInvoiceProductLineId] = useState(null);
+  const openAddInvoiceProductLine = () => {
+    setInvoiceProductLineForm(emptyInvoiceProductLineForm);
+    setEditingInvoiceProductLineId(null);
+    setQuotationSubView('addInvoiceProductLine');
+  };
+  const openEditInvoiceProductLine = (p) => {
+    setInvoiceProductLineForm({
+      productId: p.productId,
+      name: p.name,
+      price: p.price !== undefined && p.price !== null ? String(p.price) : '',
+      gst: Number(p.gst) || 0,
+      unit: p.unit || '',
+      hsn: p.hsn || '',
+      qty: p.qty !== undefined && p.qty !== null ? String(p.qty) : '1',
+      description: p.description || '',
+    });
+    setEditingInvoiceProductLineId(p.productId);
+    setQuotationSubView('addInvoiceProductLine');
+  };
+  const openPickProductForInvoiceLine = () => {
+    setProductSearchQuery('');
+    setProductPickerReturnView(quotationSubView);
+    setQuotationSubView('pickProductForInvoiceLine');
+  };
+  const handlePickProductForInvoiceLine = (product) => {
+    setInvoiceProductLineForm((prev) => ({
+      ...prev,
+      productId: product.id,
+      name: product.name,
+      price: product.price !== undefined && product.price !== null && product.price !== '' ? String(product.price) : prev.price,
+      gst: Number(product.gst) || 0,
+      unit: product.unit || '',
+      hsn: product.hsn || '',
+      description: product.description || prev.description,
+      qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
+    }));
+    setQuotationSubView('addInvoiceProductLine');
+  };
+  const handleAddInvoiceProductLine = () => {
+    if (!invoiceProductLineForm.productId) {
+      showAlert('Please select a product.');
+      return;
+    }
+    const qty = Number(invoiceProductLineForm.qty) > 0 ? Number(invoiceProductLineForm.qty) : 1;
+    const price = Number(invoiceProductLineForm.price) || 0;
+    setInvoiceForm((prev) => {
+      const baseProducts = editingInvoiceProductLineId
+        ? prev.products.filter((p) => p.productId !== editingInvoiceProductLineId)
+        : prev.products;
+      const existing = baseProducts.find((p) => p.productId === invoiceProductLineForm.productId);
+      const products = existing
+        ? baseProducts.map((p) => (p.productId === invoiceProductLineForm.productId
+            ? { ...p, qty: p.qty + qty, price, gst: Number(invoiceProductLineForm.gst) || 0, description: invoiceProductLineForm.description }
+            : p))
+        : [...baseProducts, {
+            productId: invoiceProductLineForm.productId,
+            name: invoiceProductLineForm.name,
+            price,
+            gst: Number(invoiceProductLineForm.gst) || 0,
+            qty,
+            unit: invoiceProductLineForm.unit || '',
+            hsn: invoiceProductLineForm.hsn || '',
+            description: invoiceProductLineForm.description || '',
+          }];
+      return { ...prev, products };
+    });
+    setEditingInvoiceProductLineId(null);
+    setQuotationSubView('makeInvoice');
+  };
+
+  const [isInvoiceOtherChargeModalOpen, setIsInvoiceOtherChargeModalOpen] = useState(false);
+  const [invoiceOtherChargeForm, setInvoiceOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const openInvoiceOtherChargeModal = () => {
+    setInvoiceOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setIsInvoiceOtherChargeModalOpen(true);
+  };
+  const handleSaveInvoiceOtherCharge = () => {
+    if (!invoiceOtherChargeForm.amount || Number(invoiceOtherChargeForm.amount) <= 0) {
+      showAlert('Please enter a valid other charge amount.');
+      return;
+    }
+    const newCharge = { ...invoiceOtherChargeForm, id: genId() };
+    setInvoiceForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    setIsInvoiceOtherChargeModalOpen(false);
+  };
+  const removeInvoiceOtherCharge = (id) => {
+    setInvoiceForm((prev) => ({ ...prev, otherCharges: prev.otherCharges.filter((c) => c.id !== id) }));
+  };
+  // Removes a term from THIS invoice's selection only (does not delete the term
+  // from the invoice terms catalog - that is handled separately by handleDeleteTerm).
+  const removeInvoiceSelectedTerm = (termId) => {
+    setInvoiceForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== termId) }));
+  };
+
+  const [invoiceTermsDraftSelectedIds, setInvoiceTermsDraftSelectedIds] = useState([]);
+  const openSelectTermsForInvoice = () => {
+    setInvoiceTermsDraftSelectedIds(invoiceForm.termsIds);
+    setQuotationSubView('selectTermsForInvoice');
+  };
+  const toggleInvoiceTermsDraftSelection = (id) => {
+    setInvoiceTermsDraftSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const handleDoneSelectTermsInvoice = () => {
+    setInvoiceForm((prev) => ({ ...prev, termsIds: invoiceTermsDraftSelectedIds }));
+    setQuotationSubView('makeInvoice');
+  };
+  const selectedInvoiceTerms = invoiceTerms.filter((term) => invoiceForm.termsIds.includes(term.id));
+
+  // Paid Info (extra field vs. Make Quotation)
+  const emptyPaidInfoForm = () => ({ date: '', amount: '', note: '' });
+  const [isPaidInfoModalOpen, setIsPaidInfoModalOpen] = useState(false);
+  const [paidInfoForm, setPaidInfoForm] = useState(emptyPaidInfoForm);
+  const [isPaidInfoDatePickerOpen, setIsPaidInfoDatePickerOpen] = useState(false);
+  const [paidInfoCalendarMonth, setPaidInfoCalendarMonth] = useState(() => new Date());
+  const openAddPaidInfoModal = () => {
+    setPaidInfoForm(emptyPaidInfoForm());
+    setPaidInfoCalendarMonth(new Date());
+    setIsPaidInfoModalOpen(true);
+  };
+  const handleSavePaidInfo = () => {
+    if (!paidInfoForm.amount || Number(paidInfoForm.amount) <= 0) {
+      showAlert('Please enter a valid paid amount.');
+      return;
+    }
+    if (!paidInfoForm.date) {
+      showAlert(t('selectDateForAdvanceError') || 'Please select the paid date.');
+      return;
+    }
+    const newPaidInfo = { id: genId(), date: paidInfoForm.date, amount: Number(paidInfoForm.amount), note: paidInfoForm.note };
+    setInvoiceForm((prev) => ({ ...prev, paidInfo: [...prev.paidInfo, newPaidInfo] }));
+    setIsPaidInfoModalOpen(false);
+  };
+  const removePaidInfoLine = (id) => {
+    setInvoiceForm((prev) => ({ ...prev, paidInfo: prev.paidInfo.filter((p) => p.id !== id) }));
+  };
+  // Tap-to-select on Paid Info List entries - mirrors the Select Terms and Conditions
+  // screen's draft-selection pattern (single or multi-select, highlighted card, Done
+  // just closes the screen without any further data change).
+  const [selectedPaidInfoIds, setSelectedPaidInfoIds] = useState([]);
+  const openPaidInfoList = () => {
+    setSelectedPaidInfoIds([]);
+    setQuotationSubView('paidInfoList');
+  };
+  const togglePaidInfoSelection = (id) => {
+    setSelectedPaidInfoIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+  const handleDonePaidInfoList = () => {
+    setSelectedPaidInfoIds([]);
+    setQuotationSubView('makeInvoice');
+  };
+
+  const invoiceProductsTotal = invoiceForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
+  const invoiceOtherChargesTotal = invoiceForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const invoiceGrandTotal = Math.round(invoiceProductsTotal + invoiceOtherChargesTotal);
+  const invoicePaidTotal = invoiceForm.paidInfo.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const invoiceAmountDue = Math.max(0, invoiceGrandTotal - invoicePaidTotal);
+
+  const handleGenerateInvoice = () => {
+    if (!invoiceForm.customerId) {
+      showAlert('Please select a customer.');
+      return;
+    }
+    if (invoiceForm.products.length === 0) {
+      showAlert('Please add at least one product.');
+      return;
+    }
+
+    const customerSnapshot = {
+      customerName: selectedInvoiceCustomer?.name || 'Unknown',
+      customerCompany: selectedInvoiceCustomer?.companyName || '',
+      customerMobile: selectedInvoiceCustomer?.mobile || '',
+      customerEmail: selectedInvoiceCustomer?.email || '',
+      customerAddressLine1: selectedInvoiceCustomer?.addressLine1 || '',
+      customerAddressLine2: selectedInvoiceCustomer?.addressLine2 || '',
+      customerAddressLine3: selectedInvoiceCustomer?.addressLine3 || '',
+      customerBillingAddress: selectedInvoiceCustomer?.billingAddress || '',
+      customerShippingAddress: selectedInvoiceCustomer?.shippingAddress || '',
+    };
+
+    if (editingInvoiceId) {
+      persistInvoices(invoices.map((inv) => (
+        inv.id === editingInvoiceId
+          ? { ...inv, ...invoiceForm, grandTotal: invoiceGrandTotal, paidTotal: invoicePaidTotal, balanceDue: invoiceAmountDue, ...customerSnapshot, updatedAt: new Date().toISOString() }
+          : inv
+      )));
+      showSuccess('Invoice updated successfully.');
+      setEditingInvoiceId(null);
+      setQuotationSubView('invoiceDetail');
+      return;
+    }
+
+    const newId = genId();
+    const newInvoice = {
+      id: newId,
+      ...invoiceForm,
+      grandTotal: invoiceGrandTotal,
+      paidTotal: invoicePaidTotal,
+      balanceDue: invoiceAmountDue,
+      createdAt: new Date().toISOString(),
+      ...customerSnapshot,
+    };
+
+    persistInvoices([...invoices, newInvoice]);
+
+    showSuccess('Invoice generated successfully.');
+    setQuotationSubView('invoiceList');
+  };
+
+  // ===== Receipts module: Make Receipt =====
+  const emptyReceiptForm = () => ({
+    date: formatQuotationDate(new Date()),
+    receiptNo: '',
+    customerId: null,
+    paymentMode: '',
+    referenceNo: '',
+    paidAmount: '',
+    paymentFor: '',
+  });
+  const [receiptForm, setReceiptForm] = useState(emptyReceiptForm);
+
+  // ===== Receipts module: List & Detail Views =====
+  const [receipts, setReceipts] = useState(() => {
+    try {
+      const saved = localStorage.getItem(RECEIPTS_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [selectedReceiptId, setSelectedReceiptId] = useState(null);
+  const [receiptSearchQuery, setReceiptSearchQuery] = useState('');
+
+  const persistReceipts = (next) => {
+    setReceipts(next);
+    try { localStorage.setItem(RECEIPTS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+
+  // Next receipt number = 1 higher than the highest number already used (formatted with the
+  // receipt settings prefix), so numbering stays sequential even if receipts are deleted.
+  const getNextReceiptNumber = () => {
+    const prefix = receiptSettings.numberPrefix || 'RECEIPT-';
+    const maxNum = receipts.reduce((max, r) => {
+      const match = String(r.receiptNo || '').match(/(\d+)\s*$/);
+      const n = match ? parseInt(match[1], 10) : 0;
+      return n > max ? n : max;
+    }, 0);
+    return `${prefix}${maxNum + 1}`;
+  };
+
+  const openMakeReceipt = () => {
+    setEditingReceiptId(null);
+    setReceiptForm({ ...emptyReceiptForm(), receiptNo: getNextReceiptNumber() });
+    setQuotationSubView('makeReceipt');
+  };
+
+  const openSelectCustomerForReceipt = () => {
+    setCustomerSearchQuery('');
+    setCustomerFormReturnView('selectCustomerForReceipt');
+    setQuotationSubView('selectCustomerForReceipt');
+  };
+  const handleSelectCustomerForReceipt = (customer) => {
+    setReceiptForm((prev) => ({ ...prev, customerId: customer.id }));
+    setQuotationSubView('makeReceipt');
+  };
+  const selectedReceiptCustomer = customers.find((c) => c.id === receiptForm.customerId) || null;
+
+  // Receipt Payment Info sub-screen (Matches Screenshot 3)
+  const emptyReceiptPaymentDraft = () => ({ paymentMode: '', referenceNo: '', paidAmount: '', paymentFor: '' });
+  const [receiptPaymentDraft, setReceiptPaymentDraft] = useState(emptyReceiptPaymentDraft);
+  const openReceiptPaymentInfo = () => {
+    setReceiptPaymentDraft({
+      paymentMode: receiptForm.paymentMode,
+      referenceNo: receiptForm.referenceNo,
+      paidAmount: receiptForm.paidAmount,
+      paymentFor: receiptForm.paymentFor,
+    });
+    setQuotationSubView('receiptPaymentInfo');
+  };
+  const handleSaveReceiptPaymentInfo = () => {
+    if (!receiptPaymentDraft.paidAmount || Number(receiptPaymentDraft.paidAmount) <= 0) {
+      showAlert('Please enter a valid total amount paid.');
+      return;
+    }
+    setReceiptForm((prev) => ({
+      ...prev,
+      paymentMode: receiptPaymentDraft.paymentMode,
+      referenceNo: receiptPaymentDraft.referenceNo,
+      paidAmount: receiptPaymentDraft.paidAmount,
+      paymentFor: receiptPaymentDraft.paymentFor,
+    }));
+    setQuotationSubView('makeReceipt');
+  };
+
+  const receiptPaidAmount = Number(receiptForm.paidAmount) || 0;
+
+  const handleGenerateReceipt = () => {
+    if (!receiptForm.customerId) {
+      showAlert('Please select a customer.');
+      return;
+    }
+    if (!receiptForm.paidAmount || Number(receiptForm.paidAmount) <= 0) {
+      showAlert('Please add payment info.');
+      return;
+    }
+
+    const customerSnapshot = {
+      customerName: selectedReceiptCustomer?.name || 'Unknown',
+      customerCompany: selectedReceiptCustomer?.companyName || '',
+      customerMobile: selectedReceiptCustomer?.mobile || '',
+      customerEmail: selectedReceiptCustomer?.email || '',
+      customerAddressLine1: selectedReceiptCustomer?.addressLine1 || '',
+      customerAddressLine2: selectedReceiptCustomer?.addressLine2 || '',
+      customerAddressLine3: selectedReceiptCustomer?.addressLine3 || '',
+      customerBillingAddress: selectedReceiptCustomer?.billingAddress || '',
+      customerShippingAddress: selectedReceiptCustomer?.shippingAddress || '',
+    };
+
+    if (editingReceiptId) {
+      persistReceipts(receipts.map((r) => (
+        r.id === editingReceiptId
+          ? { ...r, ...receiptForm, paidAmount: receiptPaidAmount, ...customerSnapshot, updatedAt: new Date().toISOString() }
+          : r
+      )));
+      showSuccess('Receipt updated successfully.');
+      setEditingReceiptId(null);
+      setQuotationSubView('receiptDetail');
+      return;
+    }
+
+    const newReceipt = {
+      id: genId(),
+      ...receiptForm,
+      paidAmount: receiptPaidAmount,
+      createdAt: new Date().toISOString(),
+      ...customerSnapshot,
+    };
+
+    persistReceipts([...receipts, newReceipt]);
+
+    showSuccess('Receipt generated successfully.');
+    setQuotationSubView('receiptList');
+  };
+
+  // ===== Shared: Duplicate / Edit / Status / Share for all document modules =====
+  const [editingQuotationId, setEditingQuotationId] = useState(null);
+  const [editingPurchaseOrderId, setEditingPurchaseOrderId] = useState(null);
+  const [editingProformaInvoiceId, setEditingProformaInvoiceId] = useState(null);
+  const [editingDeliveryNoteId, setEditingDeliveryNoteId] = useState(null);
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
+  const [editingReceiptId, setEditingReceiptId] = useState(null);
+
+  const [showQuotationStatusSheet, setShowQuotationStatusSheet] = useState(false);
+  const [showPurchaseOrderMoreSheet, setShowPurchaseOrderMoreSheet] = useState(false);
+  const [showPurchaseOrderStatusSheet, setShowPurchaseOrderStatusSheet] = useState(false);
+  const [showProformaInvoiceMoreSheet, setShowProformaInvoiceMoreSheet] = useState(false);
+  const [showProformaInvoiceStatusSheet, setShowProformaInvoiceStatusSheet] = useState(false);
+  const [showDeliveryNoteMoreSheet, setShowDeliveryNoteMoreSheet] = useState(false);
+  const [showDeliveryNoteStatusSheet, setShowDeliveryNoteStatusSheet] = useState(false);
+  const [showInvoiceMoreSheet, setShowInvoiceMoreSheet] = useState(false);
+  const [showInvoiceStatusSheet, setShowInvoiceStatusSheet] = useState(false);
+  const [showReceiptMoreSheet, setShowReceiptMoreSheet] = useState(false);
+  const [showReceiptStatusSheet, setShowReceiptStatusSheet] = useState(false);
+
+  const DOCUMENT_STATUS_OPTIONS = ['In-Progress', 'Approved', 'Rejected'];
+  const documentStatusColors = {
+    'In-Progress': { bg: '#D97706', text: '#ffffff' },
+    'Approved': { bg: '#16A34A', text: '#ffffff' },
+    'Rejected': { bg: '#DC2626', text: '#ffffff' },
+  };
+  const DocumentStatusBadge = ({ status }) => {
+    if (!status) return null;
+    const meta = documentStatusColors[status] || documentStatusColors['In-Progress'];
+    return (
+      <div style={{ position: 'absolute', top: '10px', right: '16px', background: meta.bg, color: meta.text, padding: '5px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '700', zIndex: 5, boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+        {status}
+      </div>
+    );
+  };
+  // Reusable "Quotation Status"-style bottom sheet used by every document module's More > Status action.
+  const DocumentStatusSheet = ({ open, title, onSelect, onClose }) => {
+    if (!open) return null;
+    return (
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.6)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999 }} onClick={onClose}>
+        <div style={{ background: '#ffffff', width: '100%', maxWidth: '500px', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', padding: '12px 20px 30px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#E2E8F0', margin: '4px auto 20px' }} />
+          <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>{title}</h3>
+          {DOCUMENT_STATUS_OPTIONS.map((status, idx) => (
+            <button
+              key={status}
+              onClick={() => onSelect(status)}
+              style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: idx < DOCUMENT_STATUS_OPTIONS.length - 1 ? '1px solid #F1F5F9' : 'none', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+            >
+              {status}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Reusable document-list row card: customer/company name on the left,
+  // document number / date / amount (+ status when present) stacked on the
+  // right — used by every list screen in the Quotation Module (Quotation,
+  // Invoice, Purchase Order, Proforma Invoice, Delivery Note, Receipt) so
+  // the information hierarchy stays identical across document types.
+  // Pass either `amount` (a number, rendered as ₹X) or `amountText` (a raw
+  // string, e.g. "2 items") for document types that don't carry a price.
+  const DocumentListCard = ({ name, docNumber, date, amount, amountText, status, onClick, rightAccessory }) => {
+    const statusMeta = status ? (documentStatusColors[status] || documentStatusColors['In-Progress']) : null;
+    return (
+      <button type="button" onClick={onClick} style={customerModuleStyles.docCard}>
+        <span style={customerModuleStyles.docCardName}>{name}</span>
+        <div style={customerModuleStyles.docCardRight}>
+          <span style={customerModuleStyles.docCardNumber}>{docNumber}</span>
+          <span style={customerModuleStyles.docCardDate}>{date}</span>
+          <div style={customerModuleStyles.docCardBottomRow}>
+            {rightAccessory}
+            {statusMeta && (
+              <span style={{ ...customerModuleStyles.docCardStatusPill, background: statusMeta.bg, color: statusMeta.text }}>
+                {status}
+              </span>
+            )}
+            <span style={customerModuleStyles.docCardAmount}>
+              {amountText !== undefined ? amountText : `₹${Number(amount || 0).toLocaleString('en-IN')}`}
+            </span>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  // ===== Shared professional-document design system =====
+  // One consistent typography/spacing scale used by every generated-document preview
+  // screen (Quotation, Purchase Order, Proforma Invoice, Delivery Note, Invoice, Receipt)
+  // so all documents in the Quotation Module look like one coherent, business-grade product.
+  const DOC_FONT = "'Helvetica Neue', Arial, 'Segoe UI', sans-serif";
+  const docStyles = {
+    page: {
+      background: '#ffffff', padding: '26px 22px 24px', borderRadius: '10px',
+      boxShadow: '0 1px 8px rgba(15,23,42,0.06)', minHeight: '70vh',
+      fontFamily: DOC_FONT, WebkitTextSizeAdjust: '100%', textSizeAdjust: '100%',
+    },
+    headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0', gap: '12px' },
+    businessName: { fontSize: '15.5px', fontWeight: '700', color: '#0F172A', margin: 0, lineHeight: 1.3, letterSpacing: '0.1px' },
+    contactLine: { fontSize: '10px', color: '#64748B', margin: '2px 0 0', lineHeight: 1.4 },
+    docTypeLabel: { fontSize: '13px', fontWeight: '700', color: '#0F172A', margin: 0, textTransform: 'uppercase', letterSpacing: '0.6px' },
+    docMetaLine: { fontSize: '10.5px', fontWeight: '500', color: '#64748B', margin: '3px 0 0', lineHeight: 1.4 },
+    sectionLabel: { fontSize: '10px', fontWeight: '700', color: '#64748B', letterSpacing: '0.5px', margin: '0 0 5px', textTransform: 'uppercase' },
+    toName: { fontSize: '12.5px', fontWeight: '700', color: '#0F172A', margin: 0, lineHeight: 1.4 },
+    addressLine: { fontSize: '10.5px', color: '#64748B', margin: '2px 0 0', lineHeight: 1.4 },
+    bodyText: { fontSize: '11px', color: '#475569', lineHeight: 1.55, margin: '0 0 14px' },
+    tableWrap: { marginBottom: '14px' },
+    table: { width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', tableLayout: 'fixed' },
+    th: { textAlign: 'left', padding: '7px 5px', fontSize: '9.5px', fontWeight: '700', color: '#475569', letterSpacing: '0.4px', textTransform: 'uppercase', borderTop: '1.5px solid #0F172A', borderBottom: '1.5px solid #0F172A' },
+    td: { padding: '8px 5px', fontSize: '10.5px', color: '#334155', borderBottom: '1px solid #EEF1F5', verticalAlign: 'top' },
+    tdBold: { fontWeight: '600', color: '#0F172A' },
+    totalsLabel: { padding: '5px 5px', textAlign: 'right', fontSize: '10.5px', color: '#64748B', fontWeight: '500' },
+    totalsValue: { padding: '5px 5px', textAlign: 'right', fontSize: '10.5px', color: '#334155', fontWeight: '600' },
+    grandTotalLabel: { padding: '9px 5px', textAlign: 'right', fontSize: '11.5px', fontWeight: '700', color: '#0F172A', letterSpacing: '0.3px' },
+    grandTotalValue: { padding: '9px 5px', textAlign: 'right', fontSize: '13.5px', fontWeight: '800', color: '#0F172A' },
+    closingText: { fontSize: '10.5px', color: '#64748B', lineHeight: 1.55, margin: '14px 0 26px' },
+    signatureLabel: { fontSize: '11.5px', fontWeight: '700', color: '#0F172A', margin: 0 },
+    signatureCaption: { fontSize: '9px', color: '#94A3B8', margin: 0, letterSpacing: '0.5px', textTransform: 'uppercase', fontWeight: '600' },
+  };
+  // Shared footer action bar (Duplicate / Edit / Invoice / Status / Delete) used on every
+  // document detail screen. Every action — including Delete — shares the same button shape
+  // and a fixed-height icon wrapper, so emoji icons and the FiTrash2 svg icon all sit on the
+  // exact same baseline instead of Delete appearing to float higher than the rest.
+  const docActionBarStyles = {
+    bar: { background: '#ffffff', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '10px 0 16px', flexShrink: 0, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' },
+    btn: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', gap: '4px', background: 'none', border: 'none', color: '#475569', cursor: 'pointer', padding: 0 },
+    iconWrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '22px', lineHeight: 1 },
+    label: { fontSize: '11px', fontWeight: '600', lineHeight: 1 },
+  };
+
+  // Small top-right brand mark shown on every generated document: a compact logo with the
+  // app name directly below it. Kept subtle/professional and away from document title,
+  // customer details, and totals. Bottom-of-document branding was removed as redundant.
+  const DocBrandHeader = () => (
+    <div style={{ textAlign: 'center', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+      <img src={smartpayLogo} alt="SmartManage" style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'cover', display: 'block' }} />
+      <span style={{ fontSize: '9.5px', fontWeight: '700', color: '#64748B', letterSpacing: '0.2px', fontFamily: DOC_FONT }}>SmartManage</span>
+    </div>
+  );
+
+  // Single source of truth for the Quotation document's content: both the in-app
+  // "Quotation Detail" preview and the shared PDF read from this exact same model,
+  // so the two can never drift apart again (header layout, To/Date, table rows,
+  // Sub Total / Other Charges / Grand Total, Terms & Conditions, signature block).
+  const getDocDisplayNumber = (docNo) => {
+    const match = String(docNo || '').match(/(\d+)\s*$/);
+    return match ? match[1] : (docNo || '');
+  };
+  // Splits a settings "Top Message" (which may contain a literal newline, e.g.
+  // "Dear Sir/Mam,\nThank you...") into separate greeting lines for display.
+  const splitTopMessageLines = (msg) => (msg || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  // Builds the "To," customer block used by every document preview/PDF. Company + contact
+  // name are combined onto one line, and Address Line 1 / Address Line 2 / City
+  // (customerAddressLine1-3) are combined onto a second line - condensed from what would
+  // otherwise be 5 separate lines, so more product rows fit on the first PDF page.
+  const buildCustomerLines = (entity) => {
+    const companyNameLine = (entity.customerCompany && entity.customerName)
+      ? `${entity.customerCompany} - ${entity.customerName}`
+      : (entity.customerCompany || entity.customerName);
+    const addressLine = [entity.customerAddressLine1, entity.customerAddressLine2, entity.customerAddressLine3].filter(Boolean).join(', ');
+    return [
+      companyNameLine,
+      addressLine,
+      entity.customerMobile ? `Mobile: ${entity.customerMobile}` : null,
+      entity.customerEmail ? `Email: ${entity.customerEmail}` : null,
+    ].filter(Boolean);
+  };
+  const buildQuotationDocModel = (q) => {
+    const rows = (q.products || []).map((p, idx) => {
+      const taxableAmt = (p.price || 0) * (p.qty || 0);
+      const gstAmt = taxableAmt * (p.gst || 0) / 100;
+      return {
+        index: idx + 1, name: p.name, hsn: p.hsn || '-', qty: p.qty, unit: p.unit || '',
+        price: p.price || 0, gstPct: p.gst || 0, gstAmt, total: taxableAmt + gstAmt,
+      };
+    });
+    const subTotal = (q.products || []).reduce((sum, p) => sum + (p.price || 0) * (p.qty || 0), 0);
+    const gstTotal = (q.products || []).reduce((sum, p) => sum + ((p.price || 0) * (p.qty || 0) * (p.gst || 0) / 100), 0);
+    const extraChargesTotal = (q.otherCharges || []).reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+    const customerLines = buildCustomerLines(q);
+    const termsLines = quotationTerms.filter((t) => (q.termsIds || []).includes(t.id)).map((t) => t.text);
+    return {
+      quotationTitle: 'Quotation',
+      businessName: businessInfo?.businessName || 'Manufacturer',
+      businessPhone: businessInfo?.phone || '',
+      businessEmail: businessInfo?.email || '',
+      hsnLabel: columnHeadingSettings.hsnLabel || 'HSN',
+      date: q.date,
+      customerLines,
+      shippingAddress: q.customerShippingAddress || '',
+      rows,
+      subTotal,
+      gstTotal,
+      otherChargesTotal: extraChargesTotal,
+      grandTotal: q.grandTotal || 0,
+      termsLines,
+      greetingLines: splitTopMessageLines(quotationSettings.topMessage),
+      closingText: quotationSettings.bottomMessage || '',
+      signatureName: businessInfo?.businessName || 'Manufacturer',
+      logoImg: businessInfo?.logoImg || null,
+      signatureImg: businessInfo?.signatureImg || null,
+    };
+  };
+
+  // Generic document-model builder shared by Invoice / Purchase Order / Proforma Invoice /
+  // Delivery Note detail screens and their PDFs. Produces the exact same shape as
+  // buildQuotationDocModel (header/business info + logo, To/Date, item rows, totals,
+  // terms, signature + signature image) so every document type gets the identical layout
+  // Quotation Detail already has — only the type-specific text/labels/fields passed in via
+  // `opts` differ (doc title prefix, greeting/closing copy, which totals rows apply, etc).
+  const buildDocModel = (doc, opts) => {
+    const { docTypeLabel, docNo, terms, toLabel, greetingLines, closingText, pricing = true, hasPayment = false } = opts;
+    const rows = (doc.products || []).map((p, idx) => {
+      const taxableAmt = (p.price || 0) * (p.qty || 0);
+      const gstAmt = taxableAmt * (p.gst || 0) / 100;
+      return {
+        index: idx + 1, name: p.name, hsn: p.hsn || '-', qty: p.qty, unit: p.unit || '',
+        price: p.price || 0, gstPct: p.gst || 0, gstAmt, total: taxableAmt + gstAmt,
+      };
+    });
+    const subTotal = (doc.products || []).reduce((sum, p) => sum + (p.price || 0) * (p.qty || 0), 0);
+    const gstTotal = (doc.products || []).reduce((sum, p) => sum + ((p.price || 0) * (p.qty || 0) * (p.gst || 0) / 100), 0);
+    const extraChargesTotal = (doc.otherCharges || []).reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+    const customerLines = buildCustomerLines(doc);
+    const termsLines = (terms || []).filter((t) => (doc.termsIds || []).includes(t.id)).map((t) => t.text);
+    return {
+      docTitle: docTypeLabel,
+      businessName: businessInfo?.businessName || 'Manufacturer',
+      businessPhone: businessInfo?.phone || '',
+      businessEmail: businessInfo?.email || '',
+      hsnLabel: columnHeadingSettings.hsnLabel || 'HSN',
+      date: doc.date,
+      toLabel: toLabel || 'To,',
+      customerLines,
+      greetingLines: greetingLines || [],
+      closingText: closingText || '',
+      rows,
+      subTotal,
+      gstTotal,
+      otherChargesTotal: extraChargesTotal,
+      grandTotal: doc.grandTotal || 0,
+      hasPayment,
+      paidTotal: doc.paidTotal || 0,
+      balanceDue: doc.balanceDue ?? doc.grandTotal ?? 0,
+      paidInfo: doc.paidInfo || [],
+      termsLines,
+      signatureName: businessInfo?.businessName || 'Manufacturer',
+      logoImg: businessInfo?.logoImg || null,
+      signatureImg: businessInfo?.signatureImg || null,
+      pricing,
+      otherInfo: doc.otherInfo || '',
+    };
+  };
+
+  // Type-specific wrappers around buildDocModel — each just supplies the doc-type label,
+  // number field, terms catalog, and greeting/closing copy appropriate to that document,
+  // while the shape (header + logo, To/Date, table, totals, terms, signature + signature
+  // image) stays identical to Quotation Detail's design across every document type.
+  const buildPurchaseOrderDocModel = (o) => buildDocModel(o, {
+    docTypeLabel: 'Purchase Order',
+    docNo: o.purchaseOrderNo,
+    terms: purchaseOrderTerms,
+    toLabel: 'To,',
+    greetingLines: splitTopMessageLines(purchaseOrderSettings.topMessage),
+    closingText: purchaseOrderSettings.bottomMessage || '',
+    pricing: true,
+    hasPayment: false,
+  });
+  const buildProformaInvoiceDocModel = (inv) => buildDocModel(inv, {
+    docTypeLabel: 'Proforma Invoice',
+    docNo: inv.proformaInvoiceNo,
+    terms: proformaInvoiceTerms,
+    toLabel: 'Bill To,',
+    greetingLines: splitTopMessageLines(proformaInvoiceSettings.topMessage),
+    closingText: proformaInvoiceSettings.bottomMessage || '',
+    pricing: true,
+    hasPayment: true,
+  });
+  const buildInvoiceDocModel = (inv) => buildDocModel(inv, {
+    docTypeLabel: 'Invoice',
+    docNo: inv.invoiceNo,
+    terms: invoiceTerms,
+    toLabel: 'Bill To,',
+    greetingLines: splitTopMessageLines(invoiceSettings.topMessage),
+    closingText: invoiceSettings.bottomMessage || '',
+    pricing: true,
+    hasPayment: true,
+  });
+  const buildDeliveryNoteDocModel = (dn) => buildDocModel(dn, {
+    docTypeLabel: 'Delivery Note',
+    docNo: dn.deliveryNoteNo,
+    terms: deliveryNoteTerms,
+    toLabel: 'To,',
+    greetingLines: splitTopMessageLines(deliveryNoteSettings.topMessage),
+    closingText: deliveryNoteSettings.bottomMessage || '',
+    pricing: false,
+    hasPayment: false,
+  });
+
+  // Renders the full document body (header/logo, To+Date, greeting, item table, totals,
+  // other info, closing text, terms, signature + signature image, brand footer) from a
+  // model built by buildDocModel/buildQuotationDocModel — the exact same visual structure
+  // Quotation Detail uses, reused by every other document type's in-app preview.
+  const GeneratedDocumentPreview = ({ model }) => {
+    const footerColSpan = model.pricing ? 6 : 3;
+    return (
+      <>
+        {/* Header: Doc title (top, centered), then Business info + logo below */}
+        <div style={{ marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0' }}>
+          <p style={{ ...docStyles.docTypeLabel, textTransform: 'none', textAlign: 'center', margin: '0 0 12px' }}>{model.docTitle}</p>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 style={docStyles.businessName}>{model.businessName}</h2>
+              {model.businessPhone && <p style={docStyles.contactLine}>{model.businessPhone}</p>}
+              {model.businessEmail && <p style={docStyles.contactLine}>{model.businessEmail}</p>}
+            </div>
+            {model.logoImg && (
+              <img src={model.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
+            )}
+          </div>
+        </div>
+
+        {/* To, (left) | Date (right) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '16px' }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>{model.toLabel}</p>
+            {model.customerLines.map((line, idx) => (
+              <p key={idx} style={idx === 0 ? docStyles.toName : docStyles.contactLine}>{line}</p>
+            ))}
+          </div>
+          <div style={{ flexShrink: 0, textAlign: 'right' }}>
+            <p style={docStyles.docMetaLine}>Date: {model.date}</p>
+          </div>
+        </div>
+
+        {model.greetingLines.length > 0 && (
+          <p style={docStyles.bodyText}>
+            {model.greetingLines.map((line, idx) => (
+              <Fragment key={idx}>
+                {line}
+                {idx < model.greetingLines.length - 1 ? <br /> : null}
+              </Fragment>
+            ))}
+          </p>
+        )}
+
+        {/* Table */}
+        <div style={docStyles.tableWrap}>
+          <table style={docStyles.table}>
+            <thead>
+              <tr>
+                <th style={{ ...docStyles.th, width: model.pricing ? '6%' : '10%' }}>#</th>
+                <th style={{ ...docStyles.th, width: model.pricing ? '22%' : '42%', wordBreak: 'break-word' }}>Item</th>
+                <th style={{ ...docStyles.th, width: model.pricing ? '11%' : '23%', wordBreak: 'break-word' }}>{model.hsnLabel}</th>
+                <th style={{ ...docStyles.th, textAlign: 'center', width: model.pricing ? '11%' : '25%' }}>Qty</th>
+                {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '17%' }}>Price</th>}
+                {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '15%' }}>GST</th>}
+                {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '18%' }}>Total</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {model.rows.map((r) => (
+                <tr key={r.index}>
+                  <td style={docStyles.td}>{r.index}</td>
+                  <td style={docStyles.td}>
+                    <div style={docStyles.tdBold}>{r.name}</div>
+                  </td>
+                  <td style={docStyles.td}>{r.hsn}</td>
+                  <td style={{ ...docStyles.td, textAlign: 'center' }}>
+                    {r.qty}{r.unit ? <span style={{ fontSize: '9px', color: '#94A3B8' }}> {r.unit}</span> : null}
+                  </td>
+                  {model.pricing && <td style={{ ...docStyles.td, textAlign: 'right' }}>₹{Number(r.price).toFixed(2)}</td>}
+                  {model.pricing && (
+                    <td style={{ ...docStyles.td, textAlign: 'right' }}>
+                      {r.gstPct}%
+                      <div style={{ fontSize: '9px', color: '#94A3B8' }}>₹{r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                    </td>
+                  )}
+                  {model.pricing && <td style={{ ...docStyles.td, ...docStyles.tdBold, textAlign: 'right' }}>₹{r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>}
+                </tr>
+              ))}
+            </tbody>
+            {model.pricing && (
+              <tfoot>
+                <tr>
+                  <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Sub Total</td>
+                  <td style={docStyles.totalsValue}>₹{model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                </tr>
+                {model.otherChargesTotal > 0 && (
+                  <tr>
+                    <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Other Charges</td>
+                    <td style={docStyles.totalsValue}>₹{model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                  </tr>
+                )}
+                <tr style={{ borderTop: '1.5px solid #0F172A' }}>
+                  <td colSpan={footerColSpan} style={docStyles.grandTotalLabel}>Grand Total</td>
+                  <td style={docStyles.grandTotalValue}>₹{model.grandTotal.toLocaleString('en-IN')}</td>
+                </tr>
+                {model.hasPayment && model.paidTotal > 0 && (
+                  <>
+                    <tr>
+                      <td colSpan={footerColSpan} style={{ padding: '6px 5px', textAlign: 'right', fontWeight: '600', fontSize: '10.5px', color: '#16A34A' }}>Paid</td>
+                      <td style={{ padding: '6px 5px', textAlign: 'right', fontWeight: '700', fontSize: '10.5px', color: '#16A34A' }}>₹{model.paidTotal.toLocaleString('en-IN')}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={footerColSpan} style={{ ...docStyles.totalsLabel, fontWeight: '700', color: '#0F172A' }}>Balance Due</td>
+                      <td style={{ ...docStyles.totalsValue, fontSize: '11.5px', fontWeight: '800' }}>₹{model.balanceDue.toLocaleString('en-IN')}</td>
+                    </tr>
+                  </>
+                )}
+              </tfoot>
+            )}
+          </table>
+        </div>
+
+        {model.otherInfo && (
+          <p style={{ ...docStyles.bodyText, margin: '0 0 16px' }}>{model.otherInfo}</p>
+        )}
+
+        {model.closingText && (
+          <p style={docStyles.closingText}>{model.closingText}</p>
+        )}
+
+        {/* Terms & Conditions */}
+        {model.termsLines.length > 0 && (
+          <div style={{ marginBottom: '18px' }}>
+            <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 6px' }}>Terms & Conditions:</p>
+            {model.termsLines.map((term, idx) => (
+              <p key={idx} style={{ ...docStyles.addressLine, margin: '0 0 4px' }}>{'\u2022'} {term}</p>
+            ))}
+          </div>
+        )}
+
+        {/* Payment History */}
+        {model.hasPayment && model.paidInfo.length > 0 && (
+          <div style={{ marginBottom: '16px' }}>
+            <p style={docStyles.sectionLabel}>Payment History</p>
+            {model.paidInfo.map((p) => (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#475569', padding: '4px 0', borderBottom: '1px solid #F1F5F9' }}>
+                <span>{p.date}{p.note ? ` — ${p.note}` : ''}</span>
+                <span style={{ fontWeight: '600', color: '#0F172A' }}>₹{p.amount}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Signature */}
+        <div style={{ textAlign: 'right', marginTop: '20px' }}>
+          <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
+          {model.signatureImg ? (
+            <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
+          ) : (
+            <div style={{ height: '34px' }}></div>
+          )}
+          <p style={docStyles.signatureCaption}>Authorized Signature</p>
+        </div>
+
+        {/* Generated with SmartManage - brand footer */}
+        <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <img src={smartpayLogo} alt="SmartManage" style={{ width: '20px', height: '20px', borderRadius: '5px', objectFit: 'cover', display: 'block' }} />
+          <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', letterSpacing: '0.2px' }}>Generated with SmartManage</span>
+        </div>
+      </>
+    );
+  };
+
+
+
+  // (Duplicate/Edit/Status live purely in-app; Share hands the user a real .pdf file
+  // through the OS share sheet, same pattern already used for worker statements above.)
+  // Loads the app's own logo (bundled asset) as a base64 PNG so it can be embedded in
+  // generated PDFs. Cached after first successful load; silently returns null on failure
+  // so a missing/blocked asset never breaks document sharing.
+  const appLogoDataUrlRef = useRef(null);
+  const getAppLogoDataUrl = async () => {
+    if (appLogoDataUrlRef.current) return appLogoDataUrlRef.current;
+    try {
+      const res = await fetch(smartpayLogo);
+      const blob = await res.blob();
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      appLogoDataUrlRef.current = dataUrl;
+      return dataUrl;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Renders a clean, professional business-document PDF: consistent typography hierarchy,
+  // a bold-but-not-oversized Grand Total, and a small "Generated with SmartManage" brand
+  // mark bottom-left — the same design system used across every module in the app.
+  const shareGeneratedDocumentPdf = async ({ fileNameBase, title, docNo, date, lines }) => {
+    const sanitizedFileName = `${(fileNameBase || title || 'Document').toString().trim().replace(/\s+/g, '_')}.pdf`;
+    try {
+      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const marginX = 44;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const bottomLimit = pageHeight - 60;
+      let y = 56;
+      const logoDataUrl = await getAppLogoDataUrl();
+
+      const drawBrandFooter = () => {
+        const fy = pageHeight - 34;
+        doc.setDrawColor('#EDF0F4');
+        doc.setLineWidth(0.6);
+        doc.line(marginX, fy - 12, pageWidth - marginX, fy - 12);
+        let tx = marginX;
+        if (logoDataUrl) {
+          try { doc.addImage(logoDataUrl, 'PNG', marginX, fy - 8, 11, 11); tx = marginX + 15; } catch (e) { /* ignore */ }
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#9CA3AF');
+        doc.text('Generated with SmartManage', tx, fy + 0.5);
+      };
+      const ensureSpace = (needed) => {
+        if (y + needed > bottomLimit) { drawBrandFooter(); doc.addPage(); y = 56; }
+      };
+
+      // Business name (left) + document type (right), same visual weight, no single
+      // element allowed to dominate the page.
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor('#0F172A');
+      doc.text(businessInfo?.businessName || 'Manufacturer', marginX, y);
+      doc.setFontSize(12);
+      doc.text((title || 'Document').toUpperCase(), pageWidth - marginX, y, { align: 'right' });
+      y += 15;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor('#64748B');
+      if (businessInfo?.phone) { doc.text(businessInfo.phone, marginX, y); }
+      if (docNo) { doc.text(`${title} #: ${docNo}`, pageWidth - marginX, y, { align: 'right' }); }
+      y += 11;
+      if (businessInfo?.email) { doc.text(businessInfo.email, marginX, y); }
+      if (date) { doc.text(`Date: ${date}`, pageWidth - marginX, y, { align: 'right' }); }
+      y += 16;
+
+      doc.setDrawColor('#CBD5E1');
+      doc.setLineWidth(0.75);
+      doc.line(marginX, y, pageWidth - marginX, y);
+      y += 20;
+
+      // Body lines. A line beginning with "Grand Total" or "Balance Due" is treated as a
+      // totals row: right-aligned, bold, set off with its own rule so it reads as
+      // important without the oversized type the old layout used.
+      (lines || []).forEach((raw) => {
+        const line = String(raw);
+        const isTotalRow = /^(grand total|balance due)/i.test(line.trim());
+        if (line.trim() === '') { ensureSpace(8); y += 8; return; }
+        if (isTotalRow) {
+          ensureSpace(24);
+          const [label, ...rest] = line.split(':');
+          const value = rest.join(':').trim();
+          doc.setDrawColor('#0F172A');
+          doc.setLineWidth(0.75);
+          doc.line(pageWidth - marginX - 190, y - 9, pageWidth - marginX, y - 9);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10.5);
+          doc.setTextColor('#0F172A');
+          doc.text(label.trim().toUpperCase(), pageWidth - marginX - 190, y + 4);
+          doc.setFontSize(12.5);
+          doc.text(value, pageWidth - marginX, y + 4, { align: 'right' });
+          y += 22;
+        } else {
+          ensureSpace(15);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9.5);
+          doc.setTextColor('#334155');
+          doc.text(line, marginX, y, { maxWidth: pageWidth - marginX * 2 });
+          y += 15;
+        }
+      });
+
+      drawBrandFooter();
+
+      const dataUrl = doc.output('datauristring');
+      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+
+      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
+        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
+        return;
+      }
+      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
+        const { Filesystem, Share } = window.Capacitor.Plugins;
+        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
+        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
+        return;
+      }
+
+      // Web/browser fallback: use the native OS share sheet (Screenshot 2/3 behaviour) when available,
+      // otherwise just download the PDF.
+      if (navigator.share) {
+        try {
+          const blob = doc.output('blob');
+          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
+          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: sanitizedFileName });
+            return;
+          }
+        } catch (shareErr) {
+          // User cancelled the share sheet, or the browser refused - fall through to download.
+        }
+      }
+
+      const ua = navigator.userAgent || '';
+      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
+      if (isBareAndroidWebView) {
+        const link = document.createElement('a');
+        link.href = `data:application/pdf;base64,${pdfBase64}`;
+        link.download = sanitizedFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        doc.save(sanitizedFileName);
+      }
+    } catch (err) {
+      console.error('PDF share failed:', err);
+      showAlert('Could not prepare the document for sharing. Please try again.');
+    }
+  };
+
+  // Dedicated Quotation PDF renderer - draws the SAME header/To-Date/table/totals/
+  // terms/signature layout as the in-app "Quotation Detail" preview, built from the
+  // exact same buildQuotationDocModel() data, so Share always matches what's on screen.
+  const shareQuotationPdf = async (q) => {
+    const sanitizedFileName = `Quotation_${q.quotationNo || ''}`.trim().replace(/\s+/g, '_') + '.pdf';
+    try {
+      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
+      const model = buildQuotationDocModel(q);
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const marginX = 44;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const contentWidth = pageWidth - marginX * 2;
+      const bottomLimit = pageHeight - 60;
+      let y = 50;
+      const logoDataUrl = await getAppLogoDataUrl();
+
+      const drawBrandFooter = () => {
+        const fy = pageHeight - 34;
+        doc.setDrawColor('#EDF0F4');
+        doc.setLineWidth(0.6);
+        doc.line(marginX, fy - 12, pageWidth - marginX, fy - 12);
+        let tx = marginX;
+        if (logoDataUrl) {
+          try { doc.addImage(logoDataUrl, 'PNG', marginX, fy - 8, 11, 11); tx = marginX + 15; } catch (e) { /* ignore */ }
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#9CA3AF');
+        doc.text('Generated with SmartManage', tx, fy + 0.5);
+      };
+      const ensureSpace = (needed) => {
+        if (y + needed > bottomLimit) { drawBrandFooter(); doc.addPage(); y = 50; }
+      };
+
+      // ---- Header: Quotation N (top, centered), then Manufacturer info below
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor('#0F172A');
+      doc.text(model.quotationTitle, pageWidth / 2, y, { align: 'center' });
+      y += 22;
+
+      if (model.logoImg) {
+        try { doc.addImage(model.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12.5);
+      doc.setTextColor('#0F172A');
+      doc.text(model.businessName, marginX, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor('#64748B');
+      let by = y + 14;
+      if (model.businessPhone) { doc.text(model.businessPhone, marginX, by); by += 11; }
+      if (model.businessEmail) { doc.text(model.businessEmail, marginX, by); by += 11; }
+
+      y = Math.max(by + 10, model.logoImg ? y + 34 : 0);
+      doc.setDrawColor('#E2E8F0');
+      doc.setLineWidth(0.75);
+      doc.line(marginX, y, pageWidth - marginX, y);
+      y += 20;
+
+      // ---- To, (left) | Date (right)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor('#64748B');
+      doc.text('To,', marginX, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor('#0F172A');
+      doc.text(`Date: ${model.date || ''}`, pageWidth - marginX, y, { align: 'right' });
+      y += 13;
+
+      model.customerLines.forEach((line, idx) => {
+        doc.setFont('helvetica', idx === 0 ? 'bold' : 'normal');
+        doc.setFontSize(idx === 0 ? 10.5 : 8.5);
+        doc.setTextColor(idx === 0 ? '#0F172A' : '#64748B');
+        doc.text(String(line), marginX, y, { maxWidth: contentWidth - 160 });
+        y += idx === 0 ? 13 : 11;
+      });
+      y += 10;
+
+      // ---- Greeting / intro line (skipped when empty)
+      if (model.greetingLines.length > 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#475569');
+        model.greetingLines.forEach((line) => {
+          doc.text(line, marginX, y);
+          y += 13;
+        });
+        y += 7;
+      }
+
+      // ---- Item table
+      const colWidths = [0.06, 0.22, 0.11, 0.11, 0.17, 0.15, 0.18].map((pct) => pct * contentWidth);
+      const colX = [marginX];
+      for (let i = 0; i < colWidths.length - 1; i++) colX.push(colX[i] + colWidths[i]);
+      const headers = ['#', 'Item', model.hsnLabel, 'Qty', 'Price', 'GST', 'Total'];
+      const aligns = ['left', 'left', 'left', 'center', 'right', 'right', 'right'];
+
+      ensureSpace(24);
+      doc.setDrawColor('#0F172A');
+      doc.setLineWidth(1);
+      doc.line(marginX, y - 9, pageWidth - marginX, y - 9);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor('#475569');
+      headers.forEach((h, i) => {
+        const align = aligns[i];
+        const tx = align === 'right' ? colX[i] + colWidths[i] : align === 'center' ? colX[i] + colWidths[i] / 2 : colX[i];
+        doc.text(h.toUpperCase(), tx, y, { align });
+      });
+      y += 4;
+      doc.line(marginX, y, pageWidth - marginX, y);
+      y += 13;
+
+      model.rows.forEach((r) => {
+        const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[1] - 4);
+        const rowH = Math.max(13, nameLines.length * 10 + 3);
+        ensureSpace(rowH + 6);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor('#334155');
+        doc.text(String(r.index), colX[0], y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#0F172A');
+        doc.text(nameLines, colX[1], y);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor('#334155');
+        doc.text(String(r.hsn), colX[2], y);
+        doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[3] + colWidths[3] / 2, y, { align: 'center' });
+        doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[4] + colWidths[4], y, { align: 'right' });
+        doc.text(`${r.gstPct}%`, colX[5] + colWidths[5], y, { align: 'right' });
+        doc.setFontSize(7.5);
+        doc.setTextColor('#94A3B8');
+        doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[5] + colWidths[5], y + 9, { align: 'right' });
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#0F172A');
+        doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[6] + colWidths[6], y, { align: 'right' });
+        y += rowH + 6;
+        doc.setDrawColor('#EEF1F5');
+        doc.setLineWidth(0.5);
+        doc.line(marginX, y - 4, pageWidth - marginX, y - 4);
+      });
+      y += 8;
+
+      // ---- Sub Total / Other Charges / Grand Total
+      const totalLabelX = pageWidth - marginX - 190;
+      ensureSpace(18);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#64748B');
+      doc.text('Sub Total', totalLabelX, y, { align: 'left' });
+      doc.setTextColor('#334155');
+      doc.text(`Rs.${model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+      y += 15;
+
+      if (model.otherChargesTotal > 0) {
+        ensureSpace(18);
+        doc.setTextColor('#64748B');
+        doc.text('Other Charges', totalLabelX, y, { align: 'left' });
+        doc.setTextColor('#334155');
+        doc.text(`Rs.${model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+        y += 15;
+      }
+      y -= 3;
+
+      ensureSpace(28);
+      doc.setDrawColor('#0F172A');
+      doc.setLineWidth(0.75);
+      doc.line(totalLabelX, y, pageWidth - marginX, y);
+      y += 15;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor('#0F172A');
+      doc.text('Grand Total', totalLabelX, y, { align: 'left' });
+      doc.setFontSize(12.5);
+      doc.text(`Rs.${model.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+      y += 26;
+
+      // ---- Closing text (skipped when empty)
+      if (model.closingText) {
+        ensureSpace(15);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#64748B');
+        doc.text(model.closingText, marginX, y, { maxWidth: contentWidth });
+        y += 22;
+      }
+
+      // ---- Terms & Conditions (Quotation-specific only)
+      if (model.termsLines.length > 0) {
+        ensureSpace(16);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#0F172A');
+        doc.text('TERMS & CONDITIONS:', marginX, y);
+        y += 13;
+        model.termsLines.forEach((term) => {
+          const lines = doc.splitTextToSize(`\u2022 ${term}`, contentWidth);
+          ensureSpace(lines.length * 12 + 2);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.setTextColor('#475569');
+          doc.text(lines, marginX, y);
+          y += lines.length * 12 + 2;
+        });
+        y += 10;
+      }
+
+      // ---- Signature block
+      ensureSpace(46);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor('#0F172A');
+      doc.text(`For, ${model.signatureName}`, pageWidth - marginX, y, { align: 'right' });
+      if (model.signatureImg) {
+        try {
+          const sigW = 90, sigH = 30;
+          doc.addImage(model.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
+        } catch (e) { /* ignore */ }
+      }
+      y += 34;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor('#94A3B8');
+      doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, y, { align: 'right' });
+
+      drawBrandFooter();
+
+      const dataUrl = doc.output('datauristring');
+      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+
+      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
+        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
+        return;
+      }
+      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
+        const { Filesystem, Share } = window.Capacitor.Plugins;
+        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
+        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
+        return;
+      }
+      if (navigator.share) {
+        try {
+          const blob = doc.output('blob');
+          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
+          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: sanitizedFileName });
+            return;
+          }
+        } catch (shareErr) {
+          // User cancelled the share sheet, or the browser refused - fall through to download.
+        }
+      }
+      const ua = navigator.userAgent || '';
+      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
+      if (isBareAndroidWebView) {
+        const link = document.createElement('a');
+        link.href = `data:application/pdf;base64,${pdfBase64}`;
+        link.download = sanitizedFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        doc.save(sanitizedFileName);
+      }
+    } catch (err) {
+      console.error('Quotation PDF share failed:', err);
+      showAlert('Could not prepare the document for sharing. Please try again.');
+    }
+  };
+
+  // Generic PDF renderer shared by Invoice / Purchase Order / Proforma Invoice / Delivery
+  // Note — draws the exact same header/logo, To-Date, greeting, table, totals, other info,
+  // closing text, terms, and signature/signature-image layout as shareQuotationPdf, driven
+  // entirely by a model built from buildDocModel, so every document's Share PDF always
+  // matches its in-app preview.
+  const shareStandardDocumentPdf = async (model, fileNameBase) => {
+    const sanitizedFileName = `${(fileNameBase || model.docTitle || 'Document').toString().trim().replace(/\s+/g, '_')}.pdf`;
+    try {
+      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const marginX = 44;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const contentWidth = pageWidth - marginX * 2;
+      const bottomLimit = pageHeight - 60;
+      let y = 50;
+      const logoDataUrl = await getAppLogoDataUrl();
+
+      const drawBrandFooter = () => {
+        const fy = pageHeight - 34;
+        doc.setDrawColor('#EDF0F4');
+        doc.setLineWidth(0.6);
+        doc.line(marginX, fy - 12, pageWidth - marginX, fy - 12);
+        let tx = marginX;
+        if (logoDataUrl) {
+          try { doc.addImage(logoDataUrl, 'PNG', marginX, fy - 8, 11, 11); tx = marginX + 15; } catch (e) { /* ignore */ }
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#9CA3AF');
+        doc.text('Generated with SmartManage', tx, fy + 0.5);
+      };
+      const ensureSpace = (needed) => {
+        if (y + needed > bottomLimit) { drawBrandFooter(); doc.addPage(); y = 50; }
+      };
+
+      // ---- Header: Doc title (top, centered), then Business info + logo below
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor('#0F172A');
+      doc.text(model.docTitle, pageWidth / 2, y, { align: 'center' });
+      y += 22;
+
+      if (model.logoImg) {
+        try { doc.addImage(model.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12.5);
+      doc.setTextColor('#0F172A');
+      doc.text(model.businessName, marginX, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor('#64748B');
+      let by = y + 14;
+      if (model.businessPhone) { doc.text(model.businessPhone, marginX, by); by += 11; }
+      if (model.businessEmail) { doc.text(model.businessEmail, marginX, by); by += 11; }
+
+      y = Math.max(by + 10, model.logoImg ? y + 34 : 0);
+      doc.setDrawColor('#E2E8F0');
+      doc.setLineWidth(0.75);
+      doc.line(marginX, y, pageWidth - marginX, y);
+      y += 20;
+
+      // ---- To, (left) | Date (right)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor('#64748B');
+      doc.text(model.toLabel || 'To,', marginX, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor('#0F172A');
+      doc.text(`Date: ${model.date || ''}`, pageWidth - marginX, y, { align: 'right' });
+      y += 13;
+
+      model.customerLines.forEach((line, idx) => {
+        doc.setFont('helvetica', idx === 0 ? 'bold' : 'normal');
+        doc.setFontSize(idx === 0 ? 10.5 : 8.5);
+        doc.setTextColor(idx === 0 ? '#0F172A' : '#64748B');
+        doc.text(String(line), marginX, y, { maxWidth: contentWidth - 160 });
+        y += idx === 0 ? 13 : 11;
+      });
+      y += 10;
+
+      // ---- Greeting / intro lines (type-specific, skipped when empty)
+      if (model.greetingLines.length > 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#475569');
+        model.greetingLines.forEach((line) => {
+          doc.text(line, marginX, y);
+          y += 13;
+        });
+        y += 7;
+      }
+
+      // ---- Item table (pricing columns only when this doc type carries pricing)
+      const colPcts = model.pricing ? [0.06, 0.22, 0.11, 0.11, 0.17, 0.15, 0.18] : [0.10, 0.42, 0.23, 0.25];
+      const colWidths = colPcts.map((pct) => pct * contentWidth);
+      const colX = [marginX];
+      for (let i = 0; i < colWidths.length - 1; i++) colX.push(colX[i] + colWidths[i]);
+      const headers = model.pricing ? ['#', 'Item', model.hsnLabel, 'Qty', 'Price', 'GST', 'Total'] : ['#', 'Item', model.hsnLabel, 'Qty'];
+      const aligns = model.pricing ? ['left', 'left', 'left', 'center', 'right', 'right', 'right'] : ['left', 'left', 'left', 'center'];
+
+      ensureSpace(24);
+      doc.setDrawColor('#0F172A');
+      doc.setLineWidth(1);
+      doc.line(marginX, y - 9, pageWidth - marginX, y - 9);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor('#475569');
+      headers.forEach((h, i) => {
+        const align = aligns[i];
+        const tx = align === 'right' ? colX[i] + colWidths[i] : align === 'center' ? colX[i] + colWidths[i] / 2 : colX[i];
+        doc.text(h.toUpperCase(), tx, y, { align });
+      });
+      y += 4;
+      doc.line(marginX, y, pageWidth - marginX, y);
+      y += 13;
+
+      model.rows.forEach((r) => {
+        const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[1] - 4);
+        const rowH = Math.max(13, nameLines.length * 10 + 3);
+        ensureSpace(rowH + 6);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor('#334155');
+        doc.text(String(r.index), colX[0], y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#0F172A');
+        doc.text(nameLines, colX[1], y);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor('#334155');
+        doc.text(String(r.hsn), colX[2], y);
+        doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[3] + colWidths[3] / 2, y, { align: 'center' });
+        if (model.pricing) {
+          doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[4] + colWidths[4], y, { align: 'right' });
+          doc.text(`${r.gstPct}%`, colX[5] + colWidths[5], y, { align: 'right' });
+          doc.setFontSize(7.5);
+          doc.setTextColor('#94A3B8');
+          doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[5] + colWidths[5], y + 9, { align: 'right' });
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor('#0F172A');
+          doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[6] + colWidths[6], y, { align: 'right' });
+        }
+        y += rowH + 6;
+        doc.setDrawColor('#EEF1F5');
+        doc.setLineWidth(0.5);
+        doc.line(marginX, y - 4, pageWidth - marginX, y - 4);
+      });
+      y += 8;
+
+      // ---- Sub Total / Other Charges / Grand Total (+ Paid / Balance Due when applicable)
+      if (model.pricing) {
+        const totalLabelX = pageWidth - marginX - 190;
+        ensureSpace(18);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#64748B');
+        doc.text('Sub Total', totalLabelX, y, { align: 'left' });
+        doc.setTextColor('#334155');
+        doc.text(`Rs.${model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+        y += 15;
+
+        if (model.otherChargesTotal > 0) {
+          ensureSpace(18);
+          doc.setTextColor('#64748B');
+          doc.text('Other Charges', totalLabelX, y, { align: 'left' });
+          doc.setTextColor('#334155');
+          doc.text(`Rs.${model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+          y += 15;
+        }
+        y -= 3;
+
+        ensureSpace(28);
+        doc.setDrawColor('#0F172A');
+        doc.setLineWidth(0.75);
+        doc.line(totalLabelX, y, pageWidth - marginX, y);
+        y += 15;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor('#0F172A');
+        doc.text('Grand Total', totalLabelX, y, { align: 'left' });
+        doc.setFontSize(12.5);
+        doc.text(`Rs.${model.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+        y += 26;
+
+        if (model.hasPayment && model.paidTotal > 0) {
+          ensureSpace(30);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor('#16A34A');
+          doc.text('Paid', totalLabelX, y, { align: 'left' });
+          doc.text(`Rs.${model.paidTotal.toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
+          y += 15;
+          doc.setTextColor('#0F172A');
+          doc.text('Balance Due', totalLabelX, y, { align: 'left' });
+          doc.setFontSize(11);
+          doc.text(`Rs.${model.balanceDue.toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
+          y += 22;
+        }
+      }
+
+      // ---- Other Info (type-agnostic free-text note, when present)
+      if (model.otherInfo) {
+        ensureSpace(15);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#64748B');
+        const lines = doc.splitTextToSize(model.otherInfo, contentWidth);
+        doc.text(lines, marginX, y);
+        y += lines.length * 13 + 8;
+      }
+
+      // ---- Closing text (skipped when empty)
+      if (model.closingText) {
+        ensureSpace(15);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#64748B');
+        doc.text(model.closingText, marginX, y, { maxWidth: contentWidth });
+        y += 22;
+      }
+
+      // ---- Terms & Conditions
+      if (model.termsLines.length > 0) {
+        ensureSpace(16);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#0F172A');
+        doc.text('TERMS & CONDITIONS:', marginX, y);
+        y += 13;
+        model.termsLines.forEach((term) => {
+          const lines = doc.splitTextToSize(`\u2022 ${term}`, contentWidth);
+          ensureSpace(lines.length * 12 + 2);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.setTextColor('#475569');
+          doc.text(lines, marginX, y);
+          y += lines.length * 12 + 2;
+        });
+        y += 10;
+      }
+
+      // ---- Payment History
+      if (model.hasPayment && model.paidInfo.length > 0) {
+        ensureSpace(16);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#0F172A');
+        doc.text('PAYMENT HISTORY:', marginX, y);
+        y += 13;
+        model.paidInfo.forEach((p) => {
+          ensureSpace(13);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.setTextColor('#475569');
+          doc.text(`${p.date}${p.note ? ' — ' + p.note : ''}`, marginX, y);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor('#0F172A');
+          doc.text(`Rs.${p.amount}`, pageWidth - marginX, y, { align: 'right' });
+          y += 13;
+        });
+        y += 8;
+      }
+
+      // ---- Signature block
+      ensureSpace(46);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor('#0F172A');
+      doc.text(`For, ${model.signatureName}`, pageWidth - marginX, y, { align: 'right' });
+      if (model.signatureImg) {
+        try {
+          const sigW = 90, sigH = 30;
+          doc.addImage(model.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
+        } catch (e) { /* ignore */ }
+      }
+      y += 34;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor('#94A3B8');
+      doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, y, { align: 'right' });
+
+      drawBrandFooter();
+
+      const dataUrl = doc.output('datauristring');
+      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+
+      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
+        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
+        return;
+      }
+      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
+        const { Filesystem, Share } = window.Capacitor.Plugins;
+        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
+        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
+        return;
+      }
+      if (navigator.share) {
+        try {
+          const blob = doc.output('blob');
+          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
+          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: sanitizedFileName });
+            return;
+          }
+        } catch (shareErr) {
+          // User cancelled the share sheet, or the browser refused - fall through to download.
+        }
+      }
+      const ua = navigator.userAgent || '';
+      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
+      if (isBareAndroidWebView) {
+        const link = document.createElement('a');
+        link.href = `data:application/pdf;base64,${pdfBase64}`;
+        link.download = sanitizedFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        doc.save(sanitizedFileName);
+      }
+    } catch (err) {
+      console.error('Document PDF share failed:', err);
+      showAlert('Could not prepare the document for sharing. Please try again.');
+    }
+  };
+
+  const productLineSummary = (p) => `${p.name} x${p.qty}${p.unit ? ' ' + p.unit : ''} - Rs.${Math.round((p.price || 0) * (p.qty || 0) * (1 + (p.gst || 0) / 100)).toLocaleString('en-IN')}`;
+
+  // ----- Quotation: Duplicate / Edit / Status / Share -----
+  const openEditQuotation = (q) => {
+    setEditingQuotationId(q.id);
+    setQuotationForm({
+      date: q.date, quotationNo: q.quotationNo, otherInfo: q.otherInfo || '',
+      customerId: q.customerId, products: q.products || [], otherCharges: q.otherCharges || [], termsIds: q.termsIds || [],
+    });
+    setQuotationSubView('makeQuotation');
+  };
+  const handleDuplicateQuotation = async (q) => {
+    if (!loggedInUser?.userId) {
+      showAlert('You need to be signed in to duplicate a quotation.');
+      return;
+    }
+    const { id, createdAt, updatedAt, status, ...rest } = q;
+    const payload = { ...rest, quotationNo: getNextQuotationNumber(), date: formatQuotationDate(new Date()) };
+    try {
+      const created = await documentService.createQuotation(loggedInUser.userId, payload);
+      persistQuotations([...quotations, created]);
+      showSuccess('Quotation duplicated successfully.');
+      setQuotationSubView('quotationList');
+    } catch (error) {
+      console.error('Error duplicating quotation:', error);
+      showAlert('Could not duplicate the quotation on the server. Please try again.');
+    }
+  };
+  const handleSetQuotationStatus = async (status) => {
+    const previous = quotations;
+    persistQuotations(quotations.map((q) => (q.id === selectedQuotationId ? { ...q, status } : q)));
+    setShowQuotationStatusSheet(false);
+    setShowQuotationMoreSheet(false);
+    try {
+      await documentService.updateQuotationStatus(selectedQuotationId, status);
+    } catch (error) {
+      console.error('Error updating quotation status:', error);
+      persistQuotations(previous); // revert on failure
+      showAlert('Could not update the quotation status on the server. Please try again.');
+    }
+  };
+  const handleShareQuotation = (q) => {
+    shareQuotationPdf(q);
+  };
+
+  // ----- Purchase Order: Duplicate / Edit / Status / Share -----
+  const openEditPurchaseOrder = (o) => {
+    setEditingPurchaseOrderId(o.id);
+    setPurchaseOrderForm({
+      date: o.date, purchaseOrderNo: o.purchaseOrderNo, otherInfo: o.otherInfo || '',
+      customerId: o.customerId, products: o.products || [], otherCharges: o.otherCharges || [], termsIds: o.termsIds || [],
+    });
+    setQuotationSubView('makePurchaseOrder');
+  };
+  const handleDuplicatePurchaseOrder = (o) => {
+    const duplicate = { ...o, id: genId(), purchaseOrderNo: getNextPurchaseOrderNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
+    persistPurchaseOrders([...purchaseOrders, duplicate]);
+    showSuccess('Purchase Order duplicated successfully.');
+    setQuotationSubView('purchaseOrderList');
+  };
+  const handleSetPurchaseOrderStatus = (status) => {
+    persistPurchaseOrders(purchaseOrders.map((o) => (o.id === selectedPurchaseOrderId ? { ...o, status } : o)));
+    setShowPurchaseOrderStatusSheet(false);
+    setShowPurchaseOrderMoreSheet(false);
+  };
+  const handleSharePurchaseOrder = (o) => {
+    shareStandardDocumentPdf(buildPurchaseOrderDocModel(o), `PurchaseOrder_${o.purchaseOrderNo || ''}`);
+  };
+
+  // ----- Proforma Invoice: Duplicate / Edit / Status / Share -----
+  const openEditProformaInvoice = (inv) => {
+    setEditingProformaInvoiceId(inv.id);
+    setProformaInvoiceForm({
+      date: inv.date, proformaInvoiceNo: inv.proformaInvoiceNo, dueDate: inv.dueDate || '', poNo: inv.poNo || '', otherInfo: inv.otherInfo || '',
+      customerId: inv.customerId, products: inv.products || [], otherCharges: inv.otherCharges || [], termsIds: inv.termsIds || [], paidInfo: inv.paidInfo || [],
+    });
+    setQuotationSubView('makeProformaInvoice');
+  };
+  const handleDuplicateProformaInvoice = (inv) => {
+    const duplicate = { ...inv, id: genId(), proformaInvoiceNo: getNextProformaInvoiceNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
+    persistProformaInvoices([...proformaInvoices, duplicate]);
+    showSuccess('Proforma Invoice duplicated successfully.');
+    setQuotationSubView('proformaInvoiceList');
+  };
+  const handleSetProformaInvoiceStatus = (status) => {
+    persistProformaInvoices(proformaInvoices.map((inv) => (inv.id === selectedProformaInvoiceId ? { ...inv, status } : inv)));
+    setShowProformaInvoiceStatusSheet(false);
+    setShowProformaInvoiceMoreSheet(false);
+  };
+  const handleShareProformaInvoice = (inv) => {
+    shareStandardDocumentPdf(buildProformaInvoiceDocModel(inv), `ProformaInvoice_${inv.proformaInvoiceNo || ''}`);
+  };
+
+  // ----- Delivery Note: Duplicate / Edit / Status / Share -----
+  const openEditDeliveryNote = (dn) => {
+    setEditingDeliveryNoteId(dn.id);
+    setDeliveryNoteForm({
+      date: dn.date, deliveryNoteNo: dn.deliveryNoteNo, refNo: dn.refNo || '', otherInfo: dn.otherInfo || '',
+      customerId: dn.customerId, products: dn.products || [], termsIds: dn.termsIds || [],
+    });
+    setQuotationSubView('makeDeliveryNote');
+  };
+  const handleDuplicateDeliveryNote = (dn) => {
+    const duplicate = { ...dn, id: genId(), deliveryNoteNo: getNextDeliveryNoteNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
+    persistDeliveryNotes([...deliveryNotes, duplicate]);
+    showSuccess('Delivery Note duplicated successfully.');
+    setQuotationSubView('deliveryNoteList');
+  };
+  const handleSetDeliveryNoteStatus = (status) => {
+    persistDeliveryNotes(deliveryNotes.map((dn) => (dn.id === selectedDeliveryNoteId ? { ...dn, status } : dn)));
+    setShowDeliveryNoteStatusSheet(false);
+    setShowDeliveryNoteMoreSheet(false);
+  };
+  const handleShareDeliveryNote = (dn) => {
+    shareStandardDocumentPdf(buildDeliveryNoteDocModel(dn), `DeliveryNote_${dn.deliveryNoteNo || ''}`);
+  };
+
+  // ----- Invoice: Duplicate / Edit / Status / Share -----
+  const openEditInvoice = (inv) => {
+    setEditingInvoiceId(inv.id);
+    setInvoiceForm({
+      date: inv.date, invoiceNo: inv.invoiceNo, dueDate: inv.dueDate || '', poNo: inv.poNo || '', otherInfo: inv.otherInfo || '',
+      customerId: inv.customerId, products: inv.products || [], otherCharges: inv.otherCharges || [], termsIds: inv.termsIds || [], paidInfo: inv.paidInfo || [],
+    });
+    setQuotationSubView('makeInvoice');
+  };
+  const handleDuplicateInvoice = (inv) => {
+    const duplicate = { ...inv, id: genId(), invoiceNo: getNextInvoiceNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
+    persistInvoices([...invoices, duplicate]);
+    showSuccess('Invoice duplicated successfully.');
+    setQuotationSubView('invoiceList');
+  };
+  const handleSetInvoiceStatus = (status) => {
+    persistInvoices(invoices.map((inv) => (inv.id === selectedInvoiceId ? { ...inv, status } : inv)));
+    setShowInvoiceStatusSheet(false);
+    setShowInvoiceMoreSheet(false);
+  };
+  const handleShareInvoice = (inv) => {
+    shareStandardDocumentPdf(buildInvoiceDocModel(inv), `Invoice_${inv.invoiceNo || ''}`);
+  };
+
+  // ----- Receipt: Duplicate / Edit / Status / Share -----
+  const openEditReceipt = (r) => {
+    setEditingReceiptId(r.id);
+    setReceiptForm({
+      date: r.date, receiptNo: r.receiptNo, customerId: r.customerId,
+      paymentMode: r.paymentMode || '', referenceNo: r.referenceNo || '', paidAmount: r.paidAmount != null ? String(r.paidAmount) : '', paymentFor: r.paymentFor || '',
+    });
+    setQuotationSubView('makeReceipt');
+  };
+  const handleDuplicateReceipt = (r) => {
+    const duplicate = { ...r, id: genId(), receiptNo: getNextReceiptNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
+    persistReceipts([...receipts, duplicate]);
+    showSuccess('Receipt duplicated successfully.');
+    setQuotationSubView('receiptList');
+  };
+  const handleSetReceiptStatus = (status) => {
+    persistReceipts(receipts.map((r) => (r.id === selectedReceiptId ? { ...r, status } : r)));
+    setShowReceiptStatusSheet(false);
+    setShowReceiptMoreSheet(false);
+  };
+  // Receipt PDF — draws the exact same header/logo, To-Date, and signature layout as
+  // shareStandardDocumentPdf (Quotation/Invoice/etc.) so the Receipt PDF matches every
+  // other document type instead of using its own one-off layout. The item table is
+  // replaced with a Payment Details block, and the signature is always the business
+  // (not the customer), matching the in-app Receipt Detail preview.
+  const shareReceiptPdf = async (r) => {
+    const sanitizedFileName = `${(`Receipt_${r.receiptNo || ''}`).toString().trim().replace(/\s+/g, '_')}.pdf`;
+    try {
+      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const marginX = 44;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const contentWidth = pageWidth - marginX * 2;
+      const bottomLimit = pageHeight - 60;
+      let y = 50;
+      const logoDataUrl = await getAppLogoDataUrl();
+
+      const drawBrandFooter = () => {
+        const fy = pageHeight - 34;
+        doc.setDrawColor('#EDF0F4');
+        doc.setLineWidth(0.6);
+        doc.line(marginX, fy - 12, pageWidth - marginX, fy - 12);
+        let tx = marginX;
+        if (logoDataUrl) {
+          try { doc.addImage(logoDataUrl, 'PNG', marginX, fy - 8, 11, 11); tx = marginX + 15; } catch (e) { /* ignore */ }
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#9CA3AF');
+        doc.text('Generated with SmartManage', tx, fy + 0.5);
+      };
+      const ensureSpace = (needed) => {
+        if (y + needed > bottomLimit) { drawBrandFooter(); doc.addPage(); y = 50; }
+      };
+
+      // ---- Header: Receipt # (top, centered), then Business info + logo below
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor('#0F172A');
+      doc.text('Receipt', pageWidth / 2, y, { align: 'center' });
+      y += 22;
+
+      if (businessInfo?.logoImg) {
+        try { doc.addImage(businessInfo.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12.5);
+      doc.setTextColor('#0F172A');
+      doc.text(businessInfo?.businessName || 'Manufacturer', marginX, y);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor('#64748B');
+      let by = y + 14;
+      if (businessInfo?.phone) { doc.text(businessInfo.phone, marginX, by); by += 11; }
+      if (businessInfo?.email) { doc.text(businessInfo.email, marginX, by); by += 11; }
+
+      y = Math.max(by + 10, businessInfo?.logoImg ? y + 34 : 0);
+      doc.setDrawColor('#E2E8F0');
+      doc.setLineWidth(0.75);
+      doc.line(marginX, y, pageWidth - marginX, y);
+      y += 20;
+
+      // ---- To, (left) | Date (right)
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor('#64748B');
+      doc.text('To,', marginX, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor('#0F172A');
+      doc.text(`Date: ${r.date || ''}`, pageWidth - marginX, y, { align: 'right' });
+      y += 13;
+
+      const customerLines = buildCustomerLines(r);
+      customerLines.forEach((line, idx) => {
+        doc.setFont('helvetica', idx === 0 ? 'bold' : 'normal');
+        doc.setFontSize(idx === 0 ? 10.5 : 8.5);
+        doc.setTextColor(idx === 0 ? '#0F172A' : '#64748B');
+        doc.text(String(line), marginX, y, { maxWidth: contentWidth - 160 });
+        y += idx === 0 ? 13 : 11;
+      });
+      y += 14;
+
+      // ---- Payment Details
+      ensureSpace(20);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#0F172A');
+      doc.text('PAYMENT DETAILS', marginX, y);
+      y += 6;
+      doc.setDrawColor('#0F172A');
+      doc.setLineWidth(1);
+      doc.line(marginX, y, pageWidth - marginX, y);
+      y += 17;
+
+      const paymentRows = [
+        ['Payment Mode', r.paymentMode || '-'],
+        ['Reference No', r.referenceNo || '-'],
+        ['Payment For', r.paymentFor || '-'],
+      ];
+      paymentRows.forEach(([label, value]) => {
+        ensureSpace(17);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#64748B');
+        doc.text(label, marginX, y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#0F172A');
+        doc.text(String(value), pageWidth - marginX, y, { align: 'right' });
+        y += 13;
+        doc.setDrawColor('#EEF1F5');
+        doc.setLineWidth(0.5);
+        doc.line(marginX, y, pageWidth - marginX, y);
+        y += 12;
+      });
+      y += 4;
+
+      // ---- Total Paid
+      const totalLabelX = pageWidth - marginX - 190;
+      ensureSpace(28);
+      doc.setDrawColor('#0F172A');
+      doc.setLineWidth(0.75);
+      doc.line(totalLabelX, y, pageWidth - marginX, y);
+      y += 15;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor('#0F172A');
+      doc.text('Total Paid', totalLabelX, y, { align: 'left' });
+      doc.setFontSize(12.5);
+      doc.text(`Rs.${Number(r.paidAmount || 0).toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
+      y += 34;
+
+      // ---- Signature block (always the business, matches in-app preview)
+      ensureSpace(46);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor('#0F172A');
+      doc.text(`For, ${businessInfo?.businessName || 'Manufacturer'}`, pageWidth - marginX, y, { align: 'right' });
+      if (businessInfo?.signatureImg) {
+        try {
+          const sigW = 90, sigH = 30;
+          doc.addImage(businessInfo.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
+        } catch (e) { /* ignore */ }
+      }
+      y += 34;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor('#94A3B8');
+      doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, y, { align: 'right' });
+
+      drawBrandFooter();
+
+      const dataUrl = doc.output('datauristring');
+      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+
+      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
+        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
+        return;
+      }
+      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
+        const { Filesystem, Share } = window.Capacitor.Plugins;
+        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
+        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
+        return;
+      }
+      if (navigator.share) {
+        try {
+          const blob = doc.output('blob');
+          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
+          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: sanitizedFileName });
+            return;
+          }
+        } catch (shareErr) {
+          // User cancelled the share sheet, or the browser refused - fall through to download.
+        }
+      }
+      const ua = navigator.userAgent || '';
+      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
+      if (isBareAndroidWebView) {
+        const link = document.createElement('a');
+        link.href = `data:application/pdf;base64,${pdfBase64}`;
+        link.download = sanitizedFileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        doc.save(sanitizedFileName);
+      }
+    } catch (err) {
+      console.error('Receipt PDF share failed:', err);
+      showAlert('Could not prepare the document for sharing. Please try again.');
+    }
+  };
+  const handleShareReceipt = (r) => {
+    shareReceiptPdf(r);
+  };
+
   // ===== Language =====
   const [language, setLanguage] = useState(() => {
     try {
@@ -938,6 +5085,7 @@ const paymentService = {
   const [projectPickerDropdown, setProjectPickerDropdown] = useState('');
   const [isSubscribePageOpen, setIsSubscribePageOpen] = useState(false);
   const [selectedSubscriptionPlan, setSelectedSubscriptionPlan] = useState('pro');
+  const [isHelpPageOpen, setIsHelpPageOpen] = useState(false);
 
   const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
   const [editProjectNameInput, setEditProjectNameInput] = useState('');
@@ -1000,6 +5148,22 @@ const paymentService = {
       setIsSubscribePageOpen(false);
       return true;
     }
+    if (isHelpPageOpen) {
+      setIsHelpPageOpen(false);
+      return true;
+    }
+    // Quotations module: hardware back closes an open sheet/picker before stepping out of a sub-screen.
+    if (showStatePicker) { setShowStatePicker(false); return true; }
+    // Quotations module: hardware back steps out of a sub-screen before leaving the module.
+    if (activeModule === 'quotations' && quotationSubView !== null) {
+      setQuotationSubView(null);
+      return true;
+    }
+    // Any module's first/top-level page: hardware back returns to the Main page.
+    if (activeModule !== null) {
+      setActiveModule(null);
+      return true;
+    }
     return false;
   };
 
@@ -1014,6 +5178,10 @@ const paymentService = {
 
   const closeTopmostScreenRef = useRef(() => false);
   closeTopmostScreenRef.current = closeTopmostScreen;
+
+  // Set to true right before an intentional reload/navigation (e.g. sign out) so the
+  // "Do you want to exit?" / Confirm Navigation prompt doesn't appear on that reload.
+  const isIntentionalReloadRef = useRef(false);
 
   const backButtonListenerRef = useRef(null);
 
@@ -1051,7 +5219,8 @@ const paymentService = {
                           isAttendanceModalOpen || 
                           isPaymentsPageOpen || 
                           activeSiteViewId || 
-                          isSubscribePageOpen;
+                          isSubscribePageOpen ||
+                          isHelpPageOpen;
 
     if (hasOpenScreens) {
       window.history.pushState({ appGuard: true, timestamp: Date.now() }, '');
@@ -1069,11 +5238,13 @@ const paymentService = {
       isAttendanceModalOpen, 
       isPaymentsPageOpen, 
       activeSiteViewId, 
-      isSubscribePageOpen]);
+      isSubscribePageOpen,
+      isHelpPageOpen]);
 
   useEffect(() => {
     if (!isUserAuthenticated) return;
     const handleDesktopUnload = (event) => {
+      if (isIntentionalReloadRef.current) return;
       const isModalOrSubFormOpen = closeTopmostScreenRef.current();
       if (!isModalOrSubFormOpen) {
         event.preventDefault();
@@ -2452,7 +6623,7 @@ const paymentService = {
     setResendSeconds(0);
   };
 
-  const isRegistrationFormValid = () => fullName.trim() !== '' && mobileNumber.length === 10;
+  const isRegistrationFormValid = () => fullName.trim() !== '' && isValidMobileNumber(mobileNumber);
 
   // Firebase phone-auth listeners: 'phoneCodeSent' fires once the SMS is dispatched and
   // gives us the verificationId we need later to confirm the code the user types in.
@@ -2475,11 +6646,49 @@ const paymentService = {
     };
   }, []);
 
+  // ✅ Checks with the backend whether a mobile number is already registered.
+  // Used right after the user types the number - BEFORE we ever call Firebase to
+  // send an OTP - so a duplicate (on Register) or unknown (on Login) number is
+  // caught immediately instead of after the user goes through the whole OTP flow.
+  // NOTE: this expects a backend endpoint `GET {API_BASE_URL}/check-mobile/{mobileNumber}`
+  // that returns JSON like { "exists": true } / { "exists": false }. Adjust the path/
+  // response field below if your backend route or shape differs.
+  const checkMobileNumberExists = async (number) => {
+    const response = await fetch(`${API_BASE_URL}/check-mobile/${number}`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    if (!response.ok) { throw new Error('Could not verify mobile number. Please try again.'); }
+    const data = await response.json();
+    return !!data.exists;
+  };
+
   const handleSendOtp = async () => {
     if (!isLoginView && !isRegistrationFormValid()) { showAlert('Please fill all registration details accurately.'); return; }
-    if (!mobileNumber || mobileNumber.length !== 10) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
+    if (!mobileNumber || !isValidMobileNumber(mobileNumber)) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
+      // 0. Registration-status check happens first, before any OTP is sent.
+      let numberExists;
+      try {
+        numberExists = await checkMobileNumberExists(mobileNumber.trim());
+      } catch (checkError) {
+        console.error('Mobile check error:', checkError);
+        showAlert(checkError?.message || 'Could not verify mobile number. Please try again.');
+        setSendingOtp(false);
+        return;
+      }
+      if (!isLoginView && numberExists) {
+        showAlert('This mobile number is already registered.');
+        setSendingOtp(false);
+        return;
+      }
+      if (isLoginView && !numberExists) {
+        showAlert('This mobile number is not registered. Please register first.');
+        setSendingOtp(false);
+        return;
+      }
+
       if (Capacitor.getPlatform() === 'web') {
         // @capacitor-firebase/authentication's signInWithPhoneNumber only supports
         // Android/iOS - on web we talk to the Firebase JS SDK directly instead.
@@ -2615,6 +6824,7 @@ const paymentService = {
 useEffect(() => {
   if (isUserAuthenticated && loggedInUser?.userId) {
     loadUserProjects(loggedInUser.userId);
+    loadUserQuotations(loggedInUser.userId);
   }
 }, [isUserAuthenticated, loggedInUser]);
 
@@ -2667,6 +6877,7 @@ useEffect(() => {
       try {
         if (isUserAuthenticated && loggedInUser?.userId) {
           await loadUserProjects(loggedInUser.userId);
+          await loadUserQuotations(loggedInUser.userId);
         }
       } finally {
         setIsReconnecting(false);
@@ -2694,6 +6905,9 @@ useEffect(() => {
 
   const connectivityStyles = {
     container: { position: 'fixed', inset: 0, zIndex: 9999, backgroundColor: '#F4F6FB', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px', textAlign: 'center' },
+    brandBlock: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', marginBottom: '48px' },
+    logoImg: { width: '68px', height: '68px', borderRadius: '18px', objectFit: 'cover', boxShadow: '0 10px 24px rgba(37, 84, 235, 0.18)' },
+    brandName: { margin: '10px 0 0 0', fontSize: '25px', fontWeight: '800', color: '#2554EB', letterSpacing: '-0.02em' },
     icon: { fontSize: '56px', marginBottom: '20px' },
     title: { fontSize: '20px', fontWeight: '700', color: '#111827', margin: '0 0 8px' },
     message: { fontSize: '14.5px', color: '#6B7280', margin: '0 0 28px', maxWidth: '320px', lineHeight: '1.5' },
@@ -2705,6 +6919,10 @@ useEffect(() => {
     return (
       <div style={connectivityStyles.container}>
         <style>{'@keyframes smartmanage-spin { to { transform: rotate(360deg); } }'}</style>
+        <div style={connectivityStyles.brandBlock}>
+          <img src={smartpayLogo} alt="SmartManage" style={connectivityStyles.logoImg} />
+          <h1 style={connectivityStyles.brandName}>SmartManage</h1>
+        </div>
         <div style={connectivityStyles.icon}>📡</div>
         <h2 style={connectivityStyles.title}>
           {hasConnectedOnceRef.current ? 'Internet connection lost.' : 'No Internet Connection'}
@@ -2719,6 +6937,10 @@ useEffect(() => {
     return (
       <div style={connectivityStyles.container}>
         <style>{'@keyframes smartmanage-spin { to { transform: rotate(360deg); } }'}</style>
+        <div style={connectivityStyles.brandBlock}>
+          <img src={smartpayLogo} alt="SmartManage" style={connectivityStyles.logoImg} />
+          <h1 style={connectivityStyles.brandName}>SmartManage</h1>
+        </div>
         <div style={connectivityStyles.spinner} />
         <p style={connectivityStyles.message}>Loading... Please wait.</p>
       </div>
@@ -2727,6 +6949,7 @@ useEffect(() => {
 
   const handleFullLogout = () => {
     showConfirm('Are you sure you want to sign out?', () => {
+      isIntentionalReloadRef.current = true;
       localStorage.clear();
       setIsUserAuthenticated(false);
       setLoggedInUser(null);
@@ -2746,6 +6969,139 @@ useEffect(() => {
       window.open(TUTORIAL_VIDEO_URL, '_blank');
     }
   };
+
+  // Shared "Update Profile" modal — rendered from every top-level screen (Main page,
+  // Quotations, Attendance/Payments) so it always opens exactly where it was triggered from.
+  const renderProfileModal = () => {
+    if (!isProfileModalOpen) return null;
+    return (
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px', boxSizing: 'border-box' }}>
+        <div style={{ backgroundColor: '#ffffff', padding: '28px 24px 24px 24px', borderRadius: '24px', width: '100%', maxWidth: '360px', boxSizing: 'border-box', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.3)' }}>
+          <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', marginBottom: '22px' }}>
+            <h3 style={{ margin: 0, fontSize: '21px', fontWeight: '800', color: '#0F172A', textAlign: 'center' }}>{t('updateProfile')}</h3>
+            <button onClick={() => setIsProfileModalOpen(false)} style={{ position: 'absolute', right: 0, top: 0, background: '#F1F5F9', border: 'none', width: '28px', height: '28px', borderRadius: '50%', fontSize: '16px', cursor: 'pointer', color: '#64748B', padding: 0, lineHeight: 1, flexShrink: 0 }}>&times;</button>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '22px' }}>
+            <label htmlFor="user-avatar-file-input" style={{ position: 'relative', cursor: 'pointer' }}>
+              <div style={{ width: '96px', height: '96px', borderRadius: '50%', backgroundColor: '#F8FAFC', border: '3px solid #EFF4FF', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.12)' }}>
+                {profileImg ? (<img src={profileImg} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : (
+                  loggedInUser?.fullName
+                    ? <span style={{ fontSize: '30px', fontWeight: '700', color: '#0B3C9B' }}>{getInitials(loggedInUser.fullName)}</span>
+                    : <span style={{ fontSize: '30px' }}>&#128100;</span>
+                )}
+              </div>
+              <div style={{ position: 'absolute', bottom: '2px', right: '2px', backgroundColor: '#0B3C9B', color: '#ffffff', borderRadius: '50%', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', border: '2.5px solid #ffffff', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}>&#128247;</div>
+            </label>
+            <input id="user-avatar-file-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
+              const file = e.target.files && e.target.files[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => openImageCropper('profileImg', reader.result);
+              reader.readAsDataURL(file);
+              e.target.value = '';
+            }} />
+            <span style={{ fontSize: '12px', color: '#64748B', marginTop: '10px', fontWeight: '500' }}>{t('tapToChangePhoto')}</span>
+            {profileImg && (
+              <button
+                type="button"
+                onClick={() => setProfileImg(null)}
+                style={{ background: 'none', border: 'none', padding: 0, marginTop: '6px', fontSize: '12px', color: '#DC2626', fontWeight: '700', cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                Remove Photo
+              </button>
+            )}
+          </div>
+
+          <div style={{ marginBottom: '22px' }}>
+            <label style={{ display: 'block', fontSize: '10.5px', fontWeight: '700', color: '#64748B', marginBottom: '7px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('yourName')}</label>
+            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '0 14px', backgroundColor: '#F8FAFC' }}>
+              <span style={{ fontSize: '15px', color: '#94A3B8', marginRight: '10px' }}>&#128100;</span>
+              <input type="text" value={userName ?? loggedInUser?.fullName ?? ''} onChange={(e) => setUserName(e.target.value)} style={{ flex: 1, padding: '13px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '14.5px', color: '#1E293B' }} />
+            </div>
+          </div>
+
+          <button
+            disabled={isSavingProfile}
+            onClick={async () => {
+              const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
+              if (!trimmedName) { showAlert(t('yourName') + ' is required.'); return; }
+
+              // No server-side user (e.g. dev/mock session) - fall back to local-only save.
+              if (!loggedInUser?.userId) {
+                setLoggedInUser(prev => {
+                  const updatedUser = { ...prev, fullName: trimmedName, profileImg };
+                  try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                  return updatedUser;
+                });
+                setIsProfileModalOpen(false);
+                return;
+              }
+
+              setIsSavingProfile(true);
+              try {
+                const response = await fetch(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({ fullName: trimmedName, profileImage: profileImg }),
+                });
+                const responseText = await response.text();
+                let data = {};
+                if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
+
+                if (!response.ok) {
+                  showAlert(data.message || 'Failed to update profile. Please try again.');
+                  return;
+                }
+
+                const updatedUser = { ...loggedInUser, fullName: data.fullName, industry: data.industry, profileImg: data.profileImage };
+                try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
+                setLoggedInUser(updatedUser);
+                setUserName(data.fullName);
+                setProfileImg(data.profileImage || null);
+                setIsProfileModalOpen(false);
+              } catch (err) {
+                showAlert('Could not reach the server. Please check your connection and try again.');
+              } finally {
+                setIsSavingProfile(false);
+              }
+            }}
+            style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
+            <span>&#128190;</span>{isSavingProfile ? t('loading') || 'Saving...' : t('saveChanges')}
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '18px 0' }}>
+            <div style={{ flex: 1, height: '1px', backgroundColor: '#E2E8F0' }} />
+            <span style={{ fontSize: '11px', color: '#94A3B8', fontWeight: '600' }}>OR</span>
+            <div style={{ flex: 1, height: '1px', backgroundColor: '#E2E8F0' }} />
+          </div>
+
+          <button onClick={() => { setIsProfileModalOpen(false); handleFullLogout(); }} style={{ width: '100%', padding: '14px', backgroundColor: '#ffffff', color: '#DC2626', border: '1.5px solid #FCA5A5', borderRadius: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <span>&#8618;</span>{t('signOut')}
+          </button>
+
+          <p style={{ margin: '16px 0 0 0', fontSize: '11px', color: '#94A3B8', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+            <span>&#128737;&#65039;</span>{t('yourDataIsSecure')}
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  // Shared "exit app" confirmation — only ever triggered from the Main page (see closeTopmostScreen).
+  const renderExitConfirmPopup = () => (
+    <AppPopup
+      open={isExitConfirmOpen}
+      tone="warning"
+      title={t('exitConfirm')}
+      confirmLabel={t('yes')}
+      cancelLabel={t('no')}
+      onConfirm={handleConfirmExitApp}
+      onCancel={() => setIsExitConfirmOpen(false)}
+      onClose={() => setIsExitConfirmOpen(false)}
+    />
+  );
 
   const handleAddNewWorkerInline = () => {
     const workerName = prompt("Enter full employee name:");
@@ -2773,15 +7129,13 @@ useEffect(() => {
     if (!tempWorkerJoiningDate) missingRequiredFields.push(t('dateOfJoining'));
     if (!tempWorkerWageAmount.trim()) missingRequiredFields.push(t('dailyWage'));
     
-    // --- NEW VALIDATION START ---
     // Only validate mobile number if the user actually typed something in
     if (tempWorkerPhone.trim() !== '') {
-      if (!/^[0-9]{10}$/.test(tempWorkerPhone.trim())) {
+      if (!isValidMobileNumber(tempWorkerPhone.trim())) {
         showAlert('Please enter a valid 10-digit Mobile Number (or leave it blank).');
         return;
       }
     }
-    // --- NEW VALIDATION END ---
 
     if (missingRequiredFields.length > 0) {
       showAlert(`${t('fillRequiredFields')}\n\u2022 ${missingRequiredFields.join('\n\u2022 ')}`);
@@ -2995,6 +7349,6470 @@ useEffect(() => {
 
   if (isUserAuthenticated && loggedInUser) {
     const activeProjectForWorkersList = projects.find(p => p.id === activeSiteViewId);
+    const homeDisplayName = loggedInUser?.fullName ? loggedInUser.fullName.split(' ')[0] : 'there';
+
+    // ===== Module picker (home screen) =====
+    if (activeModule === null) {
+      return (
+        <div style={moduleHomeStyles.screen}>
+          <div style={moduleHomeStyles.scrollArea}>
+            <div style={moduleHomeStyles.headerRow}>
+              <button
+                type="button"
+                onClick={() => setIsProfileModalOpen(true)}
+                style={moduleHomeStyles.avatarButton}
+                aria-label="Profile and settings"
+              >
+                {profileImg ? (
+                  <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                ) : (
+                  getInitials(loggedInUser?.fullName) || homeDisplayName.substring(0, 2).toUpperCase()
+                )}
+              </button>
+              <div style={moduleHomeStyles.brandRow}>
+                <img src={smartpayLogo} alt="SmartManage" style={moduleHomeStyles.logoImg} />
+                <span style={moduleHomeStyles.brandName}>SmartManage</span>
+              </div>
+            </div>
+
+            <div style={moduleHomeStyles.greetBlock}>
+              <h1 style={moduleHomeStyles.greetTitle}>{t('greetingHi')}, {homeDisplayName} </h1>
+              <p style={moduleHomeStyles.greetSubtitle}>What would you like to do today?</p>
+            </div>
+
+            <div style={moduleHomeStyles.panel}>
+              <h2 style={moduleHomeStyles.panelLabel}>Discover</h2>
+              <div style={moduleHomeStyles.tileGrid}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setActiveModule('attendance')}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveModule('attendance'); }}
+                  style={moduleHomeStyles.tile}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
+                    aria-label="Watch Employee, Attendance and Payments video"
+                    style={moduleHomeStyles.tilePlayBadge}
+                  >
+                    <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
+                  </button>
+                  <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #2554EB, #0B3C9B)' }}>
+                    <HiOutlineUserGroup size={20} color="#ffffff" />
+                  </span>
+                  <span style={moduleHomeStyles.tileTitleAdjustable}>Employee, Attendance and Payments</span>
+                </div>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setActiveModule('quotations')}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveModule('quotations'); }}
+                  style={moduleHomeStyles.tile}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
+                    aria-label="Watch Quotation, Invoice, Purchase and Delivery video"
+                    style={moduleHomeStyles.tilePlayBadge}
+                  >
+                    <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
+                  </button>
+                  <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #14B8A6, #0F766E)' }}>
+                    <FiFileText size={19} color="#ffffff" />
+                  </span>
+                  <span style={moduleHomeStyles.tileTitleAdjustable}>Quotation, Invoice, Purchase and Delivery</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Home / Subscribe / Contact Us — styled to match the Attendance module's bottom nav bar exactly */}
+          <div style={themeStyles.bottomDockNavBar}>
+            <button
+              type="button"
+              onClick={() => { setIsSubscribePageOpen(false); setIsHelpPageOpen(false); }}
+              style={!isSubscribePageOpen && !isHelpPageOpen ? themeStyles.navItemTabActive : themeStyles.navItemTab}
+            >
+              <span style={themeStyles.navTabIcon}>&#128193;</span>
+              <span style={themeStyles.navTabLabel}>{t('navHome')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setIsSubscribePageOpen(true); setIsHelpPageOpen(false); }}
+              style={isSubscribePageOpen ? themeStyles.navItemTabActive : themeStyles.navItemTab}
+            >
+              <span style={themeStyles.navTabIcon}>&#11088;</span>
+              <span style={themeStyles.navTabLabel}>{t('navSubscribe')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setIsHelpPageOpen(true); setIsSubscribePageOpen(false); }}
+              style={isHelpPageOpen ? themeStyles.navItemTabActive : themeStyles.navItemTab}
+            >
+              <span style={themeStyles.navTabIcon}>&#128222;</span>
+              <span style={themeStyles.navTabLabel}>{t('navHelp')}</span>
+            </button>
+          </div>
+
+          {isSubscribePageOpen && (() => {
+            const plans = [
+              {
+                key: 'free', name: 'Free', price: 0, tagline: 'Try it out',
+                features: ['1 active project', 'Up to 5 workers', 'Manual attendance marking', 'Basic payment tracking']
+              },
+              {
+                key: 'pro', name: 'Pro', price: 299, tagline: 'For growing supervisors', popular: true,
+                features: ['Unlimited projects', 'Unlimited workers', 'Wage history & wage edits', 'Payment tracking + PDF statements', 'Priority email support']
+              },
+              {
+                key: 'business', name: 'Business', price: 799, tagline: 'For multi-site teams',
+                features: ['Everything in Pro', 'Multiple supervisor logins', 'Data export (CSV/Excel)', 'Dedicated priority support', 'Early access to new features']
+              }
+            ];
+            return (
+              <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+                <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button type="button" onClick={() => setIsSubscribePageOpen(false)} aria-label="Back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}>
+                    <FiArrowLeft size={19} color="#1E293B" />
+                  </button>
+                  <div>
+                    <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscribe now</h2>
+                    <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>Pick a plan that fits how many projects and employees you manage</p>
+                  </div>
+                </div>
+
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {plans.map(plan => {
+                      const isSelected = selectedSubscriptionPlan === plan.key;
+                      return (
+                        <div key={plan.key} style={{
+                          backgroundColor: '#ffffff', borderRadius: '16px', padding: '18px',
+                          border: isSelected ? '2px solid #0B3C9B' : '1px solid #F1F5F9',
+                          boxShadow: plan.popular ? '0 4px 16px rgba(11,60,155,0.12)' : '0 2px 4px rgba(0,0,0,0.02)',
+                          position: 'relative'
+                        }}>
+                          {plan.popular && (
+                            <span style={{ position: 'absolute', top: '-10px', right: '18px', backgroundColor: '#0B3C9B', color: '#ffffff', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '20px' }}>MOST POPULAR</span>
+                          )}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{plan.name}</h3>
+                              <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>{plan.tagline}</p>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0B3C9B' }}>{plan.price === 0 ? 'Free' : `\u20B9${plan.price}`}</p>
+                              {plan.price > 0 && <span style={{ fontSize: '11px', color: '#94A3B8' }}>per month</span>}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '14px 0' }}>
+                            {plan.features.map((feature, idx) => (
+                              <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                                <span style={{ color: '#10B981', fontSize: '13px', marginTop: '1px' }}>&#10003;</span>
+                                <span style={{ fontSize: '13px', color: '#475569' }}>{feature}</span>
+                              </div>
+                            ))}
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              setSelectedSubscriptionPlan(plan.key);
+                              showAlert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
+                            }}
+                            style={{
+                              width: '100%', padding: '13px', borderRadius: '12px', fontWeight: '600', fontSize: '14px', cursor: 'pointer',
+                              border: isSelected ? 'none' : '1px solid #0B3C9B',
+                              backgroundColor: isSelected ? '#0B3C9B' : '#ffffff',
+                              color: isSelected ? '#ffffff' : '#0B3C9B'
+                            }}
+                          >
+                            {isSelected ? 'Current plan' : plan.price === 0 ? 'Use Free plan' : `Choose ${plan.name}`}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'center', margin: '16px 0 4px 0' }}>Prices shown are illustrative. You can change or cancel your plan anytime.</p>
+                </div>
+              </div>
+            );
+          })()}
+
+          {isHelpPageOpen && (() => {
+            const helpNumbers = ['+91 8237580362', '+91 9325461043'];
+            const helpEmails = ['nilendra777@gmail.com', 'akash24101990@gmail.com'];
+            return (
+              <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+                <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button type="button" onClick={() => setIsHelpPageOpen(false)} aria-label="Back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}>
+                    <FiArrowLeft size={19} color="#1E293B" />
+                  </button>
+                  <div>
+                    <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('helpPageTitle')}</h2>
+                  </div>
+                </div>
+
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 16px 32px' }}>
+                  {/* Intro line */}
+                  <p style={{ fontSize: '14.5px', color: '#334155', fontWeight: '500', lineHeight: '1.5', margin: '0 0 22px 0' }}>
+                    {t('helpPageSubtitle')}
+                  </p>
+
+                  {/* Let's Chat buttons (WhatsApp) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+                    {helpNumbers.map((number, idx) => (
+                      <a
+                        key={number}
+                        href={`https://wa.me/${number.replace(/[^\d]/g, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+                          backgroundColor: '#1E293B', borderRadius: '16px', padding: '16px',
+                          boxShadow: '0 2px 8px rgba(15,23,42,0.12)',
+                          textDecoration: 'none', cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ fontSize: '15.5px', fontWeight: '700', color: '#ffffff' }}>{`${t('letsChat')} ${idx + 1}`}</span>
+                        <FaWhatsapp size={20} color="#25D366" />
+                      </a>
+                    ))}
+                  </div>
+
+                  {/* App name, phone numbers, emails */}
+                  <div style={{
+                    backgroundColor: '#ffffff', borderRadius: '16px', padding: '18px',
+                    border: '1px solid #F1F5F9', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                  }}>
+                    <h3 style={{ fontSize: '17px', fontWeight: '800', color: '#0F172A', margin: '0 0 14px 0' }}>{t('contactAppName')}</h3>
+
+                    {helpNumbers.map((number) => (
+                      <a
+                        key={number}
+                        href={`tel:${number.replace(/\s+/g, '')}`}
+                        style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', margin: '0 0 10px 0' }}
+                      >
+                        <FiPhone size={16} color="#0B3C9B" />
+                        <span style={{ fontSize: '14.5px', fontWeight: '600', color: '#0F172A' }}>{number}</span>
+                      </a>
+                    ))}
+
+                    {helpEmails.map((email) => (
+                      <a
+                        key={email}
+                        href={`mailto:${email}`}
+                        onClick={(e) => { e.preventDefault(); window.location.href = `mailto:${email}`; }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', margin: '0 0 10px 0' }}
+                      >
+                        <HiOutlineMail size={17} color="#0B3C9B" />
+                        <span style={{ fontSize: '14.5px', fontWeight: '600', color: '#0F172A', wordBreak: 'break-all' }}>{email}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {renderProfileModal()}
+          {renderImageCropperModal()}
+          {renderExitConfirmPopup()}
+
+          <AppPopup
+            open={!!appPopup?.open}
+            tone={appPopup?.tone}
+            title={appPopup?.title}
+            message={appPopup?.message}
+            confirmLabel={appPopup?.confirmLabel}
+            cancelLabel={appPopup?.cancelLabel}
+            onConfirm={appPopup?.onConfirm || closeAppPopup}
+            onCancel={closeAppPopup}
+            onClose={closeAppPopup}
+          />
+        </div>
+      );
+    }
+
+    // ===== Quotations module home (Manage + Discover) =====
+    if (activeModule === 'quotations') {
+
+      // ----- Update Business Info sub-screen -----
+      if (quotationSubView === 'business') {
+        const maskIfSet = (val) => (val && val.trim() ? '########' : '—');
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Update Business Info</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={businessInfoStyles.brandRow}>
+                <div style={businessInfoStyles.brandTile}>
+                  {businessInfo.logoImg ? (
+                    <img src={businessInfo.logoImg} alt="Logo" style={businessInfoStyles.brandTileImg} />
+                  ) : (
+                    <span style={businessInfoStyles.brandTileText}>ADD<br />LOGO</span>
+                  )}
+                  <button type="button" onClick={() => openImageActionSheet('logo')} aria-label="Edit logo" style={businessInfoStyles.brandEditBadge}>
+                    <HiOutlinePencil size={13} color="#0F172A" />
+                  </button>
+                </div>
+                <div style={businessInfoStyles.brandTile}>
+                  {businessInfo.signatureImg ? (
+                    <img src={businessInfo.signatureImg} alt="Signature" style={businessInfoStyles.brandTileImg} />
+                  ) : (
+                    <span style={businessInfoStyles.brandTileText}>ADD<br />SIGNATURE</span>
+                  )}
+                  <button type="button" onClick={() => openImageActionSheet('signature')} aria-label="Edit signature" style={businessInfoStyles.brandEditBadge}>
+                    <HiOutlinePencil size={13} color="#0F172A" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Hidden file inputs - triggered programmatically from the image action sheet below */}
+              <input ref={logoCameraInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { handleBusinessImagePick('logoImg', e.target.files?.[0]); e.target.value = ''; }} />
+              <input ref={logoPhotoInputRef} type="file" accept="image/*" hidden onChange={(e) => { handleBusinessImagePick('logoImg', e.target.files?.[0]); e.target.value = ''; }} />
+              <input ref={signatureCameraInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { handleBusinessImagePick('signatureImg', e.target.files?.[0]); e.target.value = ''; }} />
+              <input ref={signaturePhotoInputRef} type="file" accept="image/*" hidden onChange={(e) => { handleBusinessImagePick('signatureImg', e.target.files?.[0]); e.target.value = ''; }} />
+
+              <FieldInput label="Business Name" value={businessInfo.businessName} onChange={(v) => updateBusinessField('businessName', v)} />
+              <FieldInput label="Contact Name" value={businessInfo.contactName} onChange={(v) => updateBusinessField('contactName', v)} />
+              <FieldInput label="Email" value={businessInfo.email} onChange={(v) => updateBusinessField('email', v)} type="email" error={businessInfoErrors.email} />
+              <FieldInput label="Phone Number" value={businessInfo.phone} onChange={(v) => updateBusinessField('phone', v.replace(/\D/g, '').slice(0, 10))} type="tel" error={businessInfoErrors.phone} />
+              <FieldInput label="Address Line 1" value={businessInfo.addressLine1} onChange={(v) => updateBusinessField('addressLine1', v)} />
+              <FieldInput label="Address Line 2" value={businessInfo.addressLine2} onChange={(v) => updateBusinessField('addressLine2', v)} />
+              <FieldInput label="City" value={businessInfo.addressLine3} onChange={(v) => updateBusinessField('addressLine3', v)} />
+              <FieldInput label="Business Category" value={businessInfo.businessCategory} onChange={(v) => updateBusinessField('businessCategory', v)} />
+
+              <div style={businessInfoStyles.sectionBar}>Tax Details</div>
+              <div style={businessInfoStyles.fieldBox}>
+                <span style={businessInfoStyles.fieldLabel}>GSTIN/PAN/VAT/Business Label</span>
+                <div style={businessInfoStyles.selectRow}>
+                  <select
+                    value={businessInfo.taxLabel}
+                    onChange={(e) => updateBusinessField('taxLabel', e.target.value)}
+                    style={businessInfoStyles.selectInput}
+                  >
+                    <option value="GSTIN">GSTIN</option>
+                    <option value="PAN">PAN</option>
+                    <option value="VAT">VAT</option>
+                    <option value="Business Label">Business Label</option>
+                  </select>
+                  <FiChevronDown size={15} color="#94A3B8" />
+                </div>
+              </div>
+              <FieldInput label="GSTIN/PAN/VAT/Business Number" value={businessInfo.taxNumber} onChange={(v) => updateBusinessField('taxNumber', v)} error={businessInfoErrors.taxNumber} />
+              <button
+                type="button"
+                onClick={() => { setStateFieldTarget('business'); setStateSearchQuery(''); setShowStatePicker(true); }}
+                style={{ ...businessInfoStyles.fieldBox, width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}
+              >
+                <span style={businessInfoStyles.fieldLabel}>State</span>
+                <span style={{ ...businessInfoStyles.fieldInputEl, color: businessInfo.state ? '#0F172A' : '#94A3B8' }}>
+                  {businessInfo.state ? toTitleCase(businessInfo.state) : 'Select State'}
+                </span>
+              </button>
+
+              <div style={businessInfoStyles.sectionBar}>Payment Instructions - Bank Details</div>
+              <button type="button" onClick={() => setIsBankDetailsModalOpen(true)} style={businessInfoStyles.bankCard}>
+                <span style={businessInfoStyles.fieldLabel}>Bank Info</span>
+                <span style={businessInfoStyles.bankLine}>Account Name : {maskIfSet(businessInfo.bankAccountName)}</span>
+                <span style={businessInfoStyles.bankLine}>Account Number : {maskIfSet(businessInfo.bankAccountNumber)}</span>
+                <span style={businessInfoStyles.bankLine}>Bank Name : {maskIfSet(businessInfo.bankName)}</span>
+                <span style={businessInfoStyles.bankLine}>IFSC Code : {maskIfSet(businessInfo.ifscCode)}</span>
+              </button>
+
+              <FieldInput label="UPI ID" value={businessInfo.upiId} onChange={(v) => updateBusinessField('upiId', v)} error={businessInfoErrors.upiId} />
+              <p style={businessInfoStyles.helperText}>This UPI ID will be used to generate Dynamic QR codes on the Quotations and invoices.</p>
+
+              <button type="button" onClick={handleUpdateBusinessInfo} style={businessInfoStyles.updateBtn}>Update</button>
+            </div>
+
+            {isBankDetailsModalOpen && (
+              <div style={businessInfoStyles.modalOverlay} onClick={handleCloseBankDetailsModal}>
+                <div style={businessInfoStyles.modalCard} onClick={(e) => e.stopPropagation()}>
+                  <div style={businessInfoStyles.modalHeaderRow}>
+                    <h3 style={businessInfoStyles.modalTitle}>Bank Details</h3>
+                    <button type="button" onClick={handleCloseBankDetailsModal} style={businessInfoStyles.modalCloseBtn} aria-label="Close">&times;</button>
+                  </div>
+                  <FieldInput label="Account Name" value={businessInfo.bankAccountName} onChange={(v) => updateBusinessField('bankAccountName', v)} />
+                  <FieldInput label="Account Number" value={businessInfo.bankAccountNumber} onChange={(v) => updateBusinessField('bankAccountNumber', v)} type="tel" />
+                  <FieldInput label="Bank Name" value={businessInfo.bankName} onChange={(v) => updateBusinessField('bankName', v)} />
+                  <FieldInput
+                    label="IFSC Code"
+                    value={businessInfo.ifscCode}
+                    onChange={(v) => updateBusinessField('ifscCode', v.toUpperCase().slice(0, 11))}
+                    error={businessInfoErrors.ifscCode}
+                  />
+                  <button type="button" onClick={handleCloseBankDetailsModal} style={businessInfoStyles.modalSaveBtn}>Save</button>
+                </div>
+              </div>
+            )}
+
+            {imageActionSheet && (
+              <div style={customerModuleStyles.modalOverlay} onClick={closeImageActionSheet}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  {(() => {
+                    const isLogo = imageActionSheet === 'logo';
+                    const hasImage = isLogo ? !!businessInfo.logoImg : !!businessInfo.signatureImg;
+                    const cameraRef = isLogo ? logoCameraInputRef : signatureCameraInputRef;
+                    const photoRef = isLogo ? logoPhotoInputRef : signaturePhotoInputRef;
+                    const imgSrc = isLogo ? businessInfo.logoImg : businessInfo.signatureImg;
+                    const removeKey = isLogo ? 'logoImg' : 'signatureImg';
+                    return (
+                      <>
+                        <button type="button" onClick={() => { cameraRef.current?.click(); closeImageActionSheet(); }} style={businessInfoStyles.sheetActionRow}>
+                          <FiCamera size={19} color="#334155" />
+                          <span>Camera</span>
+                        </button>
+                        <button type="button" onClick={() => { photoRef.current?.click(); closeImageActionSheet(); }} style={businessInfoStyles.sheetActionRow}>
+                          <FiImage size={19} color="#334155" />
+                          <span>Photos</span>
+                        </button>
+                        {!isLogo && (
+                          <button type="button" onClick={openSignaturePad} style={businessInfoStyles.sheetActionRow}>
+                            <FiEdit3 size={19} color="#334155" />
+                            <span>Signature Pad</span>
+                          </button>
+                        )}
+                        {hasImage && (
+                          <button type="button" onClick={() => { setImageViewerSrc(imgSrc); closeImageActionSheet(); }} style={businessInfoStyles.sheetActionRow}>
+                            <FiEye size={19} color="#334155" />
+                            <span>View Image</span>
+                          </button>
+                        )}
+                        {hasImage && (
+                          <button type="button" onClick={() => handleRemoveBusinessImage(removeKey)} style={{ ...businessInfoStyles.sheetActionRow, borderBottom: 'none', color: '#DC2626' }}>
+                            <FiTrash2 size={19} color="#DC2626" />
+                            <span>{isLogo ? 'Remove current photo' : 'Remove current image'}</span>
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {isSignaturePadOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsSignaturePadOpen(false)}>
+                <div style={{ background: '#ffffff', width: 'calc(100% - 40px)', maxWidth: '460px', borderRadius: '24px', padding: '20px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+                  <h3 style={{ fontSize: '17px', fontWeight: '700', color: '#0F172A', margin: '0 0 12px' }}>Draw Signature</h3>
+                  <canvas
+                    key={signaturePadKey}
+                    ref={signatureCanvasRef}
+                    width={360}
+                    height={180}
+                    style={{ width: '100%', height: '180px', background: '#F8FAFC', borderRadius: '14px', border: '1px solid #E2E8F0', touchAction: 'none', display: 'block' }}
+                    onPointerDown={handleSignaturePointerDown}
+                    onPointerMove={handleSignaturePointerMove}
+                    onPointerUp={handleSignaturePointerUp}
+                    onPointerLeave={handleSignaturePointerUp}
+                  />
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
+                    <button type="button" onClick={handleClearSignaturePad} style={{ flex: 1, height: '46px', borderRadius: '14px', border: '1.5px solid #E2E8F0', background: '#ffffff', color: '#334155', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>Clear</button>
+                    <button type="button" onClick={handleSaveSignaturePad} style={businessInfoStyles.modalSaveBtn}>Save</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {renderImageCropperModal()}
+
+            {imageViewerSrc && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: '24px', boxSizing: 'border-box' }} onClick={() => setImageViewerSrc(null)}>
+                <img src={imageViewerSrc} alt="Preview" style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: '12px', objectFit: 'contain' }} />
+                <button type="button" onClick={() => setImageViewerSrc(null)} aria-label="Close" style={{ position: 'absolute', top: '20px', right: '20px', width: '38px', height: '38px', borderRadius: '50%', background: 'rgba(255,255,255,0.15)', border: 'none', color: '#ffffff', fontSize: '20px', cursor: 'pointer' }}>&times;</button>
+              </div>
+            )}
+
+            {showStatePicker && stateFieldTarget === 'business' && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setShowStatePicker(false)}>
+                <div style={{ ...customerModuleStyles.bottomSheet, display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Select State</h3>
+                  <div style={customerModuleStyles.searchBox}>
+                    <FiSearch size={17} color="#94A3B8" />
+                    <input
+                      type="text"
+                      value={stateSearchQuery}
+                      onChange={(e) => setStateSearchQuery(e.target.value)}
+                      placeholder="Search by Name"
+                      style={customerModuleStyles.searchInput}
+                      autoFocus
+                    />
+                  </div>
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {filteredStateList.length === 0 ? (
+                      <p style={customerModuleStyles.emptyText}>No matching state found.</p>
+                    ) : (
+                      filteredStateList.map((s, idx) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => { updateBusinessField('state', s); setShowStatePicker(false); setStateSearchQuery(''); }}
+                          style={{
+                            width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                            fontFamily: 'inherit', padding: '14px 2px', fontSize: '14.5px', fontWeight: '600', color: '#0F172A',
+                            borderBottom: idx < filteredStateList.length - 1 ? '1px solid #E2E8F0' : 'none',
+                          }}
+                        >
+                          {toTitleCase(s)}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Settings menu sub-screen -----
+      if (quotationSubView === 'settingsMenu') {
+        const settingsMenuItems = [
+          { key: 'quotationSettings', label: 'Quotation Settings' },
+          { key: 'invoiceSettings', label: 'Invoice Settings' },
+          { key: 'purchaseOrderSettings', label: 'Purchase Order Settings' },
+          { key: 'proformaInvoiceSettings', label: 'Proforma Invoice Settings' },
+          { key: 'deliveryNoteSettings', label: 'Delivery Note Settings' },
+          { key: 'receiptSettings', label: 'Receipt Settings' },
+          { key: 'columnHeadingSettings', label: 'Column Heading (GST, HSN, Other Charges)' },
+        ];
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Settings</h1>
+              <span style={{ width: '27px', flexShrink: 0 }} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, padding: '10px 18px 40px' }}>
+              <div style={{ background: '#ffffff', borderRadius: '18px', boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)', overflow: 'hidden' }}>
+                {settingsMenuItems.map((item, idx) => (
+                  <button
+                    type="button"
+                    key={item.key}
+                    onClick={() => {
+                      if (item.key === 'quotationSettings') setQuotationSubView('quotationSettingsDetail');
+                      else if (item.key === 'invoiceSettings') setQuotationSubView('invoiceSettingsDetail');
+                      else if (item.key === 'purchaseOrderSettings') setQuotationSubView('purchaseOrderSettingsDetail');
+                      else if (item.key === 'proformaInvoiceSettings') setQuotationSubView('proformaInvoiceSettingsDetail');
+                      else if (item.key === 'deliveryNoteSettings') setQuotationSubView('deliveryNoteSettingsDetail');
+                      else if (item.key === 'receiptSettings') setQuotationSubView('receiptSettingsDetail');
+                      else if (item.key === 'columnHeadingSettings') setQuotationSubView('columnHeadingSettingsDetail');
+                      else showAlert('Coming soon.');
+                    }}
+                    style={{
+                      width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                      fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: '10px', padding: '17px 18px',
+                      borderBottom: idx < settingsMenuItems.length - 1 ? '1px solid #F1F5F9' : 'none',
+                    }}
+                  >
+                    <span style={{ fontSize: '14.5px', fontWeight: '600', color: '#0F172A', lineHeight: '1.35' }}>{item.label}</span>
+                    <FiChevronRight size={18} color="#94A3B8" style={{ flexShrink: 0 }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Quotation Settings detail sub-screen -----
+      if (quotationSubView === 'quotationSettingsDetail') {
+        const selectSheetConfig = {
+          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
+          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
+          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
+          shipping: { title: 'Display Shipping Address', field: 'showShippingAddress', options: ['Yes', 'No'] },
+          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
+          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
+          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
+        };
+        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+
+        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
+          <button
+            type="button"
+            onClick={() => setActiveSettingsSheet(sheetKey)}
+            style={quotationSettingsStyles.row}
+          >
+            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+            <span style={quotationSettingsStyles.rowBody}>
+              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
+              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+            </span>
+          </button>
+        );
+
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Quotation Settings</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
+                  <input
+                    type="text"
+                    value={quotationSettings.numberPrefix}
+                    onChange={(e) => updateQuotationSettingField('numberPrefix', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
+                  <input
+                    type="number"
+                    value={quotationSettings.serialNumber}
+                    onChange={(e) => updateQuotationSettingField('serialNumber', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={quotationSettings.discountType} />
+              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={quotationSettings.taxType} />
+              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={quotationSettings.showProductHSN} />
+              <SettingsSelectRow sheetKey="shipping" icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={quotationSettings.showShippingAddress} />
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Quotation Top Message</span>
+                  <textarea
+                    rows={3}
+                    value={quotationSettings.topMessage}
+                    onChange={(e) => updateQuotationSettingField('topMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Quotation Bottom Message</span>
+                  <textarea
+                    rows={2}
+                    value={quotationSettings.bottomMessage}
+                    onChange={(e) => updateQuotationSettingField('bottomMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={quotationSettings.showBankInfo} />
+              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={quotationSettings.showUpiInfo} />
+              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={quotationSettings.showSignature} />
+
+              <button type="button" onClick={handleUpdateQuotationSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+            </div>
+
+            {activeSheet && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
+                  {activeSheet.options.map((opt, idx) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => { updateQuotationSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+                      style={{
+                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
+                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Invoice Settings detail sub-screen -----
+      if (quotationSubView === 'invoiceSettingsDetail') {
+        const selectSheetConfig = {
+          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
+          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
+          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
+          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
+          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
+          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
+        };
+        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+
+        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
+          <button
+            type="button"
+            onClick={() => setActiveSettingsSheet(sheetKey)}
+            style={quotationSettingsStyles.row}
+          >
+            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+            <span style={quotationSettingsStyles.rowBody}>
+              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
+              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+            </span>
+          </button>
+        );
+
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Invoice Settings</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
+                  <input
+                    type="text"
+                    value={invoiceSettings.numberPrefix}
+                    onChange={(e) => updateInvoiceSettingField('numberPrefix', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
+                  <input
+                    type="number"
+                    value={invoiceSettings.serialNumber}
+                    onChange={(e) => updateInvoiceSettingField('serialNumber', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={invoiceSettings.discountType} />
+              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={invoiceSettings.taxType} />
+              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={invoiceSettings.showProductHSN} />
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Invoice Top Message</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Enter invoice top message"
+                    value={invoiceSettings.topMessage}
+                    onChange={(e) => updateInvoiceSettingField('topMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Invoice Bottom Message</span>
+                  <textarea
+                    rows={2}
+                    placeholder="Enter invoice bottom message"
+                    value={invoiceSettings.bottomMessage}
+                    onChange={(e) => updateInvoiceSettingField('bottomMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={invoiceSettings.showBankInfo} />
+              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={invoiceSettings.showUpiInfo} />
+              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={invoiceSettings.showSignature} />
+
+              <button type="button" onClick={handleUpdateInvoiceSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+            </div>
+
+            {activeSheet && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
+                  {activeSheet.options.map((opt, idx) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => { updateInvoiceSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+                      style={{
+                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
+                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Purchase Order Settings detail sub-screen -----
+      if (quotationSubView === 'purchaseOrderSettingsDetail') {
+        const selectSheetConfig = {
+          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
+          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
+          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
+          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
+          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
+          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
+        };
+        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+
+        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
+          <button
+            type="button"
+            onClick={() => setActiveSettingsSheet(sheetKey)}
+            style={quotationSettingsStyles.row}
+          >
+            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+            <span style={quotationSettingsStyles.rowBody}>
+              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
+              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+            </span>
+          </button>
+        );
+
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Purchase Order Settings</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
+                  <input
+                    type="text"
+                    value={purchaseOrderSettings.numberPrefix}
+                    onChange={(e) => updatePurchaseOrderSettingField('numberPrefix', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
+                  <input
+                    type="number"
+                    value={purchaseOrderSettings.serialNumber}
+                    onChange={(e) => updatePurchaseOrderSettingField('serialNumber', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={purchaseOrderSettings.discountType} />
+              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={purchaseOrderSettings.taxType} />
+              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={purchaseOrderSettings.showProductHSN} />
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Purchase Order Top Message</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Enter purchase order top message"
+                    value={purchaseOrderSettings.topMessage}
+                    onChange={(e) => updatePurchaseOrderSettingField('topMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Purchase Order Bottom Message</span>
+                  <textarea
+                    rows={2}
+                    placeholder="Enter purchase order bottom message"
+                    value={purchaseOrderSettings.bottomMessage}
+                    onChange={(e) => updatePurchaseOrderSettingField('bottomMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={purchaseOrderSettings.showBankInfo} />
+              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={purchaseOrderSettings.showUpiInfo} />
+              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={purchaseOrderSettings.showSignature} />
+
+              <button type="button" onClick={handleUpdatePurchaseOrderSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+            </div>
+
+            {activeSheet && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
+                  {activeSheet.options.map((opt, idx) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => { updatePurchaseOrderSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+                      style={{
+                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
+                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Proforma Invoice Settings detail sub-screen -----
+      if (quotationSubView === 'proformaInvoiceSettingsDetail') {
+        const selectSheetConfig = {
+          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
+          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
+          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
+          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
+          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
+          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
+        };
+        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+
+        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
+          <button
+            type="button"
+            onClick={() => setActiveSettingsSheet(sheetKey)}
+            style={quotationSettingsStyles.row}
+          >
+            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+            <span style={quotationSettingsStyles.rowBody}>
+              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
+              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+            </span>
+          </button>
+        );
+
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Proforma Invoice Settings</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
+                  <input
+                    type="text"
+                    value={proformaInvoiceSettings.numberPrefix}
+                    onChange={(e) => updateProformaInvoiceSettingField('numberPrefix', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
+                  <input
+                    type="number"
+                    value={proformaInvoiceSettings.serialNumber}
+                    onChange={(e) => updateProformaInvoiceSettingField('serialNumber', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={proformaInvoiceSettings.discountType} />
+              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={proformaInvoiceSettings.taxType} />
+              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={proformaInvoiceSettings.showProductHSN} />
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Proforma Invoice Top Message</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Enter proforma invoice top message"
+                    value={proformaInvoiceSettings.topMessage}
+                    onChange={(e) => updateProformaInvoiceSettingField('topMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Proforma Invoice Bottom Message</span>
+                  <textarea
+                    rows={2}
+                    placeholder="Enter proforma invoice bottom message"
+                    value={proformaInvoiceSettings.bottomMessage}
+                    onChange={(e) => updateProformaInvoiceSettingField('bottomMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={proformaInvoiceSettings.showBankInfo} />
+              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={proformaInvoiceSettings.showUpiInfo} />
+              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={proformaInvoiceSettings.showSignature} />
+
+              <button type="button" onClick={handleUpdateProformaInvoiceSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+            </div>
+
+            {activeSheet && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
+                  {activeSheet.options.map((opt, idx) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => { updateProformaInvoiceSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+                      style={{
+                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
+                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Delivery Note Settings detail sub-screen -----
+      if (quotationSubView === 'deliveryNoteSettingsDetail') {
+        const selectSheetConfig = {
+          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
+          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
+        };
+        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+
+        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
+          <button
+            type="button"
+            onClick={() => setActiveSettingsSheet(sheetKey)}
+            style={quotationSettingsStyles.row}
+          >
+            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+            <span style={quotationSettingsStyles.rowBody}>
+              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
+              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+            </span>
+          </button>
+        );
+
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Delivery Note Settings</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
+                  <input
+                    type="text"
+                    value={deliveryNoteSettings.numberPrefix}
+                    onChange={(e) => updateDeliveryNoteSettingField('numberPrefix', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
+                  <input
+                    type="number"
+                    value={deliveryNoteSettings.serialNumber}
+                    onChange={(e) => updateDeliveryNoteSettingField('serialNumber', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={deliveryNoteSettings.showProductHSN} />
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Delivery Note Top Message</span>
+                  <textarea
+                    rows={3}
+                    placeholder="Enter the delivery note top message"
+                    value={deliveryNoteSettings.topMessage}
+                    onChange={(e) => updateDeliveryNoteSettingField('topMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Delivery Note Bottom Message</span>
+                  <textarea
+                    rows={2}
+                    placeholder="Enter the delivery note bottom message"
+                    value={deliveryNoteSettings.bottomMessage}
+                    onChange={(e) => updateDeliveryNoteSettingField('bottomMessage', e.target.value)}
+                    style={quotationSettingsStyles.textareaEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={deliveryNoteSettings.showSignature} />
+
+              <button type="button" onClick={handleUpdateDeliveryNoteSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+            </div>
+
+            {activeSheet && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
+                  {activeSheet.options.map((opt, idx) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => { updateDeliveryNoteSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+                      style={{
+                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
+                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Receipt Settings detail sub-screen -----
+      if (quotationSubView === 'receiptSettingsDetail') {
+        const selectSheetConfig = {
+          receiptType: { title: 'Select Receipt Type', field: 'receiptType', options: ['Simple', 'Detailed'] },
+          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
+        };
+        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+
+        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
+          <button
+            type="button"
+            onClick={() => setActiveSettingsSheet(sheetKey)}
+            style={quotationSettingsStyles.row}
+          >
+            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+            <span style={quotationSettingsStyles.rowBody}>
+              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
+              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+            </span>
+          </button>
+        );
+
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Receipt Settings</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
+                  <input
+                    type="text"
+                    value={receiptSettings.numberPrefix}
+                    onChange={(e) => updateReceiptSettingField('numberPrefix', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
+                  <input
+                    type="number"
+                    value={receiptSettings.serialNumber}
+                    onChange={(e) => updateReceiptSettingField('serialNumber', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <SettingsSelectRow sheetKey="receiptType" icon={<FiTag size={18} color="#1E293B" />} label="Receipt Type" value={receiptSettings.receiptType} />
+              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={receiptSettings.showSignature} />
+
+              <button type="button" onClick={handleUpdateReceiptSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+            </div>
+
+            {activeSheet && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
+                  {activeSheet.options.map((opt, idx) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => { updateReceiptSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+                      style={{
+                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
+                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Column Heading Settings detail sub-screen -----
+      if (quotationSubView === 'columnHeadingSettingsDetail') {
+        return (
+          <div style={businessInfoStyles.screen}>
+            <div style={businessInfoStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={businessInfoStyles.headerTitle}>Column Heading</h1>
+              <span style={businessInfoStyles.headerIconBtn}>
+                <HiOutlineLightBulb size={21} color="#ffffff" />
+              </span>
+            </div>
+
+            <div style={businessInfoStyles.body}>
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiTag size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Tax Label</span>
+                  <input
+                    type="text"
+                    value={columnHeadingSettings.taxLabel}
+                    onChange={(e) => updateColumnHeadingSettingField('taxLabel', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiTag size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Product HSN Label</span>
+                  <input
+                    type="text"
+                    value={columnHeadingSettings.hsnLabel}
+                    onChange={(e) => updateColumnHeadingSettingField('hsnLabel', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={quotationSettingsStyles.row}>
+                <span style={quotationSettingsStyles.rowIcon}><FiTag size={18} color="#1E293B" /></span>
+                <span style={quotationSettingsStyles.rowBody}>
+                  <span style={quotationSettingsStyles.rowLabel}>Other Charges Label</span>
+                  <input
+                    type="text"
+                    value={columnHeadingSettings.otherChargesLabel}
+                    onChange={(e) => updateColumnHeadingSettingField('otherChargesLabel', e.target.value)}
+                    style={quotationSettingsStyles.inputEl}
+                  />
+                </span>
+              </div>
+
+              <div style={{ ...quotationSettingsStyles.row, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <span style={quotationSettingsStyles.rowIcon}><FiTag size={18} color="#1E293B" /></span>
+                  <span style={{ fontSize: '14.5px', fontWeight: '600', color: '#1E293B' }}>Add QTY2 Column?</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => updateColumnHeadingSettingField('showQty2Column', !columnHeadingSettings.showQty2Column)}
+                  aria-label="Toggle Add QTY2 Column"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    width: '76px', height: '32px', borderRadius: '16px',
+                    border: '1.5px solid #0F172A', background: '#ffffff',
+                    padding: '2px', cursor: 'pointer', flexShrink: 0,
+                    justifyContent: columnHeadingSettings.showQty2Column ? 'flex-end' : 'flex-start',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {!columnHeadingSettings.showQty2Column && (
+                    <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#0F172A', flexShrink: 0 }} />
+                  )}
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#0F172A', flex: 1, textAlign: columnHeadingSettings.showQty2Column ? 'right' : 'left', paddingRight: columnHeadingSettings.showQty2Column ? '4px' : 0, paddingLeft: columnHeadingSettings.showQty2Column ? 0 : '2px' }}>
+                    {columnHeadingSettings.showQty2Column ? 'YES' : 'NO'}
+                  </span>
+                  {columnHeadingSettings.showQty2Column && (
+                    <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#0F172A', flexShrink: 0 }} />
+                  )}
+                </button>
+              </div>
+
+              <button type="button" onClick={handleUpdateColumnHeadingSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Customer List sub-screen -----
+      if (quotationSubView === 'customerList') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Customer List</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search by Name OR Company Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {customers.length === 0 ? 'No customers added yet. Tap "Add Customer" to create one.' : 'No customers match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredCustomers, (c) => c.name).map((customer) => (
+                  <div key={customer.id} style={customerModuleStyles.customerCard}>
+                    <button type="button" onClick={() => openEditCustomer(customer)} style={customerModuleStyles.selectRowBtn}>
+                      <span style={customerModuleStyles.customerName}>{customer.name}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button type="button" onClick={() => openEditCustomer(customer)} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={openAddCustomer} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />CUSTOMER</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Add / Edit Customer sub-screen -----
+      if (quotationSubView === 'addCustomer') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(customerFormReturnView)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingCustomerId ? 'Edit Customer' : 'Add Customer'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <LabeledField
+                label="Name"
+                type="text"
+                value={customerForm.name}
+                onChange={(e) => updateCustomerField('name', e.target.value)}
+                boxStyle={{ paddingRight: '54px' }}
+                rightElement={
+                  <span style={{ ...customerModuleStyles.nameFieldIcon, position: 'static', flexShrink: 0 }}>
+                    <FaAddressBook size={16} color="#ffffff" />
+                  </span>
+                }
+              />
+
+              <LabeledField
+                label="Company Name"
+                type="text"
+                value={customerForm.companyName}
+                onChange={(e) => updateCustomerField('companyName', e.target.value)}
+              />
+              <LabeledField
+                label="Email"
+                type="email"
+                value={customerForm.email}
+                onChange={(e) => {
+                  updateCustomerField('email', e.target.value);
+                  if (customerEmailError) setCustomerEmailError(false);
+                }}
+                error={customerEmailError ? 'Enter a valid email address' : null}
+              />
+              <LabeledField
+                label="Mobile"
+                type="tel"
+                value={customerForm.mobile}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                  updateCustomerField('mobile', digits);
+                  if (customerMobileError) setCustomerMobileError(false);
+                }}
+                error={customerMobileError ? 'Enter a valid 10-digit mobile number' : null}
+              />
+              <LabeledField
+                label="Address Line 1"
+                type="text"
+                value={customerForm.addressLine1}
+                onChange={(e) => updateCustomerField('addressLine1', e.target.value)}
+              />
+              <LabeledField
+                label="Address Line 2"
+                type="text"
+                value={customerForm.addressLine2}
+                onChange={(e) => updateCustomerField('addressLine2', e.target.value)}
+              />
+              <LabeledField
+                label="City"
+                type="text"
+                value={customerForm.addressLine3}
+                onChange={(e) => updateCustomerField('addressLine3', e.target.value)}
+              />
+              <LabeledField
+                label="GST Number"
+                type="text"
+                value={customerForm.gstin}
+                onChange={(e) => {
+                  updateCustomerField('gstin', e.target.value);
+                  if (customerGstinError) setCustomerGstinError(false);
+                }}
+                error={customerGstinError ? 'Enter a valid GST number' : null}
+              />
+              <LabeledField
+                label="State"
+                as="button"
+                onClick={() => { setStateFieldTarget('customer'); setStateSearchQuery(''); setShowStatePicker(true); }}
+                inputStyle={{ color: customerForm.state ? '#0F172A' : '#94A3B8' }}
+              >
+                {customerForm.state ? toTitleCase(customerForm.state) : 'Select State'}
+              </LabeledField>
+
+              <div style={customerModuleStyles.sectionBar}>Shipping Details</div>
+              <LabeledField
+                label="Shipping Address"
+                as="textarea"
+                value={customerForm.shippingAddress}
+                onChange={(e) => updateCustomerField('shippingAddress', e.target.value)}
+              />
+
+              <button type="button" onClick={handleSaveCustomer} style={customerModuleStyles.addBtn}>
+                {editingCustomerId ? 'Update' : 'Add'}
+              </button>
+            </div>
+
+            {showStatePicker && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setShowStatePicker(false)}>
+                <div style={{ ...customerModuleStyles.bottomSheet, display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Select State</h3>
+                  <div style={customerModuleStyles.searchBox}>
+                    <FiSearch size={17} color="#94A3B8" />
+                    <input
+                      type="text"
+                      value={stateSearchQuery}
+                      onChange={(e) => setStateSearchQuery(e.target.value)}
+                      placeholder="Search by Name"
+                      style={customerModuleStyles.searchInput}
+                      autoFocus
+                    />
+                  </div>
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {filteredStateList.length === 0 ? (
+                      <p style={customerModuleStyles.emptyText}>No matching state found.</p>
+                    ) : (
+                      filteredStateList.map((s, idx) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => {
+                            if (stateFieldTarget === 'business') updateBusinessField('state', s);
+                            else updateCustomerField('state', s);
+                            setShowStatePicker(false);
+                            setStateSearchQuery('');
+                          }}
+                          style={{
+                            width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
+                            fontFamily: 'inherit', padding: '14px 2px', fontSize: '14.5px', fontWeight: '600', color: '#0F172A',
+                            borderBottom: idx < filteredStateList.length - 1 ? '1px solid #E2E8F0' : 'none',
+                          }}
+                        >
+                          {toTitleCase(s)}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Product List sub-screen -----
+      if (quotationSubView === 'productList') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Product List</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={productSearchQuery}
+                  onChange={(e) => setProductSearchQuery(e.target.value)}
+                  placeholder="Search by Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {products.length === 0 ? 'No products added yet. Tap "Add Product" to create one.' : 'No products match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredProducts, (p) => p.name).map((product) => (
+                  <div
+                    key={product.id}
+                    style={customerModuleStyles.productCard}
+                  >
+                    <button type="button" onClick={() => openEditProduct(product)} style={{ ...customerModuleStyles.selectRowBtn, display: 'block' }}>
+                      <div style={customerModuleStyles.productCardTopRow}>
+                        <span style={customerModuleStyles.customerName}>{product.name}</span>
+                      </div>
+                      {product.price && (
+                        <div style={customerModuleStyles.productDetailRow}>
+                          <span style={customerModuleStyles.productDetailLabel}>Price</span>
+                          <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                        </div>
+                      )}
+                      {product.gst && (
+                        <div style={customerModuleStyles.productDetailRow}>
+                          <span style={customerModuleStyles.productDetailLabel}>GST</span>
+                          <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
+                        </div>
+                      )}
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                      <button type="button" onClick={() => openEditProduct(product)} style={customerModuleStyles.editBadgeBtn} aria-label="Edit product">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteProduct(product)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete product">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={openAddProduct} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />PRODUCT</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Add / Edit Product sub-screen -----
+      if (quotationSubView === 'addProduct') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(productFormReturnView)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingProductId ? 'Edit Product' : 'Add Product'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <input
+                type="text"
+                value={productForm.name}
+                onChange={(e) => updateProductField('name', e.target.value)}
+                placeholder="Product Name"
+                style={customerModuleStyles.fieldInput}
+              />
+              <input
+                type="number"
+                value={productForm.price}
+                onChange={(e) => updateProductField('price', e.target.value)}
+                placeholder="Price"
+                style={customerModuleStyles.fieldInput}
+              />
+              <div style={customerModuleStyles.suffixFieldWrap}>
+                <input
+                  type="number"
+                  value={productForm.gst}
+                  onChange={(e) => { updateProductField('gst', e.target.value); if (productGstError) setProductGstError(false); }}
+                  placeholder="GST"
+                  style={{ ...customerModuleStyles.fieldInput, paddingRight: '38px', ...(productGstError ? { border: '1.5px solid #DC2626' } : null) }}
+                />
+                <span style={customerModuleStyles.suffixFieldIcon}>%</span>
+              </div>
+              {productGstError && <p style={customerModuleStyles.fieldErrorText}>Enter a valid GST percentage (0-100)</p>}
+              <div>
+                <textarea
+                  value={productForm.description}
+                  onChange={(e) => updateProductField('description', e.target.value.slice(0, 2000))}
+                  placeholder="Description"
+                  maxLength={2000}
+                  style={customerModuleStyles.descriptionTextarea}
+                />
+                <div style={customerModuleStyles.charCount}>{productForm.description.length}/2000</div>
+              </div>
+              <input
+                type="text"
+                value={productForm.unit}
+                onChange={(e) => updateProductField('unit', e.target.value)}
+                placeholder="Unit Of Measure(SET, KG etc.)"
+                style={customerModuleStyles.fieldInput}
+              />
+              <input
+                type="text"
+                value={productForm.hsn}
+                onChange={(e) => { updateProductField('hsn', e.target.value.replace(/\D/g, '').slice(0, 8)); if (productHsnError) setProductHsnError(false); }}
+                placeholder="HSN"
+                style={{ ...customerModuleStyles.fieldInput, ...(productHsnError ? { border: '1.5px solid #DC2626' } : null) }}
+              />
+              {productHsnError && <p style={customerModuleStyles.fieldErrorText}>Enter a valid HSN code (4, 6, or 8 digits)</p>}
+
+              <button type="button" onClick={handleSaveProduct} style={{ ...customerModuleStyles.addBtn, marginTop: '18px' }}>
+                {editingProductId ? 'Update' : 'Add'}
+              </button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Customer sub-screen (used from Make Quotation) -----
+      if (quotationSubView === 'selectCustomerForQuotation') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeQuotation')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Customer</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search by Name OR Company Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {customers.length === 0 ? 'No customers added yet. Tap "Add Customer" to create one.' : 'No customers match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredCustomers, (c) => c.name).map((customer) => (
+                  <div key={customer.id} style={customerModuleStyles.customerCard}>
+                    <button type="button" onClick={() => handleSelectCustomerForQuotation(customer)} style={customerModuleStyles.selectRowBtn}>
+                      <span style={customerModuleStyles.customerName}>{customer.name}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForQuotation')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddCustomer('selectCustomerForQuotation')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />CUSTOMER</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Add Quotation Product sub-screen (Product / Quantity / Price / Description) -----
+      if (quotationSubView === 'addQuotationProductLine') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeQuotation')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingQuotationProductLineId ? 'Edit Quotation Product' : 'Add Quotation Product'}</h1>
+              <button type="button" onClick={openPickProductForQuotationLine} aria-label="Search product" style={customerModuleStyles.headerIconBtn}>
+                <FiSearch size={19} color="#ffffff" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <LabeledField
+                label="Product"
+                as="button"
+                onClick={openPickProductForQuotationLine}
+                rightElement={<FiChevronRight size={18} color="#94A3B8" />}
+              >
+                {quotationProductLineForm.name || 'Select Product'}
+              </LabeledField>
+
+              <LabeledField
+                label="Quantity"
+                type="number"
+                inputMode="decimal"
+                min="1"
+                value={quotationProductLineForm.qty}
+                onChange={(e) => setQuotationProductLineForm((prev) => ({ ...prev, qty: e.target.value }))}
+              />
+
+              <LabeledField
+                label="Price"
+                type="number"
+                inputMode="decimal"
+                value={quotationProductLineForm.price}
+                onChange={(e) => setQuotationProductLineForm((prev) => ({ ...prev, price: e.target.value }))}
+              />
+
+              <div>
+                <LabeledField
+                  label="Description"
+                  as="textarea"
+                  value={quotationProductLineForm.description}
+                  onChange={(e) => setQuotationProductLineForm((prev) => ({ ...prev, description: e.target.value.slice(0, 2000) }))}
+                  maxLength={2000}
+                />
+                <div style={customerModuleStyles.charCount}>{quotationProductLineForm.description.length}/2000</div>
+              </div>
+
+              <button type="button" onClick={handleAddQuotationProductLine} style={{ ...customerModuleStyles.addBtn, marginTop: '6px' }}>
+                Add To Quotation
+              </button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Pick Product sub-screen (choosing which product to add to a Quotation line) -----
+      if (quotationSubView === 'pickProductForQuotationLine') {
+        return (
+          <div style={{ ...customerModuleStyles.screen}}>
+            <div style={{ ...customerModuleStyles.header, flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView(productPickerReturnView || 'makeQuotation')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Product</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, maxWidth: 'none', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '110px' }}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={productSearchQuery}
+                  onChange={(e) => setProductSearchQuery(e.target.value)}
+                  placeholder="Search by Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {products.length === 0 ? 'No products added yet. Tap "Add Product" to create one.' : 'No products match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredProducts, (p) => p.name).map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handlePickProductForQuotationLine(product)}
+                    style={customerModuleStyles.productCard}
+                  >
+                    <div style={customerModuleStyles.productCardTopRow}>
+                      <span style={customerModuleStyles.customerName}>{product.name}</span>
+                      <FiChevronRight size={18} color="#94A3B8" />
+                    </div>
+                    {product.price !== undefined && product.price !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
+                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                      </div>
+                    )}
+                    {product.gst !== undefined && product.gst !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
+                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddProduct('pickProductForQuotationLine')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />PRODUCT</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+
+      // ----- Select Terms and Conditions sub-screen (used from Make Quotation) -----
+      if (quotationSubView === 'selectTermsForQuotation') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeQuotation')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
+              <span style={customerModuleStyles.headerIconBtn}>
+                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <button type="button" onClick={openAddTermsModal} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+                <FiPlus size={18} color="#0F766E" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.termsTabRow}>
+              <span style={customerModuleStyles.termsTabActive}>Quotation</span>
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {quotationTerms.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '80px' }}>You don't have any terms and conditions</p>
+              ) : (
+                quotationTerms.map((term) => {
+                  const selected = termsDraftSelectedIds.includes(term.id);
+                  return (
+                    <div
+                      key={term.id}
+                      style={{ ...customerModuleStyles.termCard, ...(selected ? customerModuleStyles.termCardSelected : {}), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleTermsDraftSelection(term.id)}
+                        style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '14.5px', fontWeight: '500', color: '#0F172A', lineHeight: '1.5' }}
+                      >
+                        {term.text}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTerm(term, 'quotation')}
+                        aria-label="Delete term"
+                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                      >
+                        <FiTrash2 size={13} color="#ffffff" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={customerModuleStyles.doneBtnWrap}>
+              <button type="button" onClick={handleDoneSelectTerms} style={customerModuleStyles.doneBtn}>DONE</button>
+            </div>
+
+            {isAddTermsModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
+                  <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Quotation</div>
+                  <textarea
+                    value={newTermText}
+                    onChange={(e) => setNewTermText(e.target.value)}
+                    placeholder="Terms and condition"
+                    style={customerModuleStyles.descriptionTextarea}
+                  />
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Make Quotation sub-screen -----
+      if (quotationSubView === 'makeQuotation') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingQuotationId) { setEditingQuotationId(null); setQuotationSubView('quotationDetail'); }
+                  else { setQuotationSubView(null); }
+                }}
+                aria-label="Back"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingQuotationId ? 'Update Quotation' : 'Make Quotation'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
+              <div style={makeQuotationStyles.infoPanel}>
+                <div style={makeQuotationStyles.infoRow}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Quotation Date</span>
+                    <div style={makeQuotationStyles.infoValue}>{quotationForm.date}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>Quotation No</span>
+                    <div style={makeQuotationStyles.infoValue}>{quotationForm.quotationNo || '-'}</div>
+                  </div>
+                </div>
+                <div style={makeQuotationStyles.otherInfoRow}>
+                  <span style={makeQuotationStyles.infoLabel}>Other Info:</span>
+                  <input
+                    type="text"
+                    value={quotationForm.otherInfo}
+                    onChange={(e) => setQuotationForm((prev) => ({ ...prev, otherInfo: e.target.value }))}
+                    style={makeQuotationStyles.otherInfoInput}
+                  />
+                </div>
+              </div>
+
+              <button type="button" onClick={openSelectCustomerForQuotation} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TO (CUSTOMER)</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedQuotationCustomer && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    <p style={makeQuotationStyles.sectionCardLine}>{selectedQuotationCustomer.name}</p>
+                    {selectedQuotationCustomer.companyName && <p style={makeQuotationStyles.sectionCardSubLine}>{selectedQuotationCustomer.companyName}</p>}
+                  </div>
+                )}
+              </button>
+
+              <div style={makeQuotationStyles.sectionCard}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={openPickProductForQuotationLine}
+                  style={{ ...makeQuotationStyles.sectionCardTopRow, cursor: 'pointer' }}
+                >
+                  <span style={makeQuotationStyles.sectionCardLabel}>PRODUCTS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {quotationForm.products.length > 0 && (
+                  <div style={{ ...makeQuotationStyles.sectionCardBody, gap: '10px' }}>
+                    {quotationForm.products.map((p) => {
+                      const amount = (Number(p.price) || 0) * (Number(p.qty) || 0);
+                      const totalAmount = amount * (1 + (Number(p.gst) || 0) / 100);
+                      const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                      return (
+                        <div
+                          key={p.productId}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openEditQuotationProductLine(p)}
+                          style={{ background: '#ffffff', borderRadius: '14px', padding: '12px 14px', cursor: 'pointer', border: '1px solid #E9ECF2' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); removeQuotationProductLine(p.productId); }}
+                              style={makeQuotationStyles.removeIconBtn}
+                              aria-label={`Remove ${p.name}`}
+                            >
+                              <FiTrash2 size={16} color="#DC2626" />
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                            <span style={{ fontSize: '12.5px', color: '#64748B', fontWeight: '500' }}>Amount</span>
+                            <span style={{ fontSize: '13px', color: '#334155', fontWeight: '600' }}>{p.qty} * {'\u20B9'}{fmt(Number(p.price) || 0)} = {'\u20B9'}{fmt(amount)}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: '700' }}>Total amount</span>
+                            <span style={{ fontSize: '14px', color: '#0F172A', fontWeight: '800' }}>{'\u20B9'}{fmt(totalAmount)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button type="button" onClick={openOtherChargeModal} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>OTHER CHARGE</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {quotationForm.otherCharges.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {quotationForm.otherCharges.map((c) => (
+                      <div key={c.id} style={makeQuotationStyles.lineRow}>
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeQuotationOtherCharge(c.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label={`Remove ${c.label}`}
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+
+              <button type="button" onClick={openSelectTermsForQuotation} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TERMS & CONDITIONS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedQuotationTerms.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {selectedQuotationTerms.map((term) => (
+                      <div key={term.id} style={makeQuotationStyles.lineRow}>
+                        <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removeQuotationSelectedTerm(term.id); }}
+                          style={makeQuotationStyles.removeIconBtn}
+                          aria-label="Remove term"
+                        >
+                          <FiTrash2 size={16} color="#DC2626" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+            </div>
+
+            <div style={makeQuotationStyles.bottomBar}>
+              <div>
+                <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
+                <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{quotationAmountDue}</div>
+              </div>
+              <button type="button" onClick={handleGenerateQuotation} style={makeQuotationStyles.generateBtn}>{editingQuotationId ? 'Update' : 'Generate'}</button>
+            </div>
+
+            {isOtherChargeModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsOtherChargeModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
+                  <input
+                    type="text"
+                    value={otherChargeForm.label}
+                    onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <input
+                    type="number"
+                    value={otherChargeForm.amount}
+                    onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Other Charge Amount"
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <div style={customerModuleStyles.taxableRow}>
+                    <span style={customerModuleStyles.sheetSmallLabelInline}>Is Taxable?</span>
+                    <input
+                      type="checkbox"
+                      checked={otherChargeForm.taxable}
+                      onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, taxable: e.target.checked }))}
+                      style={customerModuleStyles.checkbox}
+                    />
+                  </div>
+                  <button type="button" onClick={handleSaveOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Quotation List sub-screen (Matches Screenshot 1) -----
+      if (quotationSubView === 'quotationList') {
+        const searchQuotation = (q) => {
+          const qs = quotationSearchQuery.trim().toLowerCase();
+          if (!qs) return true;
+          return q.customerName.toLowerCase().includes(qs) || 
+                 (q.quotationNo || '').toLowerCase().includes(qs);
+        };
+
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Quotation</h1>
+              {renderSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {/* Search Bar */}
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={quotationSearchQuery}
+                  onChange={(e) => setQuotationSearchQuery(e.target.value)}
+                  placeholder="Search by Name, Company OR Quotation#"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {/* List */}
+              {quotations.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>No quotations generated yet.</p>
+              ) : (
+                sortDocumentsByCreated(quotations.filter(searchQuotation)).map((q) => (
+                  <DocumentListCard
+                    key={q.id}
+                    onClick={() => { setSelectedQuotationId(q.id); setQuotationSubView('quotationDetail'); }}
+                    name={q.customerName}
+                    docNumber={q.quotationNo || 'Quote-' + q.id.slice(0, 4)}
+                    date={q.date}
+                    amount={q.grandTotal}
+                    status={q.status}
+                  />
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => { setEditingQuotationId(null); setQuotationForm({ ...emptyQuotationForm(), quotationNo: getNextQuotationNumber() }); setQuotationSubView('makeQuotation'); }} style={customerModuleStyles.fabCompact}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>New<br />Quotation</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Quotation Detail sub-screen (Matches Screenshot 2, 3, 4) -----
+      if (quotationSubView === 'quotationDetail') {
+        const currentQuotation = quotations.find(q => q.id === selectedQuotationId);
+        if (!currentQuotation) {
+          setQuotationSubView('quotationList');
+          return null;
+        }
+
+        return (
+          <div style={{ width: '100%', height: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView('quotationList')} style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={24} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, margin: 0 }}>Quotation Detail</h1>
+              <button type="button" onClick={() => handleShareQuotation(currentQuotation)} aria-label="Share quotation" style={customerModuleStyles.headerIconBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              </button>
+            </div>
+
+            {/* DOCUMENT PREVIEW */}
+            <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <DocumentStatusBadge status={currentQuotation.status} />
+              <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
+                <div style={docStyles.page}>
+                {(() => {
+                  const model = buildQuotationDocModel(currentQuotation);
+                  const footerColSpan = 6;
+                  return (
+                    <>
+                {/* Header: Quotation N (top, centered), then Manufacturer info below */}
+                <div style={{ marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0' }}>
+                  <p style={{ ...docStyles.docTypeLabel, textTransform: 'none', textAlign: 'center', margin: '0 0 12px' }}>{model.quotationTitle}</p>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h2 style={docStyles.businessName}>{model.businessName}</h2>
+                      {model.businessPhone && <p style={docStyles.contactLine}>{model.businessPhone}</p>}
+                      {model.businessEmail && <p style={docStyles.contactLine}>{model.businessEmail}</p>}
+                    </div>
+                    {model.logoImg && (
+                      <img src={model.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
+                    )}
+                  </div>
+                </div>
+
+                {/* To, (left) | Date (right) */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '16px' }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>To,</p>
+                    {model.customerLines.map((line, idx) => (
+                      <p key={idx} style={idx === 0 ? docStyles.toName : docStyles.contactLine}>{line}</p>
+                    ))}
+                  </div>
+                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                    <p style={docStyles.docMetaLine}>Date: {model.date}</p>
+                  </div>
+                </div>
+
+                {model.greetingLines.length > 0 && (
+                  <p style={docStyles.bodyText}>
+                    {model.greetingLines.map((line, idx) => (
+                      <Fragment key={idx}>
+                        {line}
+                        {idx < model.greetingLines.length - 1 ? <br /> : null}
+                      </Fragment>
+                    ))}
+                  </p>
+                )}
+
+                {/* Table */}
+                <div style={docStyles.tableWrap}>
+                <table style={docStyles.table}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...docStyles.th, width: '6%' }}>#</th>
+                      <th style={{ ...docStyles.th, width: '22%', wordBreak: 'break-word' }}>Item</th>
+                      <th style={{ ...docStyles.th, width: '11%', wordBreak: 'break-word' }}>{model.hsnLabel}</th>
+                      <th style={{ ...docStyles.th, textAlign: 'center', width: '11%' }}>Qty</th>
+                      <th style={{ ...docStyles.th, textAlign: 'right', width: '17%' }}>Price</th>
+                      <th style={{ ...docStyles.th, textAlign: 'right', width: '15%' }}>GST</th>
+                      <th style={{ ...docStyles.th, textAlign: 'right', width: '18%' }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {model.rows.map((r) => (
+                      <tr key={r.index}>
+                        <td style={docStyles.td}>{r.index}</td>
+                        <td style={docStyles.td}>
+                          <div style={docStyles.tdBold}>{r.name}</div>
+                        </td>
+                        <td style={docStyles.td}>{r.hsn}</td>
+                        <td style={{ ...docStyles.td, textAlign: 'center' }}>
+                          {r.qty}{r.unit ? <span style={{ fontSize: '9px', color: '#94A3B8' }}> {r.unit}</span> : null}
+                        </td>
+                        <td style={{ ...docStyles.td, textAlign: 'right' }}>₹{Number(r.price).toFixed(2)}</td>
+                        <td style={{ ...docStyles.td, textAlign: 'right' }}>
+                          {r.gstPct}%
+                          <div style={{ fontSize: '9px', color: '#94A3B8' }}>₹{r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                        </td>
+                        <td style={{ ...docStyles.td, ...docStyles.tdBold, textAlign: 'right' }}>₹{r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Sub Total</td>
+                      <td style={docStyles.totalsValue}>₹{model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                    {model.otherChargesTotal > 0 && (
+                      <tr>
+                        <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Other Charges</td>
+                        <td style={docStyles.totalsValue}>₹{model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
+                      </tr>
+                    )}
+                    <tr style={{ borderTop: '1.5px solid #0F172A' }}>
+                      <td colSpan={footerColSpan} style={docStyles.grandTotalLabel}>Grand Total</td>
+                      <td style={docStyles.grandTotalValue}>₹{model.grandTotal.toLocaleString('en-IN')}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+                </div>
+
+                {model.closingText && (
+                  <p style={docStyles.closingText}>{model.closingText}</p>
+                )}
+
+                {/* Terms & Conditions - Quotation-specific only */}
+                {model.termsLines.length > 0 && (
+                  <div style={{ marginBottom: '18px' }}>
+                    <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 6px' }}>Terms & Conditions:</p>
+                    {model.termsLines.map((term, idx) => (
+                      <p key={idx} style={{ ...docStyles.addressLine, margin: '0 0 4px' }}>{'\u2022'} {term}</p>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ textAlign: 'right', marginTop: '20px' }}>
+                  <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
+                  {model.signatureImg ? (
+                    <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
+                  ) : (
+                    <div style={{ height: '34px' }}></div>
+                  )}
+                  <p style={docStyles.signatureCaption}>Authorized Signature</p>
+                </div>
+
+                {/* Generated with SmartManage - brand footer */}
+                <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <img src={smartpayLogo} alt="SmartManage" style={{ width: '20px', height: '20px', borderRadius: '5px', objectFit: 'cover', display: 'block' }} />
+                  <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', letterSpacing: '0.2px' }}>Generated with SmartManage</span>
+                </div>
+                    </>
+                  );
+                })()}
+                </div>
+              </div>
+            </div>
+
+
+            {/* BOTTOM ACTION BAR (Duplicate, Edit, Invoice, Status, Delete) */}
+            <div style={docActionBarStyles.bar}>
+              <button onClick={() => handleDuplicateQuotation(currentQuotation)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📄</span></span>
+                <span style={docActionBarStyles.label}>Duplicate</span>
+              </button>
+              <button onClick={() => openEditQuotation(currentQuotation)} style={docActionBarStyles.btn}>
+                {/* Standardized Edit icon - matches the Edit pencil icon and styling used in the
+                    Attendance Module for the Project Name field in the header, so the Edit action
+                    looks and behaves the same everywhere within the Quotation Module. */}
+                <span style={docActionBarStyles.iconWrap}><span style={{ cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>&#9999;&#65039;</span></span>
+                <span style={docActionBarStyles.label}>Edit</span>
+              </button>
+              <button onClick={() => setShowConvertSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📑</span></span>
+                <span style={docActionBarStyles.label}>Invoice</span>
+              </button>
+              <button onClick={() => setShowQuotationStatusSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
+                <span style={docActionBarStyles.label}>Status</span>
+              </button>
+              <button
+                onClick={() => {
+                  showConfirm('Delete this quotation?', async () => {
+                    const previous = quotations;
+                    const deletedId = selectedQuotationId;
+                    persistQuotations(quotations.filter(q => q.id !== deletedId));
+                    setQuotationSubView('quotationList');
+                    try {
+                      await documentService.deleteQuotation(deletedId);
+                    } catch (error) {
+                      console.error('Error deleting quotation:', error);
+                      persistQuotations(previous); // restore on failure
+                      showAlert('Could not delete the quotation on the server. Reloading your quotations.');
+                      if (loggedInUser?.userId) await loadUserQuotations(loggedInUser.userId);
+                    }
+                  });
+                }}
+                style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
+              >
+                <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
+                <span style={docActionBarStyles.label}>Delete</span>
+              </button>
+            </div>
+
+            {/* STATUS BOTTOM SHEET (Ref Image 4) */}
+            <DocumentStatusSheet
+              open={showQuotationStatusSheet}
+              title="Quotation Status"
+              onSelect={handleSetQuotationStatus}
+              onClose={() => setShowQuotationStatusSheet(false)}
+            />
+
+            {/* CONVERSION BOTTOM SHEET (Invoice click - Ref Image 4) */}
+            {showConvertSheet && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.6)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999 }} onClick={() => setShowConvertSheet(false)}>
+                <div style={{ background: '#ffffff', width: '100%', maxWidth: '500px', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', padding: '12px 20px 30px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#E2E8F0', margin: '4px auto 20px' }} />
+                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>Do you want to convert this Quotation to...</h3>
+                  
+                  <button
+                    onClick={() => {
+                      setShowConvertSheet(false);
+                      const newId = genId();
+                      const newProformaInvoice = {
+                        id: newId,
+                        proformaInvoiceNo: getNextProformaInvoiceNumber(),
+                        date: formatQuotationDate(new Date()),
+                        dueDate: '', poNo: '', otherInfo: currentQuotation.otherInfo || '',
+                        customerId: currentQuotation.customerId,
+                        products: currentQuotation.products || [],
+                        otherCharges: currentQuotation.otherCharges || [],
+                        termsIds: currentQuotation.termsIds || [],
+                        paidInfo: [],
+                        grandTotal: currentQuotation.grandTotal,
+                        paidTotal: 0,
+                        balanceDue: currentQuotation.grandTotal,
+                        createdAt: new Date().toISOString(),
+                        customerName: currentQuotation.customerName,
+                        customerCompany: currentQuotation.customerCompany,
+                      };
+                      persistProformaInvoices([...proformaInvoices, newProformaInvoice]);
+                      showSuccess('Converted to Proforma Invoice successfully.');
+                      setSelectedProformaInvoiceId(newId);
+                      setQuotationSubView('proformaInvoiceDetail');
+                    }}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+                  >
+                    Convert To Proforma Invoice
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowConvertSheet(false);
+                      const newId = genId();
+                      const newInvoice = {
+                        id: newId,
+                        invoiceNo: getNextInvoiceNumber(),
+                        date: formatQuotationDate(new Date()),
+                        dueDate: '', poNo: '', otherInfo: currentQuotation.otherInfo || '',
+                        customerId: currentQuotation.customerId,
+                        products: currentQuotation.products || [],
+                        otherCharges: currentQuotation.otherCharges || [],
+                        termsIds: currentQuotation.termsIds || [],
+                        paidInfo: [],
+                        grandTotal: currentQuotation.grandTotal,
+                        paidTotal: 0,
+                        balanceDue: currentQuotation.grandTotal,
+                        createdAt: new Date().toISOString(),
+                        customerName: currentQuotation.customerName,
+                        customerCompany: currentQuotation.customerCompany,
+                      };
+                      persistInvoices([...invoices, newInvoice]);
+                      showSuccess('Converted to Invoice successfully.');
+                      setSelectedInvoiceId(newId);
+                      setQuotationSubView('invoiceDetail');
+                    }}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+                  >
+                    Convert To Invoice
+                  </button>
+                  <button onClick={() => setShowConvertSheet(false)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '16px 0 0', fontSize: '17px', color: '#64748B', cursor: 'pointer', marginTop: '8px' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      if (quotationSubView === 'selectCustomerForPurchaseOrder') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makePurchaseOrder')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Customer</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search by Name OR Company Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {customers.length === 0 ? 'No customers added yet. Tap "Add Customer" to create one.' : 'No customers match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredCustomers, (c) => c.name).map((customer) => (
+                  <div key={customer.id} style={customerModuleStyles.customerCard}>
+                    <button type="button" onClick={() => handleSelectCustomerForPurchaseOrder(customer)} style={customerModuleStyles.selectRowBtn}>
+                      <span style={customerModuleStyles.customerName}>{customer.name}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForPurchaseOrder')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddCustomer('selectCustomerForPurchaseOrder')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />CUSTOMER</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Add Purchase Order Product sub-screen (Product / Quantity / Price / Description) -----
+      if (quotationSubView === 'addPurchaseOrderProductLine') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makePurchaseOrder')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingPurchaseOrderProductLineId ? 'Edit Purchase Order Product' : 'Add Purchase Order Product'}</h1>
+              <button type="button" onClick={openPickProductForPurchaseOrderLine} aria-label="Search product" style={customerModuleStyles.headerIconBtn}>
+                <FiSearch size={19} color="#ffffff" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <LabeledField
+                label="Product"
+                as="button"
+                onClick={openPickProductForPurchaseOrderLine}
+                rightElement={<FiChevronRight size={18} color="#94A3B8" />}
+              >
+                {purchaseOrderProductLineForm.name || 'Select Product'}
+              </LabeledField>
+
+              <LabeledField
+                label="Quantity"
+                type="number"
+                inputMode="decimal"
+                min="1"
+                value={purchaseOrderProductLineForm.qty}
+                onChange={(e) => setPurchaseOrderProductLineForm((prev) => ({ ...prev, qty: e.target.value }))}
+              />
+
+              <LabeledField
+                label="Price"
+                type="number"
+                inputMode="decimal"
+                value={purchaseOrderProductLineForm.price}
+                onChange={(e) => setPurchaseOrderProductLineForm((prev) => ({ ...prev, price: e.target.value }))}
+              />
+
+              <div>
+                <LabeledField
+                  label="Description"
+                  as="textarea"
+                  value={purchaseOrderProductLineForm.description}
+                  onChange={(e) => setPurchaseOrderProductLineForm((prev) => ({ ...prev, description: e.target.value.slice(0, 2000) }))}
+                  maxLength={2000}
+                />
+                <div style={customerModuleStyles.charCount}>{purchaseOrderProductLineForm.description.length}/2000</div>
+              </div>
+
+              <button type="button" onClick={handleAddPurchaseOrderProductLine} style={{ ...customerModuleStyles.addBtn, marginTop: '6px' }}>
+                Add To Purchase Order
+              </button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Pick Product sub-screen (choosing which product to add to a Purchase Order line) -----
+      if (quotationSubView === 'pickProductForPurchaseOrderLine') {
+        return (
+          <div style={{ ...customerModuleStyles.screen}}>
+            <div style={{ ...customerModuleStyles.header, flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView(productPickerReturnView || 'makePurchaseOrder')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Product</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, maxWidth: 'none', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '110px' }}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={productSearchQuery}
+                  onChange={(e) => setProductSearchQuery(e.target.value)}
+                  placeholder="Search by Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {products.length === 0 ? 'No products added yet. Tap "Add Product" to create one.' : 'No products match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredProducts, (p) => p.name).map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handlePickProductForPurchaseOrderLine(product)}
+                    style={customerModuleStyles.productCard}
+                  >
+                    <div style={customerModuleStyles.productCardTopRow}>
+                      <span style={customerModuleStyles.customerName}>{product.name}</span>
+                      <FiChevronRight size={18} color="#94A3B8" />
+                    </div>
+                    {product.price !== undefined && product.price !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
+                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                      </div>
+                    )}
+                    {product.gst !== undefined && product.gst !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
+                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddProduct('pickProductForPurchaseOrderLine')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />PRODUCT</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Terms and Conditions sub-screen (used from Make Purchase Order) -----
+      if (quotationSubView === 'selectTermsForPurchaseOrder') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makePurchaseOrder')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
+              <span style={customerModuleStyles.headerIconBtn}>
+                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <button type="button" onClick={() => openAddTermsModal('purchaseOrder')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+                <FiPlus size={18} color="#0F766E" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.termsTabRow}>
+              <span style={customerModuleStyles.termsTabActive}>Purchase Order</span>
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {purchaseOrderTerms.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '80px' }}>You don't have any terms and conditions</p>
+              ) : (
+                purchaseOrderTerms.map((term) => {
+                  const selected = purchaseOrderTermsDraftSelectedIds.includes(term.id);
+                  return (
+                    <div
+                      key={term.id}
+                      style={{ ...customerModuleStyles.termCard, ...(selected ? customerModuleStyles.termCardSelected : {}), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => togglePurchaseOrderTermsDraftSelection(term.id)}
+                        style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '14.5px', fontWeight: '500', color: '#0F172A', lineHeight: '1.5' }}
+                      >
+                        {term.text}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTerm(term, 'purchaseOrder')}
+                        aria-label="Delete term"
+                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                      >
+                        <FiTrash2 size={13} color="#ffffff" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={customerModuleStyles.doneBtnWrap}>
+              <button type="button" onClick={handleDoneSelectPurchaseOrderTerms} style={customerModuleStyles.doneBtn}>DONE</button>
+            </div>
+
+            {isAddTermsModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
+                  <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Purchase Order</div>
+                  <textarea
+                    value={newTermText}
+                    onChange={(e) => setNewTermText(e.target.value)}
+                    placeholder="Terms and condition"
+                    style={customerModuleStyles.descriptionTextarea}
+                  />
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Make Purchase Order sub-screen -----
+      if (quotationSubView === 'makePurchaseOrder') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingPurchaseOrderId) { setEditingPurchaseOrderId(null); setQuotationSubView('purchaseOrderDetail'); }
+                  else { setQuotationSubView(null); }
+                }}
+                aria-label="Back"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingPurchaseOrderId ? 'Update Purchase Order' : 'Make Purchase Order'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
+              <div style={makeQuotationStyles.infoPanel}>
+                <div style={makeQuotationStyles.infoRow}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Purchase Order Date</span>
+                    <div style={makeQuotationStyles.infoValue}>{purchaseOrderForm.date}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>Purchase Order No</span>
+                    <div style={makeQuotationStyles.infoValue}>{purchaseOrderForm.purchaseOrderNo || '-'}</div>
+                  </div>
+                </div>
+                <div style={makeQuotationStyles.otherInfoRow}>
+                  <span style={makeQuotationStyles.infoLabel}>Other Info:</span>
+                  <input
+                    type="text"
+                    value={purchaseOrderForm.otherInfo}
+                    onChange={(e) => setPurchaseOrderForm((prev) => ({ ...prev, otherInfo: e.target.value }))}
+                    style={makeQuotationStyles.otherInfoInput}
+                  />
+                </div>
+              </div>
+
+              <button type="button" onClick={openSelectCustomerForPurchaseOrder} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TO (CUSTOMER)</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedPurchaseOrderCustomer && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    <p style={makeQuotationStyles.sectionCardLine}>{selectedPurchaseOrderCustomer.name}</p>
+                    {selectedPurchaseOrderCustomer.companyName && <p style={makeQuotationStyles.sectionCardSubLine}>{selectedPurchaseOrderCustomer.companyName}</p>}
+                  </div>
+                )}
+              </button>
+
+              <div style={makeQuotationStyles.sectionCard}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={openPickProductForPurchaseOrderLine}
+                  style={{ ...makeQuotationStyles.sectionCardTopRow, cursor: 'pointer' }}
+                >
+                  <span style={makeQuotationStyles.sectionCardLabel}>PRODUCTS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {purchaseOrderForm.products.length > 0 && (
+                  <div style={{ ...makeQuotationStyles.sectionCardBody, gap: '10px' }}>
+                    {purchaseOrderForm.products.map((p) => {
+                      const amount = (Number(p.price) || 0) * (Number(p.qty) || 0);
+                      const totalAmount = amount * (1 + (Number(p.gst) || 0) / 100);
+                      const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                      return (
+                        <div
+                          key={p.productId}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openEditPurchaseOrderProductLine(p)}
+                          style={{ background: '#ffffff', borderRadius: '14px', padding: '12px 14px', cursor: 'pointer', border: '1px solid #E9ECF2' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); removePurchaseOrderProductLine(p.productId); }}
+                              style={makeQuotationStyles.removeIconBtn}
+                              aria-label={`Remove ${p.name}`}
+                            >
+                              <FiTrash2 size={16} color="#DC2626" />
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                            <span style={{ fontSize: '12.5px', color: '#64748B', fontWeight: '500' }}>Amount</span>
+                            <span style={{ fontSize: '13px', color: '#334155', fontWeight: '600' }}>{p.qty} * {'\u20B9'}{fmt(Number(p.price) || 0)} = {'\u20B9'}{fmt(amount)}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: '700' }}>Total amount</span>
+                            <span style={{ fontSize: '14px', color: '#0F172A', fontWeight: '800' }}>{'\u20B9'}{fmt(totalAmount)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button type="button" onClick={openPurchaseOrderOtherChargeModal} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>OTHER CHARGE</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {purchaseOrderForm.otherCharges.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {purchaseOrderForm.otherCharges.map((c) => (
+                      <div key={c.id} style={makeQuotationStyles.lineRow}>
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removePurchaseOrderOtherCharge(c.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label={`Remove ${c.label}`}
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+
+              <button type="button" onClick={openSelectTermsForPurchaseOrder} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TERMS & CONDITIONS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedPurchaseOrderTerms.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {selectedPurchaseOrderTerms.map((term) => (
+                      <div key={term.id} style={makeQuotationStyles.lineRow}>
+                        <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removePurchaseOrderSelectedTerm(term.id); }}
+                          style={makeQuotationStyles.removeIconBtn}
+                          aria-label="Remove term"
+                        >
+                          <FiTrash2 size={16} color="#DC2626" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+            </div>
+
+            <div style={makeQuotationStyles.bottomBar}>
+              <div>
+                <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
+                <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{purchaseOrderAmountDue}</div>
+              </div>
+              <button type="button" onClick={handleGeneratePurchaseOrder} style={makeQuotationStyles.generateBtn}>{editingPurchaseOrderId ? 'Update' : 'Generate'}</button>
+            </div>
+
+            {isPurchaseOrderOtherChargeModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsPurchaseOrderOtherChargeModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
+                  <input
+                    type="text"
+                    value={purchaseOrderOtherChargeForm.label}
+                    onChange={(e) => setPurchaseOrderOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <input
+                    type="number"
+                    value={purchaseOrderOtherChargeForm.amount}
+                    onChange={(e) => setPurchaseOrderOtherChargeForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Other Charge Amount"
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <div style={customerModuleStyles.taxableRow}>
+                    <span style={customerModuleStyles.sheetSmallLabelInline}>Is Taxable?</span>
+                    <input
+                      type="checkbox"
+                      checked={purchaseOrderOtherChargeForm.taxable}
+                      onChange={(e) => setPurchaseOrderOtherChargeForm((prev) => ({ ...prev, taxable: e.target.checked }))}
+                      style={customerModuleStyles.checkbox}
+                    />
+                  </div>
+                  <button type="button" onClick={handleSavePurchaseOrderOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Purchase Order List sub-screen -----
+      if (quotationSubView === 'purchaseOrderList') {
+        const searchPurchaseOrder = (q) => {
+          const qs = purchaseOrderSearchQuery.trim().toLowerCase();
+          if (!qs) return true;
+          return q.customerName.toLowerCase().includes(qs) || 
+                 (q.purchaseOrderNo || '').toLowerCase().includes(qs);
+        };
+
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Purchase Order</h1>
+              {renderSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {/* Search Bar */}
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={purchaseOrderSearchQuery}
+                  onChange={(e) => setPurchaseOrderSearchQuery(e.target.value)}
+                  placeholder="Search by Name, Company OR Purchase Order#"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {/* List */}
+              {purchaseOrders.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>No purchase orders generated yet.</p>
+              ) : (
+                sortDocumentsByCreated(purchaseOrders.filter(searchPurchaseOrder)).map((q) => (
+                  <DocumentListCard
+                    key={q.id}
+                    onClick={() => { setSelectedPurchaseOrderId(q.id); setQuotationSubView('purchaseOrderDetail'); }}
+                    name={q.customerName}
+                    docNumber={q.purchaseOrderNo || 'PO-' + q.id.slice(0, 4)}
+                    date={q.date}
+                    amount={q.grandTotal}
+                    status={q.status}
+                  />
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => { setEditingPurchaseOrderId(null); setPurchaseOrderForm({ ...emptyPurchaseOrderForm(), purchaseOrderNo: getNextPurchaseOrderNumber() }); setQuotationSubView('makePurchaseOrder'); }} style={customerModuleStyles.fabCompact}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>New<br />Purchase<br />Order</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Purchase Order Detail sub-screen -----
+      if (quotationSubView === 'purchaseOrderDetail') {
+        const currentPurchaseOrder = purchaseOrders.find(q => q.id === selectedPurchaseOrderId);
+        if (!currentPurchaseOrder) {
+          setQuotationSubView('purchaseOrderList');
+          return null;
+        }
+
+        return (
+          <div style={{ width: '100%', height: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView('purchaseOrderList')} style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={24} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, margin: 0 }}>Purchase Order Detail</h1>
+              <button type="button" onClick={() => handleSharePurchaseOrder(currentPurchaseOrder)} aria-label="Share purchase order" style={customerModuleStyles.headerIconBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              </button>
+            </div>
+
+            {/* DOCUMENT PREVIEW */}
+            <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <DocumentStatusBadge status={currentPurchaseOrder.status} />
+              <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
+                <div style={docStyles.page}>
+                  <GeneratedDocumentPreview model={buildPurchaseOrderDocModel(currentPurchaseOrder)} />
+                </div>
+              </div>
+            </div>
+
+            {/* BOTTOM ACTION BAR (Duplicate, Edit, Status, Delete) */}
+            <div style={docActionBarStyles.bar}>
+              <button onClick={() => handleDuplicatePurchaseOrder(currentPurchaseOrder)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📄</span></span>
+                <span style={docActionBarStyles.label}>Duplicate</span>
+              </button>
+              <button onClick={() => openEditPurchaseOrder(currentPurchaseOrder)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
+                <span style={docActionBarStyles.label}>Edit</span>
+              </button>
+              <button onClick={() => setShowPurchaseOrderStatusSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
+                <span style={docActionBarStyles.label}>Status</span>
+              </button>
+              <button
+                onClick={() => {
+                  showConfirm('Delete this purchase order?', () => {
+                    persistPurchaseOrders(purchaseOrders.filter(q => q.id !== selectedPurchaseOrderId));
+                    setQuotationSubView('purchaseOrderList');
+                  });
+                }}
+                style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
+              >
+                <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
+                <span style={docActionBarStyles.label}>Delete</span>
+              </button>
+            </div>
+
+            <DocumentStatusSheet
+              open={showPurchaseOrderStatusSheet}
+              title="Purchase Order Status"
+              onSelect={handleSetPurchaseOrderStatus}
+              onClose={() => setShowPurchaseOrderStatusSheet(false)}
+            />
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      if (quotationSubView === 'selectCustomerForProformaInvoice') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeProformaInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Customer</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search by Name OR Company Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {customers.length === 0 ? 'No customers added yet. Tap "Add Customer" to create one.' : 'No customers match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredCustomers, (c) => c.name).map((customer) => (
+                  <div key={customer.id} style={customerModuleStyles.customerCard}>
+                    <button type="button" onClick={() => handleSelectCustomerForProformaInvoice(customer)} style={customerModuleStyles.selectRowBtn}>
+                      <span style={customerModuleStyles.customerName}>{customer.name}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForProformaInvoice')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddCustomer('selectCustomerForProformaInvoice')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />CUSTOMER</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Add Proforma Invoice Product sub-screen (Product / Quantity / Price / Description) -----
+      if (quotationSubView === 'addProformaInvoiceProductLine') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeProformaInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingProformaInvoiceProductLineId ? 'Edit Proforma Invoice Product' : 'Add Proforma Invoice Product'}</h1>
+              <button type="button" onClick={openPickProductForProformaInvoiceLine} aria-label="Search product" style={customerModuleStyles.headerIconBtn}>
+                <FiSearch size={19} color="#ffffff" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <LabeledField
+                label="Product"
+                as="button"
+                onClick={openPickProductForProformaInvoiceLine}
+                rightElement={<FiChevronRight size={18} color="#94A3B8" />}
+              >
+                {proformaInvoiceProductLineForm.name || 'Select Product'}
+              </LabeledField>
+
+              <LabeledField
+                label="Quantity"
+                type="number"
+                inputMode="decimal"
+                min="1"
+                value={proformaInvoiceProductLineForm.qty}
+                onChange={(e) => setProformaInvoiceProductLineForm((prev) => ({ ...prev, qty: e.target.value }))}
+              />
+
+              <LabeledField
+                label="Price"
+                type="number"
+                inputMode="decimal"
+                value={proformaInvoiceProductLineForm.price}
+                onChange={(e) => setProformaInvoiceProductLineForm((prev) => ({ ...prev, price: e.target.value }))}
+              />
+
+              <div>
+                <LabeledField
+                  label="Description"
+                  as="textarea"
+                  value={proformaInvoiceProductLineForm.description}
+                  onChange={(e) => setProformaInvoiceProductLineForm((prev) => ({ ...prev, description: e.target.value.slice(0, 2000) }))}
+                  maxLength={2000}
+                />
+                <div style={customerModuleStyles.charCount}>{proformaInvoiceProductLineForm.description.length}/2000</div>
+              </div>
+
+              <button type="button" onClick={handleAddProformaInvoiceProductLine} style={{ ...customerModuleStyles.addBtn, marginTop: '6px' }}>
+                Add To Proforma Invoice
+              </button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Pick Product sub-screen (choosing which product to add to a Proforma Invoice line) -----
+      if (quotationSubView === 'pickProductForProformaInvoiceLine') {
+        return (
+          <div style={{ ...customerModuleStyles.screen}}>
+            <div style={{ ...customerModuleStyles.header, flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView(productPickerReturnView || 'makeProformaInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Product</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, maxWidth: 'none', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '110px' }}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={productSearchQuery}
+                  onChange={(e) => setProductSearchQuery(e.target.value)}
+                  placeholder="Search by Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {products.length === 0 ? 'No products added yet. Tap "Add Product" to create one.' : 'No products match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredProducts, (p) => p.name).map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handlePickProductForProformaInvoiceLine(product)}
+                    style={customerModuleStyles.productCard}
+                  >
+                    <div style={customerModuleStyles.productCardTopRow}>
+                      <span style={customerModuleStyles.customerName}>{product.name}</span>
+                      <FiChevronRight size={18} color="#94A3B8" />
+                    </div>
+                    {product.price !== undefined && product.price !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
+                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                      </div>
+                    )}
+                    {product.gst !== undefined && product.gst !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
+                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddProduct('pickProductForProformaInvoiceLine')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />PRODUCT</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Terms and Conditions sub-screen (used from Make Proforma Invoice) -----
+      if (quotationSubView === 'selectTermsForProformaInvoice') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeProformaInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
+              <span style={customerModuleStyles.headerIconBtn}>
+                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <button type="button" onClick={() => openAddTermsModal('proformaInvoice')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+                <FiPlus size={18} color="#0F766E" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.termsTabRow}>
+              <span style={customerModuleStyles.termsTabActive}>Proforma Invoice</span>
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {proformaInvoiceTerms.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '80px' }}>You don't have any terms and conditions</p>
+              ) : (
+                proformaInvoiceTerms.map((term) => {
+                  const selected = proformaInvoiceTermsDraftSelectedIds.includes(term.id);
+                  return (
+                    <div
+                      key={term.id}
+                      style={{ ...customerModuleStyles.termCard, ...(selected ? customerModuleStyles.termCardSelected : {}), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleProformaInvoiceTermsDraftSelection(term.id)}
+                        style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '14.5px', fontWeight: '500', color: '#0F172A', lineHeight: '1.5' }}
+                      >
+                        {term.text}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTerm(term, 'proformaInvoice')}
+                        aria-label="Delete term"
+                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                      >
+                        <FiTrash2 size={13} color="#ffffff" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={customerModuleStyles.doneBtnWrap}>
+              <button type="button" onClick={handleDoneSelectProformaInvoiceTerms} style={customerModuleStyles.doneBtn}>DONE</button>
+            </div>
+
+            {isAddTermsModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
+                  <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Proforma Invoice</div>
+                  <textarea
+                    value={newTermText}
+                    onChange={(e) => setNewTermText(e.target.value)}
+                    placeholder="Terms and condition"
+                    style={customerModuleStyles.descriptionTextarea}
+                  />
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Make Proforma Invoice sub-screen -----
+      if (quotationSubView === 'makeProformaInvoice') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingProformaInvoiceId) { setEditingProformaInvoiceId(null); setQuotationSubView('proformaInvoiceDetail'); }
+                  else { setQuotationSubView(null); }
+                }}
+                aria-label="Back"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingProformaInvoiceId ? 'Update Proforma Invoice' : 'Make Proforma Invoice'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
+              <div style={makeQuotationStyles.infoPanel}>
+                <div style={makeQuotationStyles.infoRow}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Proforma Invoice Date</span>
+                    <div style={makeQuotationStyles.infoValue}>{proformaInvoiceForm.date}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>Proforma Invoice No</span>
+                    <div style={makeQuotationStyles.infoValue}>{proformaInvoiceForm.proformaInvoiceNo || '-'}</div>
+                  </div>
+                </div>
+                <div style={{ ...makeQuotationStyles.infoRow, marginBottom: '14px' }}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Due Date</span>
+                    <input
+                      type="text"
+                      value={proformaInvoiceForm.dueDate}
+                      onChange={(e) => setProformaInvoiceForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+                      placeholder="-"
+                      style={{ ...makeQuotationStyles.otherInfoInput, display: 'block', fontSize: '17px', fontWeight: '700', color: '#0F172A', marginTop: '4px', borderBottom: 'none', padding: 0, width: '140px' }}
+                    />
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>PO No</span>
+                    <input
+                      type="text"
+                      value={proformaInvoiceForm.poNo}
+                      onChange={(e) => setProformaInvoiceForm((prev) => ({ ...prev, poNo: e.target.value }))}
+                      placeholder="-"
+                      style={{ ...makeQuotationStyles.otherInfoInput, display: 'block', fontSize: '17px', fontWeight: '700', color: '#0F172A', marginTop: '4px', borderBottom: 'none', padding: 0, textAlign: 'right', width: '140px', marginLeft: 'auto' }}
+                    />
+                  </div>
+                </div>
+                <div style={makeQuotationStyles.otherInfoRow}>
+                  <span style={makeQuotationStyles.infoLabel}>Other Info:</span>
+                  <input
+                    type="text"
+                    value={proformaInvoiceForm.otherInfo}
+                    onChange={(e) => setProformaInvoiceForm((prev) => ({ ...prev, otherInfo: e.target.value }))}
+                    style={makeQuotationStyles.otherInfoInput}
+                  />
+                </div>
+              </div>
+
+              <button type="button" onClick={openSelectCustomerForProformaInvoice} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>BILL TO (CUSTOMER)</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedProformaInvoiceCustomer && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    <p style={makeQuotationStyles.sectionCardLine}>{selectedProformaInvoiceCustomer.name}</p>
+                    {selectedProformaInvoiceCustomer.companyName && <p style={makeQuotationStyles.sectionCardSubLine}>{selectedProformaInvoiceCustomer.companyName}</p>}
+                  </div>
+                )}
+              </button>
+
+              <div style={makeQuotationStyles.sectionCard}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={openPickProductForProformaInvoiceLine}
+                  style={{ ...makeQuotationStyles.sectionCardTopRow, cursor: 'pointer' }}
+                >
+                  <span style={makeQuotationStyles.sectionCardLabel}>PRODUCTS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {proformaInvoiceForm.products.length > 0 && (
+                  <div style={{ ...makeQuotationStyles.sectionCardBody, gap: '10px' }}>
+                    {proformaInvoiceForm.products.map((p) => {
+                      const amount = (Number(p.price) || 0) * (Number(p.qty) || 0);
+                      const totalAmount = amount * (1 + (Number(p.gst) || 0) / 100);
+                      const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                      return (
+                        <div
+                          key={p.productId}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openEditProformaInvoiceProductLine(p)}
+                          style={{ background: '#ffffff', borderRadius: '14px', padding: '12px 14px', cursor: 'pointer', border: '1px solid #E9ECF2' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); removeProformaInvoiceProductLine(p.productId); }}
+                              style={makeQuotationStyles.removeIconBtn}
+                              aria-label={`Remove ${p.name}`}
+                            >
+                              <FiTrash2 size={16} color="#DC2626" />
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                            <span style={{ fontSize: '12.5px', color: '#64748B', fontWeight: '500' }}>Amount</span>
+                            <span style={{ fontSize: '13px', color: '#334155', fontWeight: '600' }}>{p.qty} * {'\u20B9'}{fmt(Number(p.price) || 0)} = {'\u20B9'}{fmt(amount)}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: '700' }}>Total amount</span>
+                            <span style={{ fontSize: '14px', color: '#0F172A', fontWeight: '800' }}>{'\u20B9'}{fmt(totalAmount)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button type="button" onClick={openProformaInvoiceOtherChargeModal} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>OTHER CHARGE</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {proformaInvoiceForm.otherCharges.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {proformaInvoiceForm.otherCharges.map((c) => (
+                      <div key={c.id} style={makeQuotationStyles.lineRow}>
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeProformaInvoiceOtherCharge(c.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label={`Remove ${c.label}`}
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+
+              <button type="button" onClick={openSelectTermsForProformaInvoice} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TERMS & CONDITIONS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedProformaInvoiceTerms.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {selectedProformaInvoiceTerms.map((term) => (
+                      <div key={term.id} style={makeQuotationStyles.lineRow}>
+                        <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removeProformaInvoiceSelectedTerm(term.id); }}
+                          style={makeQuotationStyles.removeIconBtn}
+                          aria-label="Remove term"
+                        >
+                          <FiTrash2 size={16} color="#DC2626" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+
+              <button type="button" onClick={openProformaPaidInfoList} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>PAID INFO</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {proformaInvoiceForm.paidInfo.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {proformaInvoiceForm.paidInfo.map((p) => (
+                      <div key={p.id} style={makeQuotationStyles.lineRow}>
+                        <span style={makeQuotationStyles.sectionCardLine}>{p.date}{p.note ? ` — ${p.note}` : ''}</span>
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{p.amount}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeProformaPaidInfoLine(p.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label="Remove paid info"
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+            </div>
+
+            <div style={makeQuotationStyles.bottomBar}>
+              <div>
+                <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
+                <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{proformaInvoiceAmountDue}</div>
+              </div>
+              <button type="button" onClick={handleGenerateProformaInvoice} style={makeQuotationStyles.generateBtn}>{editingProformaInvoiceId ? 'Update' : 'Generate'}</button>
+            </div>
+
+            {isProformaInvoiceOtherChargeModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsProformaInvoiceOtherChargeModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
+                  <input
+                    type="text"
+                    value={proformaInvoiceOtherChargeForm.label}
+                    onChange={(e) => setProformaInvoiceOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <input
+                    type="number"
+                    value={proformaInvoiceOtherChargeForm.amount}
+                    onChange={(e) => setProformaInvoiceOtherChargeForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Other Charge Amount"
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <div style={customerModuleStyles.taxableRow}>
+                    <span style={customerModuleStyles.sheetSmallLabelInline}>Is Taxable?</span>
+                    <input
+                      type="checkbox"
+                      checked={proformaInvoiceOtherChargeForm.taxable}
+                      onChange={(e) => setProformaInvoiceOtherChargeForm((prev) => ({ ...prev, taxable: e.target.checked }))}
+                      style={customerModuleStyles.checkbox}
+                    />
+                  </div>
+                  <button type="button" onClick={handleSaveProformaInvoiceOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Proforma Paid Info List sub-screen -----
+      if (quotationSubView === 'proformaPaidInfoList') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeProformaInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Paid Info List</h1>
+              <button type="button" onClick={openAddProformaPaidInfoModal} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+                <FiPlus size={18} color="#0F766E" />
+              </button>
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '90px' }}>
+              {proformaInvoiceForm.paidInfo.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '160px' }}>You don't have any paid info</p>
+              ) : (
+                proformaInvoiceForm.paidInfo.map((p) => {
+                  const isSelected = selectedProformaPaidInfoIds.includes(p.id);
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => toggleProformaPaidInfoSelection(p.id)}
+                      style={{ ...customerModuleStyles.customerCard, ...(isSelected ? customerModuleStyles.termCardSelected : {}) }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={customerModuleStyles.customerName}>{'\u20B9'}{p.amount}</span>
+                          <span style={{ fontSize: '13px', color: '#64748B', fontWeight: '600' }}>{p.date}</span>
+                        </div>
+                        {p.note && <p style={{ fontSize: '13px', color: '#64748B', margin: '4px 0 0' }}>{p.note}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); removeProformaPaidInfoLine(p.id); }}
+                        style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626', marginLeft: '10px' }}
+                        aria-label="Delete paid info"
+                      >
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={customerModuleStyles.doneBtnWrap}>
+              <button type="button" onClick={handleDoneProformaPaidInfoList} style={customerModuleStyles.doneBtn}>DONE</button>
+            </div>
+
+            {isProformaPaidInfoModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsProformaPaidInfoModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Paid Info</h3>
+                  <button
+                    type="button"
+                    onClick={() => { setProformaPaidInfoCalendarMonth(parseQuotationDate(proformaPaidInfoForm.date) || new Date()); setIsProformaPaidInfoDatePickerOpen(true); }}
+                    style={{ ...customerModuleStyles.fieldInput, textAlign: 'left', cursor: 'pointer', color: proformaPaidInfoForm.date ? '#0F172A' : '#94A3B8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <span>{proformaPaidInfoForm.date || t('selectDatePlaceholder')}</span>
+                    <span style={{ fontSize: '15px' }}>&#128197;</span>
+                  </button>
+                  <input
+                    type="number"
+                    value={proformaPaidInfoForm.amount}
+                    onChange={(e) => setProformaPaidInfoForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Amount"
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <textarea
+                    value={proformaPaidInfoForm.note}
+                    onChange={(e) => setProformaPaidInfoForm((prev) => ({ ...prev, note: e.target.value }))}
+                    placeholder="Note"
+                    style={customerModuleStyles.descriptionTextarea}
+                  />
+                  <button type="button" onClick={handleSaveProformaPaidInfo} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                </div>
+              </div>
+            )}
+
+            {/* ============ PROFORMA PAID INFO DATE CALENDAR POPUP ============ */}
+            {isProformaPaidInfoDatePickerOpen && (() => {
+              const maxDateStr = toLocalISODate(new Date());
+              const year = proformaPaidInfoCalendarMonth.getFullYear();
+              const month = proformaPaidInfoCalendarMonth.getMonth();
+              const firstWeekday = new Date(year, month, 1).getDay();
+              const daysInMonth = new Date(year, month + 1, 0).getDate();
+              const cells = [];
+              for (let i = 0; i < firstWeekday; i++) cells.push(null);
+              for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+              const rows = [];
+              for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+
+              return (
+                <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
+                  <div style={{ backgroundColor: '#ffffff', borderRadius: '20px', width: '92%', maxWidth: '340px', overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+                    <div style={{ backgroundColor: '#0B3C9B', padding: '20px 20px 16px 20px', color: '#ffffff' }}>
+                      <div style={{ fontSize: '13px', opacity: 0.85, marginBottom: '4px' }}>{year}</div>
+                      <div style={{ fontSize: '21px', fontWeight: '700' }}>{proformaPaidInfoForm.date ? proformaPaidInfoForm.date : t('selectDatePlaceholder')}</div>
+                    </div>
+                    <div style={{ padding: '16px 18px 4px 18px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <button onClick={() => setProformaPaidInfoCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#334155', padding: '4px 10px' }}>&lsaquo;</button>
+                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#1E293B' }}>{proformaPaidInfoCalendarMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                        <button onClick={() => setProformaPaidInfoCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#334155', padding: '4px 10px' }}>&rsaquo;</button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '2px' }}>
+                        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                          <div key={i} style={{ textAlign: 'center', fontSize: '11px', color: '#94A3B8', fontWeight: '600', padding: '4px 0' }}>{d}</div>
+                        ))}
+                      </div>
+                      {rows.map((row, ri) => (
+                        <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                          {row.map((dayNum, ci) => {
+                            if (!dayNum) return <div key={ci} />;
+                            const isoStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                            const displayStr = `${String(dayNum).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`;
+                            const isDisabled = isoStr > maxDateStr;
+                            const isSelected = proformaPaidInfoForm.date === displayStr;
+                            return (
+                              <div
+                                key={ci}
+                                onClick={() => { if (isDisabled) return; setProformaPaidInfoForm((prev) => ({ ...prev, date: displayStr })); setIsProformaPaidInfoDatePickerOpen(false); }}
+                                style={{
+                                  textAlign: 'center', padding: '9px 0', margin: '2px 0', borderRadius: '50%',
+                                  fontSize: '13px', fontWeight: isSelected ? '700' : '500',
+                                  cursor: isDisabled ? 'default' : 'pointer',
+                                  color: isDisabled ? '#CBD5E1' : (isSelected ? '#ffffff' : '#1E293B'),
+                                  backgroundColor: isSelected ? '#0B3C9B' : 'transparent'
+                                }}
+                              >
+                                {dayNum}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '22px', padding: '12px 20px 18px 20px' }}>
+                      <button onClick={() => setIsProformaPaidInfoDatePickerOpen(false)} style={{ background: 'none', border: 'none', color: '#0B3C9B', fontWeight: '700', fontSize: '13px', cursor: 'pointer' }}>{t('cancel')}</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Proforma Invoice List sub-screen -----
+      if (quotationSubView === 'proformaInvoiceList') {
+        const searchProformaInvoice = (q) => {
+          const qs = proformaInvoiceSearchQuery.trim().toLowerCase();
+          if (!qs) return true;
+          return q.customerName.toLowerCase().includes(qs) || 
+                 (q.proformaInvoiceNo || '').toLowerCase().includes(qs);
+        };
+
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Proforma Invoice</h1>
+              {renderSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {/* Search Bar */}
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={proformaInvoiceSearchQuery}
+                  onChange={(e) => setProformaInvoiceSearchQuery(e.target.value)}
+                  placeholder="Search by Name, Company OR Proforma#"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {/* List */}
+              {proformaInvoices.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>No proforma invoices generated yet.</p>
+              ) : (
+                sortDocumentsByCreated(proformaInvoices.filter(searchProformaInvoice)).map((q) => (
+                  <DocumentListCard
+                    key={q.id}
+                    onClick={() => { setSelectedProformaInvoiceId(q.id); setQuotationSubView('proformaInvoiceDetail'); }}
+                    name={q.customerName}
+                    docNumber={q.proformaInvoiceNo || 'PI-' + q.id.slice(0, 4)}
+                    date={q.date}
+                    amount={q.grandTotal}
+                    status={q.status}
+                  />
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => { setEditingProformaInvoiceId(null); setProformaInvoiceForm({ ...emptyProformaInvoiceForm(), proformaInvoiceNo: getNextProformaInvoiceNumber() }); setQuotationSubView('makeProformaInvoice'); }} style={customerModuleStyles.fabCompact}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>New<br />Proforma<br />Invoice</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Proforma Invoice Detail sub-screen -----
+      if (quotationSubView === 'proformaInvoiceDetail') {
+        const currentProformaInvoice = proformaInvoices.find(q => q.id === selectedProformaInvoiceId);
+        if (!currentProformaInvoice) {
+          setQuotationSubView('proformaInvoiceList');
+          return null;
+        }
+
+        return (
+          <div style={{ width: '100%', height: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView('proformaInvoiceList')} style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={24} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, margin: 0 }}>Proforma Invoice Detail</h1>
+              <button type="button" onClick={() => handleShareProformaInvoice(currentProformaInvoice)} aria-label="Share proforma invoice" style={customerModuleStyles.headerIconBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              </button>
+            </div>
+
+            {/* DOCUMENT PREVIEW */}
+            <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <DocumentStatusBadge status={currentProformaInvoice.status} />
+              <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
+                <div style={docStyles.page}>
+                  <GeneratedDocumentPreview model={buildProformaInvoiceDocModel(currentProformaInvoice)} />
+                </div>
+              </div>
+            </div>
+
+            {/* BOTTOM ACTION BAR (Duplicate, Edit, Status, Delete) */}
+            <div style={docActionBarStyles.bar}>
+              <button onClick={() => handleDuplicateProformaInvoice(currentProformaInvoice)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📄</span></span>
+                <span style={docActionBarStyles.label}>Duplicate</span>
+              </button>
+              <button onClick={() => openEditProformaInvoice(currentProformaInvoice)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
+                <span style={docActionBarStyles.label}>Edit</span>
+              </button>
+              <button onClick={() => setShowProformaInvoiceStatusSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
+                <span style={docActionBarStyles.label}>Status</span>
+              </button>
+              <button
+                onClick={() => {
+                  showConfirm('Delete this proforma invoice?', () => {
+                    persistProformaInvoices(proformaInvoices.filter(q => q.id !== selectedProformaInvoiceId));
+                    setQuotationSubView('proformaInvoiceList');
+                  });
+                }}
+                style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
+              >
+                <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
+                <span style={docActionBarStyles.label}>Delete</span>
+              </button>
+            </div>
+
+            <DocumentStatusSheet
+              open={showProformaInvoiceStatusSheet}
+              title="Proforma Invoice Status"
+              onSelect={handleSetProformaInvoiceStatus}
+              onClose={() => setShowProformaInvoiceStatusSheet(false)}
+            />
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Customer sub-screen (used from Make Delivery Note) -----
+      if (quotationSubView === 'selectCustomerForDeliveryNote') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeDeliveryNote')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Customer</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search by Name OR Company Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {customers.length === 0 ? 'No customers added yet. Tap "Add Customer" to create one.' : 'No customers match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredCustomers, (c) => c.name).map((customer) => (
+                  <div key={customer.id} style={customerModuleStyles.customerCard}>
+                    <button type="button" onClick={() => handleSelectCustomerForDeliveryNote(customer)} style={customerModuleStyles.selectRowBtn}>
+                      <span style={customerModuleStyles.customerName}>{customer.name}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForDeliveryNote')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddCustomer('selectCustomerForDeliveryNote')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />CUSTOMER</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Add Delivery Note Product sub-screen (Product / Quantity / Price / Description) -----
+      if (quotationSubView === 'addDeliveryNoteProductLine') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeDeliveryNote')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingDeliveryNoteProductLineId ? 'Edit Delivery Note Product' : 'Add Delivery Note Product'}</h1>
+              <button type="button" onClick={openPickProductForDeliveryNoteLine} aria-label="Search product" style={customerModuleStyles.headerIconBtn}>
+                <FiSearch size={19} color="#ffffff" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <LabeledField
+                label="Product"
+                as="button"
+                onClick={openPickProductForDeliveryNoteLine}
+                rightElement={<FiChevronRight size={18} color="#94A3B8" />}
+              >
+                {deliveryNoteProductLineForm.name || 'Select Product'}
+              </LabeledField>
+
+              <LabeledField
+                label="Quantity"
+                type="number"
+                inputMode="decimal"
+                min="1"
+                value={deliveryNoteProductLineForm.qty}
+                onChange={(e) => setDeliveryNoteProductLineForm((prev) => ({ ...prev, qty: e.target.value }))}
+              />
+
+              <LabeledField
+                label="Price"
+                type="number"
+                inputMode="decimal"
+                value={deliveryNoteProductLineForm.price}
+                onChange={(e) => setDeliveryNoteProductLineForm((prev) => ({ ...prev, price: e.target.value }))}
+              />
+
+              <div>
+                <LabeledField
+                  label="Description"
+                  as="textarea"
+                  value={deliveryNoteProductLineForm.description}
+                  onChange={(e) => setDeliveryNoteProductLineForm((prev) => ({ ...prev, description: e.target.value.slice(0, 2000) }))}
+                  maxLength={2000}
+                />
+                <div style={customerModuleStyles.charCount}>{deliveryNoteProductLineForm.description.length}/2000</div>
+              </div>
+
+              <button type="button" onClick={handleAddDeliveryNoteProductLine} style={{ ...customerModuleStyles.addBtn, marginTop: '6px' }}>
+                Add To Delivery Note
+              </button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Pick Product sub-screen (choosing which product to add to a Delivery Note line) -----
+      if (quotationSubView === 'pickProductForDeliveryNoteLine') {
+        return (
+          <div style={{ ...customerModuleStyles.screen}}>
+            <div style={{ ...customerModuleStyles.header, flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView(productPickerReturnView || 'makeDeliveryNote')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Product</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, maxWidth: 'none', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '110px' }}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={productSearchQuery}
+                  onChange={(e) => setProductSearchQuery(e.target.value)}
+                  placeholder="Search by Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {products.length === 0 ? 'No products added yet. Tap "Add Product" to create one.' : 'No products match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredProducts, (p) => p.name).map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handlePickProductForDeliveryNoteLine(product)}
+                    style={customerModuleStyles.productCard}
+                  >
+                    <div style={customerModuleStyles.productCardTopRow}>
+                      <span style={customerModuleStyles.customerName}>{product.name}</span>
+                      <FiChevronRight size={18} color="#94A3B8" />
+                    </div>
+                    {product.price !== undefined && product.price !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
+                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                      </div>
+                    )}
+                    {product.gst !== undefined && product.gst !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
+                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddProduct('pickProductForDeliveryNoteLine')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />PRODUCT</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Terms and Conditions sub-screen (used from Make Delivery Note) -----
+      if (quotationSubView === 'selectTermsForDeliveryNote') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeDeliveryNote')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
+              <span style={customerModuleStyles.headerIconBtn}>
+                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <button type="button" onClick={() => openAddTermsModal('deliveryNote')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+                <FiPlus size={18} color="#0F766E" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.termsTabRow}>
+              <span style={customerModuleStyles.termsTabActive}>Delivery Note</span>
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {deliveryNoteTerms.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '80px' }}>You don't have any terms and conditions</p>
+              ) : (
+                deliveryNoteTerms.map((term) => {
+                  const selected = deliveryNoteTermsDraftSelectedIds.includes(term.id);
+                  return (
+                    <div
+                      key={term.id}
+                      style={{ ...customerModuleStyles.termCard, ...(selected ? customerModuleStyles.termCardSelected : {}), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleDeliveryNoteTermsDraftSelection(term.id)}
+                        style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '14.5px', fontWeight: '500', color: '#0F172A', lineHeight: '1.5' }}
+                      >
+                        {term.text}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTerm(term, 'deliveryNote')}
+                        aria-label="Delete term"
+                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                      >
+                        <FiTrash2 size={13} color="#ffffff" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={customerModuleStyles.doneBtnWrap}>
+              <button type="button" onClick={handleDoneSelectDeliveryNoteTerms} style={customerModuleStyles.doneBtn}>DONE</button>
+            </div>
+
+            {isAddTermsModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
+                  <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Delivery Note</div>
+                  <textarea
+                    value={newTermText}
+                    onChange={(e) => setNewTermText(e.target.value)}
+                    placeholder="Terms and condition"
+                    style={customerModuleStyles.descriptionTextarea}
+                  />
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Make Delivery Note sub-screen -----
+      if (quotationSubView === 'makeDeliveryNote') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingDeliveryNoteId) { setEditingDeliveryNoteId(null); setQuotationSubView('deliveryNoteDetail'); }
+                  else { setQuotationSubView(null); }
+                }}
+                aria-label="Back"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingDeliveryNoteId ? 'Update Delivery Note' : 'Make Delivery Note'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
+              <div style={makeQuotationStyles.infoPanel}>
+                <div style={makeQuotationStyles.infoRow}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Delivery Note Date</span>
+                    <div style={makeQuotationStyles.infoValue}>{deliveryNoteForm.date}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>Delivery Note No</span>
+                    <div style={makeQuotationStyles.infoValue}>{deliveryNoteForm.deliveryNoteNo || '-'}</div>
+                  </div>
+                </div>
+                <div style={{ ...makeQuotationStyles.infoRow, marginBottom: '14px' }}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Ref No</span>
+                    <input
+                      type="text"
+                      value={deliveryNoteForm.refNo}
+                      onChange={(e) => setDeliveryNoteForm((prev) => ({ ...prev, refNo: e.target.value }))}
+                      placeholder="-"
+                      style={{ ...makeQuotationStyles.otherInfoInput, display: 'block', fontSize: '17px', fontWeight: '700', color: '#0F172A', marginTop: '4px', borderBottom: 'none', padding: 0, width: '140px' }}
+                    />
+                  </div>
+                </div>
+                <div style={makeQuotationStyles.otherInfoRow}>
+                  <span style={makeQuotationStyles.infoLabel}>Other Info:</span>
+                  <input
+                    type="text"
+                    value={deliveryNoteForm.otherInfo}
+                    onChange={(e) => setDeliveryNoteForm((prev) => ({ ...prev, otherInfo: e.target.value }))}
+                    style={makeQuotationStyles.otherInfoInput}
+                  />
+                </div>
+              </div>
+
+              <button type="button" onClick={openSelectCustomerForDeliveryNote} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TO (CUSTOMER)</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedDeliveryNoteCustomer && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    <p style={makeQuotationStyles.sectionCardLine}>{selectedDeliveryNoteCustomer.name}</p>
+                    {selectedDeliveryNoteCustomer.companyName && <p style={makeQuotationStyles.sectionCardSubLine}>{selectedDeliveryNoteCustomer.companyName}</p>}
+                  </div>
+                )}
+              </button>
+
+              <div style={makeQuotationStyles.sectionCard}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={openPickProductForDeliveryNoteLine}
+                  style={{ ...makeQuotationStyles.sectionCardTopRow, cursor: 'pointer' }}
+                >
+                  <span style={makeQuotationStyles.sectionCardLabel}>PRODUCTS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {deliveryNoteForm.products.length > 0 && (
+                  <div style={{ ...makeQuotationStyles.sectionCardBody, gap: '8px' }}>
+                    {deliveryNoteForm.products.map((p) => (
+                      <div
+                        key={p.productId}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openEditDeliveryNoteProductLine(p)}
+                        style={{ background: '#ffffff', borderRadius: '14px', padding: '12px 14px', cursor: 'pointer', border: '1px solid #E9ECF2', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                      >
+                        <span style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>{p.name} x{p.qty}{p.unit ? ` ${p.unit}` : ''}</span>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removeDeliveryNoteProductLine(p.productId); }}
+                          style={makeQuotationStyles.removeIconBtn}
+                          aria-label={`Remove ${p.name}`}
+                        >
+                          <FiTrash2 size={16} color="#DC2626" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button type="button" onClick={openSelectTermsForDeliveryNote} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TERMS & CONDITIONS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedDeliveryNoteTerms.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {selectedDeliveryNoteTerms.map((term) => (
+                      <div key={term.id} style={makeQuotationStyles.lineRow}>
+                        <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removeDeliveryNoteSelectedTerm(term.id); }}
+                          style={makeQuotationStyles.removeIconBtn}
+                          aria-label="Remove term"
+                        >
+                          <FiTrash2 size={16} color="#DC2626" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+            </div>
+
+            <div style={{ ...makeQuotationStyles.bottomBar, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={handleGenerateDeliveryNote} style={makeQuotationStyles.generateBtn}>{editingDeliveryNoteId ? 'Update' : 'Generate'}</button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Delivery Note List sub-screen -----
+      if (quotationSubView === 'deliveryNoteList') {
+        const searchDeliveryNote = (q) => {
+          const qs = deliveryNoteSearchQuery.trim().toLowerCase();
+          if (!qs) return true;
+          return q.customerName.toLowerCase().includes(qs) || 
+                 (q.deliveryNoteNo || '').toLowerCase().includes(qs);
+        };
+
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Delivery Note</h1>
+              {renderSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {/* Search Bar */}
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={deliveryNoteSearchQuery}
+                  onChange={(e) => setDeliveryNoteSearchQuery(e.target.value)}
+                  placeholder="Search by Name, Company OR Delivery Note#"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {/* List */}
+              {deliveryNotes.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>No delivery notes generated yet.</p>
+              ) : (
+                sortDocumentsByCreated(deliveryNotes.filter(searchDeliveryNote)).map((q) => (
+                  <DocumentListCard
+                    key={q.id}
+                    onClick={() => { setSelectedDeliveryNoteId(q.id); setQuotationSubView('deliveryNoteDetail'); }}
+                    name={q.customerName}
+                    docNumber={q.deliveryNoteNo || 'DN-' + q.id.slice(0, 4)}
+                    date={q.date}
+                    amountText={`${q.products.length} item${q.products.length === 1 ? '' : 's'}`}
+                    status={q.status}
+                  />
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={openMakeDeliveryNote} style={customerModuleStyles.fabCompact}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>New<br />Delivery<br />Note</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Delivery Note Detail sub-screen -----
+      if (quotationSubView === 'deliveryNoteDetail') {
+        const currentDeliveryNote = deliveryNotes.find(q => q.id === selectedDeliveryNoteId);
+        if (!currentDeliveryNote) {
+          setQuotationSubView('deliveryNoteList');
+          return null;
+        }
+
+        return (
+          <div style={{ width: '100%', height: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView('deliveryNoteList')} style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={24} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, margin: 0 }}>Delivery Note Detail</h1>
+              <button type="button" onClick={() => handleShareDeliveryNote(currentDeliveryNote)} aria-label="Share delivery note" style={customerModuleStyles.headerIconBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              </button>
+            </div>
+
+            {/* DOCUMENT PREVIEW */}
+            <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <DocumentStatusBadge status={currentDeliveryNote.status} />
+              <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
+                <div style={docStyles.page}>
+                  <GeneratedDocumentPreview model={buildDeliveryNoteDocModel(currentDeliveryNote)} />
+                </div>
+              </div>
+            </div>
+
+            {/* BOTTOM ACTION BAR (Duplicate, Edit, Status, Delete) */}
+            <div style={docActionBarStyles.bar}>
+              <button onClick={() => handleDuplicateDeliveryNote(currentDeliveryNote)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📄</span></span>
+                <span style={docActionBarStyles.label}>Duplicate</span>
+              </button>
+              <button onClick={() => openEditDeliveryNote(currentDeliveryNote)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
+                <span style={docActionBarStyles.label}>Edit</span>
+              </button>
+              <button onClick={() => setShowDeliveryNoteStatusSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
+                <span style={docActionBarStyles.label}>Status</span>
+              </button>
+              <button
+                onClick={() => {
+                  showConfirm('Delete this delivery note?', () => {
+                    persistDeliveryNotes(deliveryNotes.filter(q => q.id !== selectedDeliveryNoteId));
+                    setQuotationSubView('deliveryNoteList');
+                  });
+                }}
+                style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
+              >
+                <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
+                <span style={docActionBarStyles.label}>Delete</span>
+              </button>
+            </div>
+
+            <DocumentStatusSheet
+              open={showDeliveryNoteStatusSheet}
+              title="Delivery Note Status"
+              onSelect={handleSetDeliveryNoteStatus}
+              onClose={() => setShowDeliveryNoteStatusSheet(false)}
+            />
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Customer sub-screen (used from Make Invoice) -----
+      if (quotationSubView === 'selectCustomerForInvoice') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Customer</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search by Name OR Company Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {customers.length === 0 ? 'No customers added yet. Tap "Add Customer" to create one.' : 'No customers match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredCustomers, (c) => c.name).map((customer) => (
+                  <div key={customer.id} style={customerModuleStyles.customerCard}>
+                    <button type="button" onClick={() => handleSelectCustomerForInvoice(customer)} style={customerModuleStyles.selectRowBtn}>
+                      <span style={customerModuleStyles.customerName}>{customer.name}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForInvoice')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddCustomer('selectCustomerForInvoice')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />CUSTOMER</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Add Invoice Product sub-screen (Product / Quantity / Price / Description) -----
+      if (quotationSubView === 'addInvoiceProductLine') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingInvoiceProductLineId ? 'Edit Invoice Product' : 'Add Invoice Product'}</h1>
+              <button type="button" onClick={openPickProductForInvoiceLine} aria-label="Search product" style={customerModuleStyles.headerIconBtn}>
+                <FiSearch size={19} color="#ffffff" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <LabeledField
+                label="Product"
+                as="button"
+                onClick={openPickProductForInvoiceLine}
+                rightElement={<FiChevronRight size={18} color="#94A3B8" />}
+              >
+                {invoiceProductLineForm.name || 'Select Product'}
+              </LabeledField>
+
+              <LabeledField
+                label="Quantity"
+                type="number"
+                inputMode="decimal"
+                min="1"
+                value={invoiceProductLineForm.qty}
+                onChange={(e) => setInvoiceProductLineForm((prev) => ({ ...prev, qty: e.target.value }))}
+              />
+
+              <LabeledField
+                label="Price"
+                type="number"
+                inputMode="decimal"
+                value={invoiceProductLineForm.price}
+                onChange={(e) => setInvoiceProductLineForm((prev) => ({ ...prev, price: e.target.value }))}
+              />
+
+              <div>
+                <LabeledField
+                  label="Description"
+                  as="textarea"
+                  value={invoiceProductLineForm.description}
+                  onChange={(e) => setInvoiceProductLineForm((prev) => ({ ...prev, description: e.target.value.slice(0, 2000) }))}
+                  maxLength={2000}
+                />
+                <div style={customerModuleStyles.charCount}>{invoiceProductLineForm.description.length}/2000</div>
+              </div>
+
+              <button type="button" onClick={handleAddInvoiceProductLine} style={{ ...customerModuleStyles.addBtn, marginTop: '6px' }}>
+                Add To Invoice
+              </button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Pick Product sub-screen (choosing which product to add to a Invoice line) -----
+      if (quotationSubView === 'pickProductForInvoiceLine') {
+        return (
+          <div style={{ ...customerModuleStyles.screen}}>
+            <div style={{ ...customerModuleStyles.header, flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView(productPickerReturnView || 'makeInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Product</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, maxWidth: 'none', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '110px' }}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={productSearchQuery}
+                  onChange={(e) => setProductSearchQuery(e.target.value)}
+                  placeholder="Search by Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredProducts.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {products.length === 0 ? 'No products added yet. Tap "Add Product" to create one.' : 'No products match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredProducts, (p) => p.name).map((product) => (
+                  <button
+                    key={product.id}
+                    type="button"
+                    onClick={() => handlePickProductForInvoiceLine(product)}
+                    style={customerModuleStyles.productCard}
+                  >
+                    <div style={customerModuleStyles.productCardTopRow}>
+                      <span style={customerModuleStyles.customerName}>{product.name}</span>
+                      <FiChevronRight size={18} color="#94A3B8" />
+                    </div>
+                    {product.price !== undefined && product.price !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
+                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                      </div>
+                    )}
+                    {product.gst !== undefined && product.gst !== '' && (
+                      <div style={customerModuleStyles.productDetailRow}>
+                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
+                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddProduct('pickProductForInvoiceLine')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />PRODUCT</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Terms and Conditions sub-screen (used from Make Invoice) -----
+      if (quotationSubView === 'selectTermsForInvoice') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
+              <span style={customerModuleStyles.headerIconBtn}>
+                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <button type="button" onClick={() => openAddTermsModal('invoice')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+                <FiPlus size={18} color="#0F766E" />
+              </button>
+            </div>
+
+            <div style={customerModuleStyles.termsTabRow}>
+              <span style={customerModuleStyles.termsTabActive}>Invoice</span>
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {invoiceTerms.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '80px' }}>You don't have any terms and conditions</p>
+              ) : (
+                invoiceTerms.map((term) => {
+                  const selected = invoiceTermsDraftSelectedIds.includes(term.id);
+                  return (
+                    <div
+                      key={term.id}
+                      style={{ ...customerModuleStyles.termCard, ...(selected ? customerModuleStyles.termCardSelected : {}), display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleInvoiceTermsDraftSelection(term.id)}
+                        style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: '14.5px', fontWeight: '500', color: '#0F172A', lineHeight: '1.5' }}
+                      >
+                        {term.text}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTerm(term, 'invoice')}
+                        aria-label="Delete term"
+                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                      >
+                        <FiTrash2 size={13} color="#ffffff" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={customerModuleStyles.doneBtnWrap}>
+              <button type="button" onClick={handleDoneSelectTermsInvoice} style={customerModuleStyles.doneBtn}>DONE</button>
+            </div>
+
+            {isAddTermsModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
+                  <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Invoice</div>
+                  <textarea
+                    value={newTermText}
+                    onChange={(e) => setNewTermText(e.target.value)}
+                    placeholder="Terms and condition"
+                    style={customerModuleStyles.descriptionTextarea}
+                  />
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Paid Info List sub-screen (Matches Screenshots 2 & 3) -----
+      if (quotationSubView === 'paidInfoList') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeInvoice')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Paid Info List</h1>
+              <button type="button" onClick={openAddPaidInfoModal} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+                <FiPlus size={18} color="#0F766E" />
+              </button>
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '90px' }}>
+              {invoiceForm.paidInfo.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '160px' }}>You don't have any paid info</p>
+              ) : (
+                invoiceForm.paidInfo.map((p) => {
+                  const isSelected = selectedPaidInfoIds.includes(p.id);
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => togglePaidInfoSelection(p.id)}
+                      style={{ ...customerModuleStyles.customerCard, ...(isSelected ? customerModuleStyles.termCardSelected : {}) }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={customerModuleStyles.customerName}>{'\u20B9'}{p.amount}</span>
+                          <span style={{ fontSize: '13px', color: '#64748B', fontWeight: '600' }}>{p.date}</span>
+                        </div>
+                        {p.note && <p style={{ fontSize: '13px', color: '#64748B', margin: '4px 0 0' }}>{p.note}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); removePaidInfoLine(p.id); }}
+                        style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626', marginLeft: '10px' }}
+                        aria-label="Delete paid info"
+                      >
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={customerModuleStyles.doneBtnWrap}>
+              <button type="button" onClick={handleDonePaidInfoList} style={customerModuleStyles.doneBtn}>DONE</button>
+            </div>
+
+            {isPaidInfoModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsPaidInfoModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Paid Info</h3>
+                  <button
+                    type="button"
+                    onClick={() => { setPaidInfoCalendarMonth(parseQuotationDate(paidInfoForm.date) || new Date()); setIsPaidInfoDatePickerOpen(true); }}
+                    style={{ ...customerModuleStyles.fieldInput, textAlign: 'left', cursor: 'pointer', color: paidInfoForm.date ? '#0F172A' : '#94A3B8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <span>{paidInfoForm.date || t('selectDatePlaceholder')}</span>
+                    <span style={{ fontSize: '15px' }}>&#128197;</span>
+                  </button>
+                  <input
+                    type="number"
+                    value={paidInfoForm.amount}
+                    onChange={(e) => setPaidInfoForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Amount"
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <textarea
+                    value={paidInfoForm.note}
+                    onChange={(e) => setPaidInfoForm((prev) => ({ ...prev, note: e.target.value }))}
+                    placeholder="Note"
+                    style={customerModuleStyles.descriptionTextarea}
+                  />
+                  <button type="button" onClick={handleSavePaidInfo} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                </div>
+              </div>
+            )}
+
+            {/* ============ PAID INFO DATE CALENDAR POPUP ============ */}
+            {isPaidInfoDatePickerOpen && (() => {
+              const maxDateStr = toLocalISODate(new Date());
+              const year = paidInfoCalendarMonth.getFullYear();
+              const month = paidInfoCalendarMonth.getMonth();
+              const firstWeekday = new Date(year, month, 1).getDay();
+              const daysInMonth = new Date(year, month + 1, 0).getDate();
+              const cells = [];
+              for (let i = 0; i < firstWeekday; i++) cells.push(null);
+              for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+              const rows = [];
+              for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+
+              return (
+                <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
+                  <div style={{ backgroundColor: '#ffffff', borderRadius: '20px', width: '92%', maxWidth: '340px', overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+                    <div style={{ backgroundColor: '#0B3C9B', padding: '20px 20px 16px 20px', color: '#ffffff' }}>
+                      <div style={{ fontSize: '13px', opacity: 0.85, marginBottom: '4px' }}>{year}</div>
+                      <div style={{ fontSize: '21px', fontWeight: '700' }}>{paidInfoForm.date ? paidInfoForm.date : t('selectDatePlaceholder')}</div>
+                    </div>
+                    <div style={{ padding: '16px 18px 4px 18px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <button onClick={() => setPaidInfoCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#334155', padding: '4px 10px' }}>&lsaquo;</button>
+                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#1E293B' }}>{paidInfoCalendarMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                        <button onClick={() => setPaidInfoCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#334155', padding: '4px 10px' }}>&rsaquo;</button>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '2px' }}>
+                        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                          <div key={i} style={{ textAlign: 'center', fontSize: '11px', color: '#94A3B8', fontWeight: '600', padding: '4px 0' }}>{d}</div>
+                        ))}
+                      </div>
+                      {rows.map((row, ri) => (
+                        <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                          {row.map((dayNum, ci) => {
+                            if (!dayNum) return <div key={ci} />;
+                            const isoStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                            const displayStr = `${String(dayNum).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`;
+                            const isDisabled = isoStr > maxDateStr;
+                            const isSelected = paidInfoForm.date === displayStr;
+                            return (
+                              <div
+                                key={ci}
+                                onClick={() => { if (isDisabled) return; setPaidInfoForm((prev) => ({ ...prev, date: displayStr })); setIsPaidInfoDatePickerOpen(false); }}
+                                style={{
+                                  textAlign: 'center', padding: '9px 0', margin: '2px 0', borderRadius: '50%',
+                                  fontSize: '13px', fontWeight: isSelected ? '700' : '500',
+                                  cursor: isDisabled ? 'default' : 'pointer',
+                                  color: isDisabled ? '#CBD5E1' : (isSelected ? '#ffffff' : '#1E293B'),
+                                  backgroundColor: isSelected ? '#0B3C9B' : 'transparent'
+                                }}
+                              >
+                                {dayNum}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '22px', padding: '12px 20px 18px 20px' }}>
+                      <button onClick={() => setIsPaidInfoDatePickerOpen(false)} style={{ background: 'none', border: 'none', color: '#0B3C9B', fontWeight: '700', fontSize: '13px', cursor: 'pointer' }}>{t('cancel')}</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Make Invoice sub-screen (Matches Screenshot 1) -----
+      if (quotationSubView === 'makeInvoice') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingInvoiceId) { setEditingInvoiceId(null); setQuotationSubView('invoiceDetail'); }
+                  else { setQuotationSubView(null); }
+                }}
+                aria-label="Back"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingInvoiceId ? 'Update Invoice' : 'Make Invoice'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
+              <div style={makeQuotationStyles.infoPanel}>
+                <div style={makeQuotationStyles.infoRow}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Invoice Date</span>
+                    <div style={makeQuotationStyles.infoValue}>{invoiceForm.date}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>Invoice No</span>
+                    <div style={makeQuotationStyles.infoValue}>{invoiceForm.invoiceNo || '-'}</div>
+                  </div>
+                </div>
+                <div style={{ ...makeQuotationStyles.infoRow, marginBottom: '14px' }}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Due Date</span>
+                    <input
+                      type="text"
+                      value={invoiceForm.dueDate}
+                      onChange={(e) => setInvoiceForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+                      placeholder="-"
+                      style={{ ...makeQuotationStyles.otherInfoInput, display: 'block', fontSize: '17px', fontWeight: '700', color: '#0F172A', marginTop: '4px', borderBottom: 'none', padding: 0, width: '140px' }}
+                    />
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>PO No</span>
+                    <input
+                      type="text"
+                      value={invoiceForm.poNo}
+                      onChange={(e) => setInvoiceForm((prev) => ({ ...prev, poNo: e.target.value }))}
+                      placeholder="-"
+                      style={{ ...makeQuotationStyles.otherInfoInput, display: 'block', fontSize: '17px', fontWeight: '700', color: '#0F172A', marginTop: '4px', borderBottom: 'none', padding: 0, textAlign: 'right', width: '140px', marginLeft: 'auto' }}
+                    />
+                  </div>
+                </div>
+                <div style={makeQuotationStyles.otherInfoRow}>
+                  <span style={makeQuotationStyles.infoLabel}>Other Info:</span>
+                  <input
+                    type="text"
+                    value={invoiceForm.otherInfo}
+                    onChange={(e) => setInvoiceForm((prev) => ({ ...prev, otherInfo: e.target.value }))}
+                    style={makeQuotationStyles.otherInfoInput}
+                  />
+                </div>
+              </div>
+
+              <button type="button" onClick={openSelectCustomerForInvoice} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>BILL TO (CUSTOMER)</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedInvoiceCustomer && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    <p style={makeQuotationStyles.sectionCardLine}>{selectedInvoiceCustomer.name}</p>
+                    {selectedInvoiceCustomer.companyName && <p style={makeQuotationStyles.sectionCardSubLine}>{selectedInvoiceCustomer.companyName}</p>}
+                  </div>
+                )}
+              </button>
+
+              <div style={makeQuotationStyles.sectionCard}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={openPickProductForInvoiceLine}
+                  style={{ ...makeQuotationStyles.sectionCardTopRow, cursor: 'pointer' }}
+                >
+                  <span style={makeQuotationStyles.sectionCardLabel}>PRODUCTS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {invoiceForm.products.length > 0 && (
+                  <div style={{ ...makeQuotationStyles.sectionCardBody, gap: '10px' }}>
+                    {invoiceForm.products.map((p) => {
+                      const amount = (Number(p.price) || 0) * (Number(p.qty) || 0);
+                      const totalAmount = amount * (1 + (Number(p.gst) || 0) / 100);
+                      const fmt = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                      return (
+                        <div
+                          key={p.productId}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openEditInvoiceProductLine(p)}
+                          style={{ background: '#ffffff', borderRadius: '14px', padding: '12px 14px', cursor: 'pointer', border: '1px solid #E9ECF2' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); removeInvoiceProductLine(p.productId); }}
+                              style={makeQuotationStyles.removeIconBtn}
+                              aria-label={`Remove ${p.name}`}
+                            >
+                              <FiTrash2 size={16} color="#DC2626" />
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                            <span style={{ fontSize: '12.5px', color: '#64748B', fontWeight: '500' }}>Amount</span>
+                            <span style={{ fontSize: '13px', color: '#334155', fontWeight: '600' }}>{p.qty} * {'\u20B9'}{fmt(Number(p.price) || 0)} = {'\u20B9'}{fmt(amount)}</span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <span style={{ fontSize: '13px', color: '#0F172A', fontWeight: '700' }}>Total amount</span>
+                            <span style={{ fontSize: '14px', color: '#0F172A', fontWeight: '800' }}>{'\u20B9'}{fmt(totalAmount)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button type="button" onClick={openInvoiceOtherChargeModal} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>OTHER CHARGE</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {invoiceForm.otherCharges.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {invoiceForm.otherCharges.map((c) => (
+                      <div key={c.id} style={makeQuotationStyles.lineRow}>
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeInvoiceOtherCharge(c.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label={`Remove ${c.label}`}
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+
+              <button type="button" onClick={openSelectTermsForInvoice} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>TERMS & CONDITIONS</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedInvoiceTerms.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {selectedInvoiceTerms.map((term) => (
+                      <div key={term.id} style={makeQuotationStyles.lineRow}>
+                        <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); removeInvoiceSelectedTerm(term.id); }}
+                          style={makeQuotationStyles.removeIconBtn}
+                          aria-label="Remove term"
+                        >
+                          <FiTrash2 size={16} color="#DC2626" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+
+              <button type="button" onClick={openPaidInfoList} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>PAID INFO</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {invoiceForm.paidInfo.length > 0 && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    {invoiceForm.paidInfo.map((p) => (
+                      <div key={p.id} style={makeQuotationStyles.lineRow}>
+                        <span style={makeQuotationStyles.sectionCardLine}>{p.date}{p.note ? ` — ${p.note}` : ''}</span>
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{p.amount}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removePaidInfoLine(p.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label="Remove paid info"
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+            </div>
+
+            <div style={makeQuotationStyles.bottomBar}>
+              <div>
+                <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
+                <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{invoiceAmountDue}</div>
+              </div>
+              <button type="button" onClick={handleGenerateInvoice} style={makeQuotationStyles.generateBtn}>{editingInvoiceId ? 'Update' : 'Generate'}</button>
+            </div>
+
+            {isInvoiceOtherChargeModalOpen && (
+              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsInvoiceOtherChargeModalOpen(false)}>
+                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+                  <div style={customerModuleStyles.sheetHandle} />
+                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
+                  <input
+                    type="text"
+                    value={invoiceOtherChargeForm.label}
+                    onChange={(e) => setInvoiceOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <input
+                    type="number"
+                    value={invoiceOtherChargeForm.amount}
+                    onChange={(e) => setInvoiceOtherChargeForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    placeholder="Other Charge Amount"
+                    style={customerModuleStyles.fieldInput}
+                  />
+                  <div style={customerModuleStyles.taxableRow}>
+                    <span style={customerModuleStyles.sheetSmallLabelInline}>Is Taxable?</span>
+                    <input
+                      type="checkbox"
+                      checked={invoiceOtherChargeForm.taxable}
+                      onChange={(e) => setInvoiceOtherChargeForm((prev) => ({ ...prev, taxable: e.target.checked }))}
+                      style={customerModuleStyles.checkbox}
+                    />
+                  </div>
+                  <button type="button" onClick={handleSaveInvoiceOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                </div>
+              </div>
+            )}
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Invoice List sub-screen (Matches Screenshot 4) -----
+      if (quotationSubView === 'invoiceList') {
+        const searchInvoice = (inv) => {
+          const qs = invoiceSearchQuery.trim().toLowerCase();
+          if (!qs) return true;
+          return inv.customerName.toLowerCase().includes(qs) ||
+                 (inv.customerCompany || '').toLowerCase().includes(qs) ||
+                 (inv.invoiceNo || '').toLowerCase().includes(qs);
+        };
+
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Invoice</h1>
+              {renderSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {/* Search Bar */}
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={invoiceSearchQuery}
+                  onChange={(e) => setInvoiceSearchQuery(e.target.value)}
+                  placeholder="Search by Name, Company OR Invoice#"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {/* List */}
+              {invoices.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>No invoices generated yet.</p>
+              ) : (
+                sortDocumentsByCreated(invoices.filter(searchInvoice)).map((inv) => (
+                  <DocumentListCard
+                    key={inv.id}
+                    onClick={() => { setSelectedInvoiceId(inv.id); setQuotationSubView('invoiceDetail'); }}
+                    name={inv.customerName}
+                    docNumber={inv.invoiceNo || 'INV-' + inv.id.slice(0, 4)}
+                    date={inv.date}
+                    amount={inv.grandTotal}
+                    status={inv.status}
+                  />
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={openMakeInvoice} style={customerModuleStyles.fabCompact}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>New<br />Invoice</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Invoice Detail sub-screen -----
+      if (quotationSubView === 'invoiceDetail') {
+        const currentInvoice = invoices.find(inv => inv.id === selectedInvoiceId);
+        if (!currentInvoice) {
+          setQuotationSubView('invoiceList');
+          return null;
+        }
+
+        return (
+          <div style={{ width: '100%', height: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView('invoiceList')} style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={24} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, margin: 0 }}>Invoice Detail</h1>
+              <button type="button" onClick={() => handleShareInvoice(currentInvoice)} aria-label="Share invoice" style={customerModuleStyles.headerIconBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              </button>
+            </div>
+
+            {/* DOCUMENT PREVIEW */}
+            <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <DocumentStatusBadge status={currentInvoice.status} />
+              <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
+                <div style={docStyles.page}>
+                  <GeneratedDocumentPreview model={buildInvoiceDocModel(currentInvoice)} />
+                </div>
+              </div>
+            </div>
+
+            {/* BOTTOM ACTION BAR (Duplicate, Edit, Status, Delete) */}
+            <div style={docActionBarStyles.bar}>
+              <button onClick={() => handleDuplicateInvoice(currentInvoice)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📄</span></span>
+                <span style={docActionBarStyles.label}>Duplicate</span>
+              </button>
+              <button onClick={() => openEditInvoice(currentInvoice)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
+                <span style={docActionBarStyles.label}>Edit</span>
+              </button>
+              <button onClick={() => setShowInvoiceStatusSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
+                <span style={docActionBarStyles.label}>Status</span>
+              </button>
+              <button
+                onClick={() => {
+                  showConfirm('Delete this invoice?', () => {
+                    persistInvoices(invoices.filter(inv => inv.id !== selectedInvoiceId));
+                    setQuotationSubView('invoiceList');
+                  });
+                }}
+                style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
+              >
+                <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
+                <span style={docActionBarStyles.label}>Delete</span>
+              </button>
+            </div>
+
+            <DocumentStatusSheet
+              open={showInvoiceStatusSheet}
+              title="Invoice Status"
+              onSelect={handleSetInvoiceStatus}
+              onClose={() => setShowInvoiceStatusSheet(false)}
+            />
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Select Customer sub-screen (used from Make Receipt) -----
+      if (quotationSubView === 'selectCustomerForReceipt') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeReceipt')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Select Customer</h1>
+              {renderNameSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  placeholder="Search by Name OR Company Name"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {filteredCustomers.length === 0 ? (
+                <p style={customerModuleStyles.emptyText}>
+                  {customers.length === 0 ? 'No customers added yet. Tap "Add Customer" to create one.' : 'No customers match your search.'}
+                </p>
+              ) : (
+                sortByName(filteredCustomers, (c) => c.name).map((customer) => (
+                  <div key={customer.id} style={customerModuleStyles.customerCard}>
+                    <button type="button" onClick={() => handleSelectCustomerForReceipt(customer)} style={customerModuleStyles.selectRowBtn}>
+                      <span style={customerModuleStyles.customerName}>{customer.name}</span>
+                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForReceipt')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
+                        <HiOutlinePencil size={14} color="#ffffff" />
+                      </button>
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
+                        <FiTrash2 size={14} color="#ffffff" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={() => openAddCustomer('selectCustomerForReceipt')} style={customerModuleStyles.fab}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>ADD<br />CUSTOMER</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Receipt Payment Info sub-screen (Matches Screenshot 3) -----
+      if (quotationSubView === 'receiptPaymentInfo') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView('makeReceipt')} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Receipt Payment Info</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={customerModuleStyles.formBody}>
+              <p style={customerModuleStyles.sheetSmallLabel}>PAYMENT MODE</p>
+              <div style={{ position: 'relative' }}>
+                <select
+                  value={receiptPaymentDraft.paymentMode}
+                  onChange={(e) => setReceiptPaymentDraft((prev) => ({ ...prev, paymentMode: e.target.value }))}
+                  style={{ ...customerModuleStyles.fieldInput, appearance: 'none', WebkitAppearance: 'none', color: receiptPaymentDraft.paymentMode ? '#0F172A' : '#64748B', paddingRight: '40px' }}
+                >
+                  <option value="">Select Payment Mode</option>
+                  {RECEIPT_PAYMENT_MODES.map((mode) => (
+                    <option key={mode} value={mode}>{mode}</option>
+                  ))}
+                </select>
+                <FiChevronDown size={18} color="#64748B" style={{ position: 'absolute', right: '16px', top: '18px', pointerEvents: 'none' }} />
+              </div>
+
+              <input
+                type="text"
+                value={receiptPaymentDraft.referenceNo}
+                onChange={(e) => setReceiptPaymentDraft((prev) => ({ ...prev, referenceNo: e.target.value }))}
+                placeholder="Payment Reference Number"
+                style={customerModuleStyles.fieldInput}
+              />
+
+              <input
+                type="number"
+                value={receiptPaymentDraft.paidAmount}
+                onChange={(e) => setReceiptPaymentDraft((prev) => ({ ...prev, paidAmount: e.target.value }))}
+                placeholder="Total Amount Paid"
+                style={customerModuleStyles.fieldInput}
+              />
+
+              <textarea
+                value={receiptPaymentDraft.paymentFor}
+                onChange={(e) => setReceiptPaymentDraft((prev) => ({ ...prev, paymentFor: e.target.value }))}
+                placeholder="Payment For"
+                style={{ ...customerModuleStyles.descriptionTextarea, marginBottom: '20px' }}
+              />
+
+              <button type="button" onClick={handleSaveReceiptPaymentInfo} style={customerModuleStyles.addBtn}>Save</button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Make Receipt sub-screen (Matches Screenshot 2) -----
+      if (quotationSubView === 'makeReceipt') {
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (editingReceiptId) { setEditingReceiptId(null); setQuotationSubView('receiptDetail'); }
+                  else { setQuotationSubView('receiptList'); }
+                }}
+                aria-label="Back"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>{editingReceiptId ? 'Update Receipt' : 'Make Receipt'}</h1>
+              <span style={customerModuleStyles.headerIconBtn} />
+            </div>
+
+            <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
+              <div style={makeQuotationStyles.infoPanel}>
+                <div style={{ ...makeQuotationStyles.infoRow, marginBottom: 0 }}>
+                  <div>
+                    <span style={makeQuotationStyles.infoLabel}>Receipt Date</span>
+                    <div style={makeQuotationStyles.infoValue}>{receiptForm.date}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={makeQuotationStyles.infoLabel}>Receipt No</span>
+                    <div style={makeQuotationStyles.infoValue}>{receiptForm.receiptNo || '-'}</div>
+                  </div>
+                </div>
+              </div>
+
+              <button type="button" onClick={openSelectCustomerForReceipt} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>RECEIVED FROM (CUSTOMER)</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {selectedReceiptCustomer && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    <p style={makeQuotationStyles.sectionCardLine}>{selectedReceiptCustomer.name}</p>
+                    {selectedReceiptCustomer.companyName && <p style={makeQuotationStyles.sectionCardSubLine}>{selectedReceiptCustomer.companyName}</p>}
+                  </div>
+                )}
+              </button>
+
+              <button type="button" onClick={openReceiptPaymentInfo} style={makeQuotationStyles.sectionCard}>
+                <div style={makeQuotationStyles.sectionCardTopRow}>
+                  <span style={makeQuotationStyles.sectionCardLabel}>PAYMENT INFO</span>
+                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                </div>
+                {receiptForm.paidAmount && (
+                  <div style={makeQuotationStyles.sectionCardBody}>
+                    <p style={makeQuotationStyles.sectionCardLine}>{receiptForm.paymentMode || 'Payment'}{receiptForm.referenceNo ? ` \u2014 ${receiptForm.referenceNo}` : ''}</p>
+                    <p style={makeQuotationStyles.sectionCardSubLine}>{'\u20B9'}{receiptForm.paidAmount}</p>
+                  </div>
+                )}
+              </button>
+
+              <div style={{ background: '#ffffff', borderRadius: '18px', padding: '20px 18px', boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)' }}>
+                <div style={{ marginBottom: '18px' }}>
+                  <p style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 8px' }}>Payment Mode</p>
+                  <p style={{ fontSize: '13.5px', color: '#64748B', margin: 0, borderBottom: '1px solid #E2E8F0', paddingBottom: '10px' }}>{receiptForm.paymentMode || '\u2014'}</p>
+                </div>
+                <div style={{ marginBottom: '18px' }}>
+                  <p style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 8px' }}>Reference No</p>
+                  <p style={{ fontSize: '13.5px', color: '#64748B', margin: 0, borderBottom: '1px solid #E2E8F0', paddingBottom: '10px' }}>{receiptForm.referenceNo || '\u2014'}</p>
+                </div>
+                <div style={{ marginBottom: '18px' }}>
+                  <p style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 8px' }}>Total Paid</p>
+                  <p style={{ fontSize: '13.5px', color: '#64748B', margin: 0, borderBottom: '1px solid #E2E8F0', paddingBottom: '10px' }}>{receiptForm.paidAmount ? `\u20B9${receiptForm.paidAmount}` : '\u2014'}</p>
+                </div>
+                <div>
+                  <p style={{ fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 8px' }}>Payment For</p>
+                  <p style={{ fontSize: '13.5px', color: '#64748B', margin: 0 }}>{receiptForm.paymentFor || '\u2014'}</p>
+                </div>
+              </div>
+            </div>
+
+            <div style={makeQuotationStyles.bottomBar}>
+              <div>
+                <span style={makeQuotationStyles.bottomBarLabel}>Paid Amount</span>
+                <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{receiptPaidAmount}</div>
+              </div>
+              <button type="button" onClick={handleGenerateReceipt} style={makeQuotationStyles.generateBtn}>{editingReceiptId ? 'Update' : 'Generate'}</button>
+            </div>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Receipt List sub-screen (Matches Screenshot 1) -----
+      if (quotationSubView === 'receiptList') {
+        const searchReceipt = (r) => {
+          const qs = receiptSearchQuery.trim().toLowerCase();
+          if (!qs) return true;
+          return (r.customerName || '').toLowerCase().includes(qs) ||
+                 (r.customerCompany || '').toLowerCase().includes(qs) ||
+                 (r.receiptNo || '').toLowerCase().includes(qs);
+        };
+
+        return (
+          <div style={customerModuleStyles.screen}>
+            <div style={customerModuleStyles.header}>
+              <button type="button" onClick={() => setQuotationSubView(null)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={19} color="#ffffff" />
+              </button>
+              <h1 style={customerModuleStyles.headerTitle}>Receipt</h1>
+              {renderSortMenu()}
+            </div>
+
+            <div style={customerModuleStyles.body}>
+              {/* Search Bar */}
+              <div style={customerModuleStyles.searchBox}>
+                <FiSearch size={17} color="#94A3B8" />
+                <input
+                  type="text"
+                  value={receiptSearchQuery}
+                  onChange={(e) => setReceiptSearchQuery(e.target.value)}
+                  placeholder="Search by Name, Company OR Receipt#"
+                  style={customerModuleStyles.searchInput}
+                />
+              </div>
+
+              {/* List */}
+              {receipts.length === 0 ? (
+                <p style={{ ...customerModuleStyles.emptyText, marginTop: '160px' }}>You don't have any receipt</p>
+              ) : (
+                sortDocumentsByCreated(receipts.filter(searchReceipt)).map((r) => (
+                  <DocumentListCard
+                    key={r.id}
+                    onClick={() => { setSelectedReceiptId(r.id); setQuotationSubView('receiptDetail'); }}
+                    name={r.customerName}
+                    docNumber={r.receiptNo || 'RECEIPT-' + r.id.slice(0, 4)}
+                    date={r.date}
+                    amount={r.paidAmount}
+                    status={r.status}
+                  />
+                ))
+              )}
+            </div>
+
+            <button type="button" onClick={openMakeReceipt} style={customerModuleStyles.fabCompact}>
+              <FiPlus size={14} color="#ffffff" />
+              <span>New<br />Receipt</span>
+            </button>
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      // ----- Receipt Detail sub-screen -----
+      if (quotationSubView === 'receiptDetail') {
+        const currentReceipt = receipts.find(r => r.id === selectedReceiptId);
+        if (!currentReceipt) {
+          setQuotationSubView('receiptList');
+          return null;
+        }
+
+        return (
+          <div style={{ width: '100%', height: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <button type="button" onClick={() => setQuotationSubView('receiptList')} style={customerModuleStyles.headerIconBtn}>
+                <FiArrowLeft size={24} color="#ffffff" />
+              </button>
+              <h1 style={{ ...customerModuleStyles.headerTitle, margin: 0 }}>Receipt Detail</h1>
+              <button type="button" onClick={() => handleShareReceipt(currentReceipt)} aria-label="Share receipt" style={customerModuleStyles.headerIconBtn}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+              </button>
+            </div>
+
+            {/* DOCUMENT PREVIEW */}
+            <div style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <DocumentStatusBadge status={currentReceipt.status} />
+              <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', margin: '0 auto', boxSizing: 'border-box', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ ...docStyles.page, flex: 1, display: 'flex', flexDirection: 'column' }}>
+                {/* Header: Receipt # (top, centered), then Business info + logo below - matches Quotation Detail */}
+                <div style={{ marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0' }}>
+                  <p style={{ ...docStyles.docTypeLabel, textTransform: 'none', textAlign: 'center', margin: '0 0 12px' }}>
+                    Receipt
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <h2 style={docStyles.businessName}>{businessInfo?.businessName || 'Manufacturer'}</h2>
+                      {businessInfo?.phone && <p style={docStyles.contactLine}>{businessInfo.phone}</p>}
+                      {businessInfo?.email && <p style={docStyles.contactLine}>{businessInfo.email}</p>}
+                    </div>
+                    {businessInfo?.logoImg && (
+                      <img src={businessInfo.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
+                    )}
+                  </div>
+                </div>
+
+                {/* To, (left) | Date (right) */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '16px' }}>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>To,</p>
+                    <p style={docStyles.toName}>
+                      {(currentReceipt.customerCompany && currentReceipt.customerName)
+                        ? `${currentReceipt.customerCompany} - ${currentReceipt.customerName}`
+                        : (currentReceipt.customerCompany || currentReceipt.customerName)}
+                    </p>
+                    {[currentReceipt.customerAddressLine1, currentReceipt.customerAddressLine2, currentReceipt.customerAddressLine3].filter(Boolean).length > 0 && (
+                      <p style={docStyles.contactLine}>
+                        {[currentReceipt.customerAddressLine1, currentReceipt.customerAddressLine2, currentReceipt.customerAddressLine3].filter(Boolean).join(', ')}
+                      </p>
+                    )}
+                    {currentReceipt.customerMobile && (
+                      <p style={docStyles.contactLine}>Mobile: {currentReceipt.customerMobile}</p>
+                    )}
+                    {currentReceipt.customerEmail && (
+                      <p style={docStyles.contactLine}>Email: {currentReceipt.customerEmail}</p>
+                    )}
+                  </div>
+                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
+                    <p style={docStyles.docMetaLine}>Date: {currentReceipt.date}</p>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '10px' }}>
+                  <p style={docStyles.sectionLabel}>Payment Details</p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#64748B', padding: '7px 0', borderBottom: '1px solid #EEF1F5' }}>
+                    <span>Payment Mode</span><span style={{ fontWeight: '600', color: '#0F172A' }}>{currentReceipt.paymentMode || '-'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#64748B', padding: '7px 0', borderBottom: '1px solid #EEF1F5' }}>
+                    <span>Reference No</span><span style={{ fontWeight: '600', color: '#0F172A' }}>{currentReceipt.referenceNo || '-'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#64748B', padding: '7px 0', borderBottom: '1px solid #EEF1F5' }}>
+                    <span>Payment For</span><span style={{ fontWeight: '600', color: '#0F172A' }}>{currentReceipt.paymentFor || '-'}</span>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'right', marginTop: '14px', borderTop: '1.5px solid #0F172A', paddingTop: '10px' }}>
+                  <span style={docStyles.grandTotalLabel}>Total Paid </span>
+                  <span style={docStyles.grandTotalValue}>₹{Number(currentReceipt.paidAmount || 0).toLocaleString('en-IN')}</span>
+                </div>
+
+                <div style={{ textAlign: 'right', marginTop: '30px' }}>
+                  <p style={docStyles.signatureLabel}>For, {businessInfo?.businessName || 'Manufacturer'}</p>
+                  {businessInfo?.signatureImg ? (
+                    <img src={businessInfo.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
+                  ) : (
+                    <div style={{ height: '34px' }}></div>
+                  )}
+                  <p style={docStyles.signatureCaption}>Authorized Signature</p>
+                </div>
+
+                {/* Generated with SmartManage - brand footer */}
+                <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <img src={smartpayLogo} alt="SmartManage" style={{ width: '20px', height: '20px', borderRadius: '5px', objectFit: 'cover', display: 'block' }} />
+                  <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', letterSpacing: '0.2px' }}>Generated with SmartManage</span>
+                </div>
+                </div>
+              </div>
+            </div>
+
+            {/* BOTTOM ACTION BAR (Duplicate, Edit, Status, Delete) */}
+            <div style={docActionBarStyles.bar}>
+              <button onClick={() => handleDuplicateReceipt(currentReceipt)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📄</span></span>
+                <span style={docActionBarStyles.label}>Duplicate</span>
+              </button>
+              <button onClick={() => openEditReceipt(currentReceipt)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
+                <span style={docActionBarStyles.label}>Edit</span>
+              </button>
+              <button onClick={() => setShowReceiptStatusSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
+                <span style={docActionBarStyles.label}>Status</span>
+              </button>
+              <button
+                onClick={() => {
+                  showConfirm('Delete this receipt?', () => {
+                    persistReceipts(receipts.filter(r => r.id !== selectedReceiptId));
+                    setQuotationSubView('receiptList');
+                  });
+                }}
+                style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
+              >
+                <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
+                <span style={docActionBarStyles.label}>Delete</span>
+              </button>
+            </div>
+
+            <DocumentStatusSheet
+              open={showReceiptStatusSheet}
+              title="Receipt Status"
+              onSelect={handleSetReceiptStatus}
+              onClose={() => setShowReceiptStatusSheet(false)}
+            />
+
+            <AppPopup
+              open={!!appPopup?.open}
+              tone={appPopup?.tone}
+              title={appPopup?.title}
+              message={appPopup?.message}
+              confirmLabel={appPopup?.confirmLabel}
+              cancelLabel={appPopup?.cancelLabel}
+              onConfirm={appPopup?.onConfirm || closeAppPopup}
+              onCancel={closeAppPopup}
+              onClose={closeAppPopup}
+            />
+          </div>
+        );
+      }
+
+      const manageItems = [
+        { key: 'business', label: 'BUSINESS', icon: HiOutlineBuildingOffice2 },
+        { key: 'customer', label: 'CUSTOMER', icon: FiUser },
+        { key: 'product', label: 'PRODUCT', icon: FiBox },
+        { key: 'settings', label: 'SETTINGS', icon: HiOutlineCog6Tooth },
+      ];
+      const discoverTiles = [
+        { key: 'quotationList', title: 'Make Quotation' },
+        { key: 'invoiceList', title: 'Make Invoice' },
+        { key: 'purchaseOrder', title: 'Make Purchase Order' },
+        { key: 'proformaInvoice', title: 'Make Proforma Invoice' },
+        { key: 'deliveryNote', title: 'Make Delivery Note' },
+        { key: 'receipt', title: 'Make Receipt' },
+      ];
+      // TODO: remaining tiles (terms as a Discover tile, quotationList, and the other 6 Discover tiles) still no-op —
+      // wire these up once the destination screens are defined.
+      const handleManageTap = (key) => {
+        if (key === 'business') { setQuotationSubView('business'); return; }
+        if (key === 'customer') { setCustomerSearchQuery(''); setQuotationSubView('customerList'); return; }
+        if (key === 'product') { setProductSearchQuery(''); setQuotationSubView('productList'); return; }
+        if (key === 'settings') { setQuotationSubView('settingsMenu'); return; }
+      };
+      const handleDiscoverTap = (key) => {
+        if (key === 'makeQuotation') { openMakeQuotation(); return; }
+        if (key === 'quotationList') { setQuotationSearchQuery(''); setQuotationSubView('quotationList'); return; }
+        if (key === 'makeInvoice') { openMakeInvoice(); return; }
+        if (key === 'invoiceList') { setInvoiceSearchQuery(''); setQuotationSubView('invoiceList'); return; }
+        if (key === 'purchaseOrder') { setPurchaseOrderSearchQuery(''); setQuotationSubView('purchaseOrderList'); return; }
+        if (key === 'proformaInvoice') { setProformaInvoiceSearchQuery(''); setQuotationSubView('proformaInvoiceList'); return; }
+        if (key === 'deliveryNote') { setDeliveryNoteSearchQuery(''); setQuotationSubView('deliveryNoteList'); return; }
+        if (key === 'receipt') { setReceiptSearchQuery(''); setQuotationSubView('receiptList'); return; }
+      };
+
+      return (
+        <div style={quotationModuleStyles.screen}>
+          <div style={{ ...themeStyles.authHeader, backgroundColor: '#0F766E' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setActiveModule(null)}
+                aria-label="Back to main page"
+                style={{ background: 'rgba(255,255,255,0.16)', border: 'none', borderRadius: '10px', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0 }}
+              >
+                <FiArrowLeft size={16} color="#ffffff" />
+              </button>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '12px', overflow: 'hidden', flexShrink: 0 }}>
+                {profileImg ? (
+                  <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  getInitials(loggedInUser?.fullName) || 'GS'
+                )}
+              </div>
+              <span style={{ color: '#ffffff', fontWeight: '600', fontSize: '15px' }}>
+                {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'}
+              </span>
+            </div>
+          </div>
+
+          <div style={quotationModuleStyles.bodyRow}>
+            <div style={quotationModuleStyles.bodyInner}>
+              <div style={quotationModuleStyles.manageColumn}>
+                <h2 style={quotationModuleStyles.sectionLabel}>Manage</h2>
+                <div style={quotationModuleStyles.manageScrollArea}>
+                  <div style={quotationModuleStyles.managePanel}>
+                    <div style={quotationModuleStyles.manageListVertical}>
+                      {manageItems.map((item) => (
+                        <button type="button" key={item.key} onClick={() => handleManageTap(item.key)} style={quotationModuleStyles.manageItemVertical}>
+                          <span style={quotationModuleStyles.manageIconCircleSmall}>
+                            <item.icon size={17} color="#1E293B" />
+                          </span>
+                          <span style={quotationModuleStyles.manageLabelVertical}>{item.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={quotationModuleStyles.discoverColumn}>
+                <h2 style={quotationModuleStyles.sectionLabel}>Discover</h2>
+                <div style={quotationModuleStyles.discoverScrollArea}>
+                  <div style={quotationModuleStyles.discoverPanel}>
+                    <div style={quotationModuleStyles.discoverGrid}>
+                      {discoverTiles.map((tile) => (
+                        <button type="button" key={tile.key} onClick={() => handleDiscoverTap(tile.key)} style={quotationModuleStyles.discoverTile}>
+                          <span style={quotationModuleStyles.discoverBadge}>
+                            <FiFileText size={17} color="#ffffff" />
+                          </span>
+                          <span style={quotationModuleStyles.discoverTitle}>{tile.title.replace(' ', '\n')}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <AppPopup
+            open={!!appPopup?.open}
+            tone={appPopup?.tone}
+            title={appPopup?.title}
+            message={appPopup?.message}
+            confirmLabel={appPopup?.confirmLabel}
+            cancelLabel={appPopup?.cancelLabel}
+            onConfirm={appPopup?.onConfirm || closeAppPopup}
+            onCancel={closeAppPopup}
+            onClose={closeAppPopup}
+          />
+          {renderProfileModal()}
+          {renderImageCropperModal()}
+        </div>
+      );
+    }
 
     return (
       <div style={themeStyles.authDashboardContainer}>
@@ -3011,7 +13829,7 @@ useEffect(() => {
           });
 
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1650, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1650, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden' }}>
               <div style={{ backgroundColor: '#ffffff', padding: '20px 16px', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -3026,7 +13844,7 @@ useEffect(() => {
                   </div>
                 </div>
                 {isEditProjectModalOpen && (
-                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1800, padding: '16px', boxSizing: 'border-box' }}>
+                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1800, padding: '16px', boxSizing: 'border-box' }}>
                     <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '20px', boxSizing: 'border-box', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                         <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{t('editProject')}</h3>
@@ -3506,7 +14324,7 @@ useEffect(() => {
                             : `${tempCalendarDates.length} ${t('datesSelected')}`;
 
                         return (
-                          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}>
+                          <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}>
                             <div style={{ backgroundColor: '#ffffff', borderRadius: '20px', width: '92%', maxWidth: '340px', overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
                               <div style={{ backgroundColor: '#0F766E', padding: '20px 20px 16px 20px', color: '#ffffff' }}>
                                 <div style={{ fontSize: '13px', opacity: 0.85, marginBottom: '4px' }}>{year}</div>
@@ -3618,7 +14436,7 @@ useEffect(() => {
                             : isWageRangeAlreadyAtAmount(targetWorker, editWageEffectiveRangeForCheck, parseFloat(editWageNewAmount)));
                         const isEditWageSaveEnabled = isEditWageAmountValid && isEditWageDateValid && !isEditWageSameAsCurrent;
                         return (
-                          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1900, padding: '16px', boxSizing: 'border-box' }}>
+                          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1900, padding: '16px', boxSizing: 'border-box' }}>
                             <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '20px', boxSizing: 'border-box', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '20px 20px 0 20px', flexShrink: 0 }}>
                                 <div>
@@ -3905,7 +14723,7 @@ useEffect(() => {
               {isWorkerSubFormOpen && (
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: '#ffffff', zIndex: 999, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ padding: '24px 20px', display: 'flex', alignItems: 'center', gap: '16px', borderBottom: '1px solid #F1F5F9' }}>
-                    <button onClick={() => setIsWorkerSubFormOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
+                    <button onClick={handleCloseWorkerFormSheet} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
                     <div>
                       <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{editingWorkerId ? t('editEmployee') : t('addNewEmployee')}</h2>
                       <p style={{ fontSize: '12px', color: '#64748B', margin: '2px 0 0 0' }}>{t('registerEmployeeTo')} {currentProject.name}</p>
@@ -4021,7 +14839,7 @@ useEffect(() => {
 
           return (
             <div style={{
-              position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)',
+              position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)',
               backgroundColor: '#f4f6f9', zIndex: 1660, display: 'flex', flexDirection: 'column',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', overflow: 'hidden'
             }}>
@@ -4344,7 +15162,7 @@ useEffect(() => {
                         for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
 
                         return (
-                          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
+                          <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }}>
                             <div style={{ backgroundColor: '#ffffff', borderRadius: '20px', width: '92%', maxWidth: '340px', overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
                               <div style={{ backgroundColor: '#0B3C9B', padding: '20px 20px 16px 20px', color: '#ffffff' }}>
                                 <div style={{ fontSize: '13px', opacity: 0.85, marginBottom: '4px' }}>{year}</div>
@@ -4466,7 +15284,7 @@ useEffect(() => {
           );
         })()}
         {isAddProjectOpen && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
             <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', borderBottom: '1px solid #F1F5F9' }}>
               <button onClick={() => { setIsAddProjectOpen(false); setNewSiteName(''); setTempWorkersList([]); setIsNewProjectNameDuplicate(false); }} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
             </div>
@@ -4593,7 +15411,15 @@ useEffect(() => {
         )}
 
         <div style={themeStyles.authHeader}>
-          <div onClick={() => setIsProfileModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              type="button"
+              onClick={() => setActiveModule(null)}
+              aria-label="Back to main page"
+              style={{ background: 'rgba(255,255,255,0.16)', border: 'none', borderRadius: '10px', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0 }}
+            >
+              <FiArrowLeft size={16} color="#ffffff" />
+            </button>
             <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 'bold', fontSize: '12px', overflow: 'hidden', flexShrink: 0 }}>
               {profileImg ? (
                 <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -4608,9 +15434,6 @@ useEffect(() => {
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-            <button type="button" onClick={handleWatchTutorialVideo} style={{ ...themeStyles.logoutIconBtn, fontSize: '11px', padding: '6px 10px', whiteSpace: 'nowrap' }}>
-              <span style={{ marginRight: '4px' }}>&#9654;&#65039;</span>{t('watchVideo')}
-            </button>
             <select
               value={language}
               onChange={(e) => handleLanguageChange(e.target.value)}
@@ -4723,11 +15546,10 @@ useEffect(() => {
         {(() => {
           const isAttendanceTabActive = isAttendanceModalOpen || (isProjectPickerOpen && projectPickerPurpose === 'attendance');
           const isPaymentsTabActive = isPaymentsPageOpen || (isProjectPickerOpen && projectPickerPurpose === 'payments');
-          const isSubscribeTabActive = isSubscribePageOpen;
           // Home stays highlighted for anything that belongs to the Home section
           // (including viewing an individual project via "My Projects"), and only
           // yields to another tab when that tab is genuinely active.
-          const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive && !isSubscribeTabActive;
+          const isHomeTabActive = !isAttendanceTabActive && !isPaymentsTabActive;
 
           const goHome = () => {
             setActiveSiteViewId(null);
@@ -4738,14 +15560,12 @@ useEffect(() => {
             setIsWorkerSubFormOpen(false);
             setIsEditWageModalOpen(false);
             setIsProjectPickerOpen(false);
-            setIsSubscribePageOpen(false);
           };
           const openPicker = (purpose) => {
             setActiveSiteViewId(null);
             setIsPaymentsPageOpen(false);
             setIsAttendanceModalOpen(false);
             setIsAddProjectOpen(false);
-            setIsSubscribePageOpen(false);
             setProjectPickerPurpose(purpose);
             setProjectPickerSearch('');
             setProjectPickerDropdown('');
@@ -4757,8 +15577,8 @@ useEffect(() => {
           return (
             <div style={themeStyles.bottomDockNavBar}>
               <button style={isHomeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={goHome}>
-                <span style={themeStyles.navTabIcon}>&#127968;</span>
-                <span style={themeStyles.navTabLabel}>{t('navHome')}</span>
+                <span style={themeStyles.navTabIcon}>&#128193;</span>
+                <span style={themeStyles.navTabLabel}>{t('navProjectsTab')}</span>
               </button>
               <button style={isAttendanceTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => openPicker('attendance')}>
                 <span style={themeStyles.navTabIcon}>&#128197;</span>
@@ -4767,10 +15587,6 @@ useEffect(() => {
               <button style={isPaymentsTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => openPicker('payments')}>
                 <span style={themeStyles.navTabIcon}>&#128176;</span>
                 <span style={themeStyles.navTabLabel}>{t('navPayments')}</span>
-              </button>
-              <button style={isSubscribeTabActive ? themeStyles.navItemTabActive : themeStyles.navItemTab} onClick={() => { setActiveSiteViewId(null); setIsPaymentsPageOpen(false); setIsAttendanceModalOpen(false); setIsAddProjectOpen(false); setIsProjectPickerOpen(false); setIsSubscribePageOpen(true); }}>
-                <span style={themeStyles.navTabIcon}>&#11088;</span>
-                <span style={themeStyles.navTabLabel}>{t('navSubscribe')}</span>
               </button>
             </div>
           );
@@ -4792,7 +15608,7 @@ useEffect(() => {
             }
           };
           return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
               <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{ ...themeStyles.searchBarContainer, flex: 1 }}>
                   <span style={themeStyles.searchIconMarker}>&#128269;</span>
@@ -4838,203 +15654,11 @@ useEffect(() => {
           );
         })()}
 
-         {isSubscribePageOpen && (() => {
-          const plans = [
-            {
-              key: 'free', name: 'Free', price: 0, tagline: 'Try it out',
-              features: ['1 active project', 'Up to 5 workers', 'Manual attendance marking', 'Basic payment tracking']
-            },
-            {
-              key: 'pro', name: 'Pro', price: 299, tagline: 'For growing supervisors', popular: true,
-              features: ['Unlimited projects', 'Unlimited workers', 'Wage history & wage edits', 'Payment tracking + PDF statements', 'Priority email support']
-            },
-            {
-              key: 'business', name: 'Business', price: 799, tagline: 'For multi-site teams',
-              features: ['Everything in Pro', 'Multiple supervisor logins', 'Data export (CSV/Excel)', 'Dedicated priority support', 'Early access to new features']
-            }
-          ];
-          return (
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100vw', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-              <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
-                <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscribe now</h2>
-                <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>Pick a plan that fits how many projects and employees you manage</p>
-              </div>
-
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  {plans.map(plan => {
-                    const isSelected = selectedSubscriptionPlan === plan.key;
-                    return (
-                      <div key={plan.key} style={{
-                        backgroundColor: '#ffffff', borderRadius: '16px', padding: '18px',
-                        border: isSelected ? '2px solid #0B3C9B' : '1px solid #F1F5F9',
-                        boxShadow: plan.popular ? '0 4px 16px rgba(11,60,155,0.12)' : '0 2px 4px rgba(0,0,0,0.02)',
-                        position: 'relative'
-                      }}>
-                        {plan.popular && (
-                          <span style={{ position: 'absolute', top: '-10px', right: '18px', backgroundColor: '#0B3C9B', color: '#ffffff', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '20px' }}>MOST POPULAR</span>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div>
-                            <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{plan.name}</h3>
-                            <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>{plan.tagline}</p>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0B3C9B' }}>{plan.price === 0 ? 'Free' : `\u20B9${plan.price}`}</p>
-                            {plan.price > 0 && <span style={{ fontSize: '11px', color: '#94A3B8' }}>per month</span>}
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '14px 0' }}>
-                          {plan.features.map((feature, idx) => (
-                            <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                              <span style={{ color: '#10B981', fontSize: '13px', marginTop: '1px' }}>&#10003;</span>
-                              <span style={{ fontSize: '13px', color: '#475569' }}>{feature}</span>
-                            </div>
-                          ))}
-                        </div>
-
-                        <button
-                          onClick={() => {
-                            setSelectedSubscriptionPlan(plan.key);
-                            showAlert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
-                          }}
-                          style={{
-                            width: '100%', padding: '13px', borderRadius: '12px', fontWeight: '600', fontSize: '14px', cursor: 'pointer',
-                            border: isSelected ? 'none' : '1px solid #0B3C9B',
-                            backgroundColor: isSelected ? '#0B3C9B' : '#ffffff',
-                            color: isSelected ? '#ffffff' : '#0B3C9B'
-                          }}
-                        >
-                          {isSelected ? 'Current plan' : plan.price === 0 ? 'Use Free plan' : `Choose ${plan.name}`}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'center', margin: '16px 0 4px 0' }}>Prices shown are illustrative. You can change or cancel your plan anytime.</p>
-              </div>
-            </div>
-          );
-        })()}
-
-       
-
-        {isProfileModalOpen && (
-          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px', boxSizing: 'border-box' }}>
-            <div style={{ backgroundColor: '#ffffff', padding: '28px 24px 24px 24px', borderRadius: '24px', width: '100%', maxWidth: '360px', boxSizing: 'border-box', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.3)' }}>
-              <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', marginBottom: '22px' }}>
-                <h3 style={{ margin: 0, fontSize: '21px', fontWeight: '800', color: '#0F172A', textAlign: 'center' }}>{t('updateProfile')}</h3>
-                <button onClick={() => setIsProfileModalOpen(false)} style={{ position: 'absolute', right: 0, top: 0, background: '#F1F5F9', border: 'none', width: '28px', height: '28px', borderRadius: '50%', fontSize: '16px', cursor: 'pointer', color: '#64748B', padding: 0, lineHeight: 1, flexShrink: 0 }}>&times;</button>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '22px' }}>
-                <label htmlFor="user-avatar-file-input" style={{ position: 'relative', cursor: 'pointer' }}>
-                  <div style={{ width: '96px', height: '96px', borderRadius: '50%', backgroundColor: '#F8FAFC', border: '3px solid #EFF4FF', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.12)' }}>
-                    {profileImg ? (<img src={profileImg} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : (
-                      loggedInUser?.fullName
-                        ? <span style={{ fontSize: '30px', fontWeight: '700', color: '#0B3C9B' }}>{loggedInUser.fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}</span>
-                        : <span style={{ fontSize: '30px' }}>&#128100;</span>
-                    )}
-                  </div>
-                  <div style={{ position: 'absolute', bottom: '2px', right: '2px', backgroundColor: '#0B3C9B', color: '#ffffff', borderRadius: '50%', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', border: '2.5px solid #ffffff', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}>&#128247;</div>
-                </label>
-                <input id="user-avatar-file-input" type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
-                  const file = e.target.files && e.target.files[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () => setProfileImg(reader.result); // base64 data URL - safe to persist
-                  reader.readAsDataURL(file);
-                }} />
-                <span style={{ fontSize: '12px', color: '#64748B', marginTop: '10px', fontWeight: '500' }}>{t('tapToChangePhoto')}</span>
-              </div>
-
-              <div style={{ marginBottom: '22px' }}>
-                <label style={{ display: 'block', fontSize: '10.5px', fontWeight: '700', color: '#64748B', marginBottom: '7px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('yourName')}</label>
-                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '0 14px', backgroundColor: '#F8FAFC' }}>
-                  <span style={{ fontSize: '15px', color: '#94A3B8', marginRight: '10px' }}>&#128100;</span>
-                  <input type="text" value={userName ?? loggedInUser?.fullName ?? ''} onChange={(e) => setUserName(e.target.value)} style={{ flex: 1, padding: '13px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '14.5px', color: '#1E293B' }} />
-                </div>
-              </div>
-
-              <button
-                disabled={isSavingProfile}
-                onClick={async () => {
-                  const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
-                  if (!trimmedName) { showAlert(t('yourName') + ' is required.'); return; }
-
-                  // No server-side user (e.g. dev/mock session) - fall back to local-only save.
-                  if (!loggedInUser?.userId) {
-                    setLoggedInUser(prev => {
-                      const updatedUser = { ...prev, fullName: trimmedName, profileImg };
-                      try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
-                      return updatedUser;
-                    });
-                    setIsProfileModalOpen(false);
-                    return;
-                  }
-
-                  setIsSavingProfile(true);
-                  try {
-                    const response = await fetch(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify({ fullName: trimmedName, profileImage: profileImg }),
-                    });
-                    const responseText = await response.text();
-                    let data = {};
-                    if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
-
-                    if (!response.ok) {
-                      showAlert(data.message || 'Failed to update profile. Please try again.');
-                      return;
-                    }
-
-                    const updatedUser = { ...loggedInUser, fullName: data.fullName, industry: data.industry, profileImg: data.profileImage };
-                    try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
-                    setLoggedInUser(updatedUser);
-                    setUserName(data.fullName);
-                    setProfileImg(data.profileImage || null);
-                    setIsProfileModalOpen(false);
-                  } catch (err) {
-                    showAlert('Could not reach the server. Please check your connection and try again.');
-                  } finally {
-                    setIsSavingProfile(false);
-                  }
-                }}
-                style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
-                <span>&#128190;</span>{isSavingProfile ? t('loading') || 'Saving...' : t('saveChanges')}
-              </button>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '18px 0' }}>
-                <div style={{ flex: 1, height: '1px', backgroundColor: '#E2E8F0' }} />
-                <span style={{ fontSize: '11px', color: '#94A3B8', fontWeight: '600' }}>OR</span>
-                <div style={{ flex: 1, height: '1px', backgroundColor: '#E2E8F0' }} />
-              </div>
-
-              <button onClick={() => { setIsProfileModalOpen(false); handleFullLogout(); }} style={{ width: '100%', padding: '14px', backgroundColor: '#ffffff', color: '#DC2626', border: '1.5px solid #FCA5A5', borderRadius: '12px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                <span>&#8618;</span>{t('signOut')}
-              </button>
-
-              <p style={{ margin: '16px 0 0 0', fontSize: '11px', color: '#94A3B8', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
-                <span>&#128737;&#65039;</span>{t('yourDataIsSecure')}
-              </p>
-            </div>
-          </div>
-        )}
+        {renderProfileModal()}
+          {renderImageCropperModal()}
 
         {/* ============ EXIT CONFIRMATION ============ */}
-        <AppPopup
-          open={isExitConfirmOpen}
-          tone="warning"
-          title={t('exitConfirm')}
-          confirmLabel={t('yes')}
-          cancelLabel={t('no')}
-          onConfirm={handleConfirmExitApp}
-          onCancel={() => setIsExitConfirmOpen(false)}
-          onClose={() => setIsExitConfirmOpen(false)}
-        />
+        {renderExitConfirmPopup()}
 
         {/* ============ COMMON POPUP (replaces every window.alert / window.confirm) ============ */}
         <AppPopup
@@ -5052,7 +15676,7 @@ useEffect(() => {
     );
   }
 
-  const otpButtonDisabled = sendingOtp || mobileNumber.length !== 10 || (!isLoginView && !isRegistrationFormValid());
+  const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!isLoginView && !isRegistrationFormValid());
   const canVerify = otpSent && otp.length === 6 && !loading;
 
   return (
@@ -5066,14 +15690,14 @@ useEffect(() => {
         <div style={authStyles.brandBlock}>
           <img src={smartpayLogo} alt="SmartManage" style={authStyles.logoImg} />
           <h1 style={authStyles.brandName}>SmartManage</h1>
-          <p style={authStyles.brandTagline}>Track Wages. Pay on Time.</p>
+          <p style={authStyles.brandTagline}>Quote.Track Wages. Pay on Time.</p>
         </div>
 
         {/* ---- Card ---- */}
         <div style={authStyles.card}>
           <div style={authStyles.welcomeBlock}>
             <h2 style={authStyles.welcomeTitle}>Welcome</h2>
-            <p style={authStyles.welcomeSubtitle}>Login or register to continue</p>
+            <p style={authStyles.welcomeSubtitle}>Login to continue</p>
           </div>
 
           <form onSubmit={handleSubmit} style={authStyles.form}>
@@ -5118,7 +15742,7 @@ useEffect(() => {
             {/* ---- OTP info card (always visible once the form is in play) ---- */}
             <div style={authStyles.otpInfoCard}>
               <span style={authStyles.otpInfoIcon}><HiOutlineShieldCheck size={22} color="#2563EB" /></span>
-              <p style={authStyles.otpInfoText}>We'll send you a One Time Password (OTP) to verify your mobile number</p>
+              <p style={authStyles.otpInfoText}>Enter the OTP sent to your mobile</p>
             </div>
 
             {/* ---- Slow-request notice: shown once a send-otp/verify call has been ---- */}
@@ -5216,8 +15840,9 @@ useEffect(() => {
             </button>
 
             <p style={authStyles.switchViewText}>
-              {isLoginView ? "Don't have an account yet?" : 'Already registered corporate manager?'}
-              <button type="button" onClick={toggleView} style={authStyles.toggleLink}>{isLoginView ? 'Register here' : 'Login here'}</button>
+              {isLoginView ? "Don't have an account yet?" : 'Already registered on SmartManage?'}
+              <style>{'@keyframes registerHereBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }'}</style>
+              <button type="button" onClick={toggleView} style={{ ...authStyles.toggleLink, color: isLoginView ? '#DC2626' : '#0B3C9B', textDecoration: 'underline', animation: isLoginView ? 'registerHereBlink 1.2s ease-in-out infinite' : 'none' }}>{isLoginView ? 'Register here' : 'Login here'}</button>
             </p>
           </form>
         </div>
@@ -5228,17 +15853,22 @@ useEffect(() => {
         <div style={authStyles.featureRow}>
           <div style={authStyles.featureItem}>
             <span style={authStyles.featureIconWrap}><HiOutlineUserGroup size={20} color="#2563EB" /></span>
-            <span style={authStyles.featureLabel}>Manage Employees</span>
+            <span style={authStyles.featureLabel}>Employees</span>
           </div>
           <span style={authStyles.featureDivider} />
           <div style={authStyles.featureItem}>
             <span style={authStyles.featureIconWrap}><HiOutlineCalendar size={20} color="#2563EB" /></span>
-            <span style={authStyles.featureLabel}>Track Attendance</span>
+            <span style={authStyles.featureLabel}>Attendance</span>
           </div>
           <span style={authStyles.featureDivider} />
           <div style={authStyles.featureItem}>
             <span style={authStyles.featureIconWrap}><HiOutlineWallet size={20} color="#2563EB" /></span>
-            <span style={authStyles.featureLabel}>Handle Payments</span>
+            <span style={authStyles.featureLabel}>Payments</span>
+          </div>
+          <span style={authStyles.featureDivider} />
+          <div style={authStyles.featureItem}>
+            <span style={authStyles.featureIconWrap}><FiFileText size={20} color="#2563EB" /></span>
+            <span style={authStyles.featureLabel}>Quotation</span>
           </div>
         </div>
         )}
@@ -5263,7 +15893,7 @@ useEffect(() => {
 const authStyles = {
   page: {
     position: 'relative',
-    width: '100vw', minHeight: '100vh', boxSizing: 'border-box',
+    width: '100%', minHeight: '100vh', boxSizing: 'border-box',
     backgroundColor: '#EDF1FC',
     display: 'flex', justifyContent: 'center',
     padding: '18px 18px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -5367,7 +15997,7 @@ const authStyles = {
 const themeStyles = {
   textInput: { width: '100%', padding: '12px 14px', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '14px', color: '#1E293B', outline: 'none', boxSizing: 'border-box', backgroundColor: '#F8FAFC' },
 
-  authDashboardContainer: { width: '100vw', height: '100vh', backgroundColor: '#f4f6f9', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', margin: 0, padding: 0, overflow: 'hidden' },
+  authDashboardContainer: { width: '100%', height: '100vh', backgroundColor: '#f4f6f9', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', margin: 0, padding: 0, overflow: 'hidden' },
   authHeader: { backgroundColor: '#0B3C9B', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', height: '52px', boxSizing: 'border-box', flexShrink: 0 },
   profileRow: { display: 'flex', alignItems: 'center', gap: '10px' },
   avatarBox: { width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'rgba(255, 255, 255, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff', fontWeight: 'bold', fontSize: '12px' },
@@ -5412,4 +16042,466 @@ const themeStyles = {
   navItemTabActive: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', background: '#DBEAFE', border: 'none', cursor: 'pointer', color: '#0B3C9B', padding: '6px 14px', borderRadius: '16px', transition: 'background-color 0.15s ease, color 0.15s ease' },
   navTabIcon: { fontSize: '18px' },
   navTabLabel: { fontSize: '10px', fontWeight: '600' }
+};
+
+const moduleHomeStyles = {
+  screen: {
+    width: '100%', minHeight: '100vh',
+    background: 'linear-gradient(180deg, #F6F9FF 0%, #F0F4FC 45%, #EAF0FB 100%)',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    display: 'flex', justifyContent: 'center', boxSizing: 'border-box',
+  },
+  scrollArea: { width: '100%', maxWidth: '460px', padding: '20px 18px 28px', boxSizing: 'border-box' },
+
+  headerRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '22px' },
+  brandRow: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
+  logoImg: { width: '30px', height: '30px', objectFit: 'contain', borderRadius: '8px' },
+  brandName: { fontSize: '11px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.01em' },
+  avatarButton: {
+    width: '36px', height: '36px', borderRadius: '50%', border: 'none',
+    background: 'linear-gradient(135deg, #0B3C9B, #2554EB)', color: '#ffffff',
+    fontWeight: '700', fontSize: '13px', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: 0,
+  },
+
+  greetBlock: { marginBottom: '10px' },
+  greetTitle: { fontSize: '22px', fontWeight: '800', color: '#0F172A', margin: '0 0 4px 0', letterSpacing: '-0.3px' },
+  greetSubtitle: { fontSize: '13.5px', color: '#64748B', margin: 0, fontWeight: '500' },
+
+  panel: { background: '#F3F5F9', borderRadius: '26px', padding: '18px 16px 20px', boxSizing: 'border-box' },
+  panelLabel: { fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 14px 4px' },
+
+  tileGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' },
+  tile: {
+    position: 'relative',
+    background: '#ffffff', border: '1px solid #F0F2F6', borderRadius: '20px',
+    padding: '18px 14px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column',
+    alignItems: 'flex-start', gap: '10px', cursor: 'pointer', textAlign: 'left',
+    fontFamily: 'inherit', minHeight: '128px', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)',
+  },
+  tileBadge: { width: '40px', height: '40px', borderRadius: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  tileTitle: { fontSize: '14.5px', fontWeight: '700', color: '#0F172A', lineHeight: '1.25' },
+  // Font auto-shrinks to fit the tile width as the label text grows (e.g. longer module names).
+  tileTitleAdjustable: {
+    fontSize: 'clamp(11px, 3.4vw, 14.5px)', fontWeight: '700', color: '#0F172A',
+    lineHeight: '1.25', overflowWrap: 'break-word', wordBreak: 'break-word', width: '100%',
+  },
+  tileSubtitle: { fontSize: '11.5px', fontWeight: '500', color: '#94A3B8', lineHeight: '1.35' },
+  tilePlayBadge: {
+    position: 'absolute', top: '10px', right: '10px', width: '26px', height: '26px', borderRadius: '50%',
+    background: 'rgba(15, 23, 42, 0.85)', border: 'none', cursor: 'pointer', color: '#ffffff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', padding: 0, zIndex: 2,
+  },
+
+  quickActionBtn: {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+    background: '#ffffff', border: '1px solid #F0F2F6', borderRadius: '16px',
+    padding: '13px 12px', boxSizing: 'border-box', cursor: 'pointer', fontFamily: 'inherit',
+    fontSize: '13.5px', fontWeight: '700', color: '#0F172A', boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)',
+  },
+  quickActionIcon: { fontSize: '15px' },
+
+  backRow: { display: 'flex', alignItems: 'center', gap: '6px', background: 'transparent', border: 'none', cursor: 'pointer', padding: '8px 0', marginBottom: '18px' },
+  backLabel: { fontSize: '13px', fontWeight: '600', color: '#475569' },
+
+  comingSoonCard: {
+    background: '#ffffff', border: '1px solid #F0F2F6', borderRadius: '24px',
+    padding: '32px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center',
+    textAlign: 'center', gap: '12px', marginTop: '40px',
+  },
+  comingSoonTitle: { fontSize: '18px', fontWeight: '700', color: '#0F172A', margin: 0 },
+  comingSoonText: { fontSize: '13px', color: '#64748B', margin: 0, lineHeight: '1.5', maxWidth: '280px' },
+};
+
+const quotationModuleStyles = {
+  screen: {
+    width: '100%', height: '100vh', background: 'linear-gradient(180deg, #F5FBFA 0%, #F0F8F6 45%, #EAF5F2 100%)',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    display: 'flex', flexDirection: 'column', boxSizing: 'border-box', overflow: 'hidden',
+  },
+
+  bodyRow: { flex: 1, minHeight: 0, width: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden' },
+  bodyInner: { width: '100%', maxWidth: '460px', height: '100%', display: 'flex', gap: '12px', padding: '16px 18px 0', boxSizing: 'border-box', overflow: 'hidden' },
+
+  sectionLabel: { fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 14px 2px', flexShrink: 0 },
+
+  manageColumn: { width: '76px', flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  manageScrollArea: { flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: '24px' },
+  managePanel: { background: '#EEF7F5', borderRadius: '20px', padding: '10px', boxSizing: 'border-box' },
+  manageListVertical: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  manageItemVertical: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '7px',
+    background: '#ffffff', border: '1px solid #DCEEEA', borderRadius: '16px', cursor: 'pointer',
+    padding: '10px 6px', width: '100%', boxSizing: 'border-box', boxShadow: '0 1px 2px rgba(15, 118, 110, 0.05)',
+  },
+  manageIconCircleSmall: {
+    width: '44px', height: '44px', borderRadius: '14px', background: '#ffffff',
+    border: '1px solid #D9EEEA', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    boxShadow: '0 6px 14px rgba(15, 118, 110, 0.10)', flexShrink: 0,
+  },
+  manageLabelVertical: { fontSize: '9px', fontWeight: '700', color: '#64748B', letterSpacing: '0.3px', textAlign: 'center' },
+
+  discoverColumn: { flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  discoverScrollArea: { flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: '24px' },
+  discoverPanel: { background: '#EEF7F5', borderRadius: '20px', padding: '14px', boxSizing: 'border-box' },
+  discoverGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
+  discoverTile: {
+    background: '#ffffff', border: '1px solid #DCEEEA', borderRadius: '16px',
+    padding: '12px 10px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column',
+    alignItems: 'flex-start', gap: '8px', cursor: 'pointer', textAlign: 'left',
+    fontFamily: 'inherit', minHeight: '74px', boxShadow: '0 1px 2px rgba(15, 118, 110, 0.05)',
+  },
+  discoverBadge: {
+    width: '30px', height: '30px', borderRadius: '10px', background: 'linear-gradient(145deg, #12786B, #0A3D38)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  discoverTitle: { fontSize: '12.5px', fontWeight: '700', color: '#0F172A', lineHeight: '1.25', whiteSpace: 'pre-line' },
+  discoverSubtitle: { fontSize: '10px', fontWeight: '500', color: '#94A3B8', lineHeight: '1.35' },
+};
+
+function FieldInput({ label, value, onChange, type = 'text', error }) {
+  return (
+    <div>
+      <div style={{ ...businessInfoStyles.fieldBox, ...(error ? { border: '1.5px solid #DC2626' } : null) }}>
+        <span style={businessInfoStyles.fieldLabel}>{label}</span>
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={businessInfoStyles.fieldInputEl}
+        />
+      </div>
+      {error && typeof error === 'string' && <p style={customerModuleStyles.fieldErrorText}>{error}</p>}
+    </div>
+  );
+}
+
+const quotationSettingsStyles = {
+  row: {
+    width: '100%', textAlign: 'left', background: '#F1F3F6', border: 'none', borderRadius: '18px',
+    padding: '15px 16px', marginBottom: '14px', display: 'flex', alignItems: 'flex-start', gap: '14px',
+    cursor: 'pointer', fontFamily: 'inherit', boxSizing: 'border-box',
+  },
+  rowIcon: { width: '22px', flexShrink: 0, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  rowBody: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' },
+  rowLabel: { fontSize: '13.5px', color: '#64748B', fontWeight: '500' },
+  rowValue: { fontSize: '17px', color: '#0F172A', fontWeight: '500', lineHeight: '1.3' },
+  inputEl: {
+    border: 'none', outline: 'none', background: 'transparent', fontSize: '17px', color: '#0F172A',
+    fontWeight: '500', padding: 0, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
+  },
+  textareaEl: {
+    border: 'none', outline: 'none', background: 'transparent', fontSize: '15px', color: '#0F172A',
+    fontWeight: '500', padding: 0, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
+    resize: 'vertical', lineHeight: '1.45',
+  },
+};
+
+const businessInfoStyles = {
+  screen: { width: '100%', minHeight: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
+  header: {
+    background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', gap: '10px',
+    position: 'sticky', top: 0, zIndex: 20,
+  },
+  headerIconBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, padding: '4px' },
+  headerTitle: { flex: 1, color: '#ffffff', fontSize: '17px', fontWeight: '700', margin: 0, textAlign: 'center' },
+
+  body: { padding: '22px 18px 32px', maxWidth: '460px', margin: '0 auto', boxSizing: 'border-box' },
+
+  brandRow: { display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '26px' },
+  brandTile: {
+    position: 'relative', width: '128px', height: '128px', borderRadius: '20px',
+    background: 'linear-gradient(160deg, #12786B, #0A3D38)', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', cursor: 'pointer', overflow: 'hidden', flexShrink: 0,
+  },
+  brandTileText: { color: '#ffffff', fontWeight: '800', fontSize: '15px', textAlign: 'center', lineHeight: '1.3', letterSpacing: '0.3px' },
+  brandTileImg: { width: '100%', height: '100%', objectFit: 'cover' },
+  brandEditBadge: {
+    position: 'absolute', top: '-8px', right: '-8px', width: '30px', height: '30px', borderRadius: '50%',
+    background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.25)', border: '2px solid #0A3D38', padding: 0, margin: 0, cursor: 'pointer',
+  },
+
+  fieldBox: {
+    background: '#F1F3F6', borderRadius: '16px', padding: '10px 16px 12px', marginBottom: '12px',
+    display: 'flex', flexDirection: 'column', gap: '2px',
+  },
+  fieldLabel: { fontSize: '12px', color: '#64748B', fontWeight: '600' },
+  fieldInputEl: {
+    border: 'none', outline: 'none', background: 'transparent', fontSize: '16px', color: '#0F172A',
+    fontWeight: '600', padding: '2px 0 0', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
+  },
+
+  selectRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
+  selectInput: {
+    border: 'none', outline: 'none', background: 'transparent', fontSize: '16px', color: '#0F172A',
+    fontWeight: '600', padding: '2px 0 0', fontFamily: 'inherit', flex: 1, appearance: 'none', WebkitAppearance: 'none',
+  },
+
+  sectionBar: {
+    background: '#DDE1E7', color: '#0F172A', fontWeight: '700', fontSize: '14.5px',
+    borderRadius: '14px', padding: '13px 16px', margin: '18px 0 12px',
+  },
+
+  bankCard: {
+    width: '100%', textAlign: 'left', background: '#F1F3F6', border: 'none', borderRadius: '16px',
+    padding: '12px 16px 14px', marginBottom: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column',
+    gap: '3px', fontFamily: 'inherit',
+  },
+  bankLine: { fontSize: '14.5px', color: '#1E293B', fontWeight: '600' },
+
+  helperText: { fontSize: '12px', color: '#94A3B8', lineHeight: '1.5', margin: '-4px 2px 20px' },
+
+  updateBtn: {
+    width: '100%', height: '52px', borderRadius: '16px', border: 'none', background: '#0F766E',
+    color: '#ffffff', fontSize: '15.5px', fontWeight: '700', letterSpacing: '1px', cursor: 'pointer',
+  },
+
+  modalOverlay: {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.5)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '20px', boxSizing: 'border-box',
+  },
+  modalCard: { background: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '20px', padding: '20px', boxSizing: 'border-box' },
+  modalHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' },
+  modalTitle: { fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: 0 },
+  modalCloseBtn: { background: 'none', border: 'none', fontSize: '22px', color: '#94A3B8', cursor: 'pointer', lineHeight: 1, padding: 0 },
+  modalSaveBtn: { width: '100%', height: '46px', borderRadius: '14px', border: 'none', background: '#0F766E', color: '#ffffff', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', marginTop: '4px' },
+
+  sheetActionRow: {
+    display: 'flex', alignItems: 'center', gap: '14px', width: '100%', textAlign: 'left',
+    background: 'none', border: 'none', borderBottom: '1px solid #F1F5F9', padding: '15px 4px',
+    fontSize: '15px', fontWeight: '600', color: '#0F172A', cursor: 'pointer', fontFamily: 'inherit',
+  },
+};
+
+const customerModuleStyles = {
+  screen: { width: '100%', minHeight: '100vh', background: '#F3F5F9', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
+
+  header: {
+    background: '#0F766E', padding: '14px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+    position: 'sticky', top: 0, zIndex: 20,
+  },
+  headerIconBtn: { background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, padding: '4px', width: '27px' },
+  headerTitle: { flex: 1, color: '#ffffff', fontSize: '19px', fontWeight: '700', margin: 0, textAlign: 'center' },
+
+  // Filter / Sort dropdown menu (Newest to Oldest / Oldest to Newest)
+  sortMenu: {
+    position: 'absolute', top: 'calc(100% + 8px)', right: 0, background: '#ffffff', borderRadius: '14px',
+    boxShadow: '0 10px 30px rgba(15, 23, 42, 0.18)', padding: '8px', minWidth: '200px', zIndex: 100,
+  },
+  sortMenuItem: {
+    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+    background: 'none', border: 'none', borderRadius: '10px', padding: '11px 12px', cursor: 'pointer',
+    fontFamily: 'inherit', textAlign: 'left',
+  },
+  sortMenuItemLabel: { fontSize: '14px', fontWeight: '500', color: '#334155' },
+  sortMenuItemLabelActive: { fontSize: '14px', fontWeight: '700', color: '#0F766E' },
+
+  // Document list card (Quotation, Invoice, Purchase Order, Proforma Invoice,
+  // Delivery Note, Receipt) — name on the left, number/date/amount/status on the right.
+  docCard: {
+    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '18px',
+    padding: '16px 18px', marginBottom: '12px', boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)',
+    cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center',
+    justifyContent: 'space-between', gap: '14px', boxSizing: 'border-box',
+  },
+  docCardName: {
+    flex: 1, minWidth: 0, fontSize: '16.5px', fontWeight: '700', color: '#0F172A',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  docCardRight: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 },
+  docCardNumber: { fontSize: '13px', fontWeight: '600', color: '#64748B', whiteSpace: 'nowrap' },
+  docCardDate: { fontSize: '12.5px', color: '#94A3B8', whiteSpace: 'nowrap' },
+  docCardBottomRow: { display: 'flex', alignItems: 'center', gap: '8px' },
+  docCardAmount: { fontSize: '16.5px', fontWeight: '800', color: '#0F172A', whiteSpace: 'nowrap' },
+  docCardStatusPill: {
+    fontSize: '10.5px', fontWeight: '700', padding: '3px 10px', borderRadius: '20px', whiteSpace: 'nowrap',
+  },
+
+  // Customer List
+  body: { padding: '18px 18px 110px', maxWidth: '460px', margin: '0 auto', boxSizing: 'border-box' },
+  searchBox: {
+    background: '#ffffff', borderRadius: '18px', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '10px',
+    boxShadow: '0 2px 10px rgba(15, 23, 42, 0.06)', marginBottom: '16px',
+  },
+  searchInput: { border: 'none', outline: 'none', flex: 1, fontSize: '14.5px', color: '#0F172A', fontFamily: 'inherit', background: 'transparent' },
+  customerCard: {
+    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '18px',
+    padding: '18px 18px', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  customerName: { fontSize: '16.5px', fontWeight: '700', color: '#0F172A' },
+  editBadge: { width: '34px', height: '34px', borderRadius: '50%', background: '#0F766E', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  editBadgeBtn: { width: '34px', height: '34px', borderRadius: '50%', background: '#0F766E', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' },
+  selectRowBtn: { flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' },
+  emptyText: { textAlign: 'center', color: '#94A3B8', fontSize: '13.5px', lineHeight: '1.5', marginTop: '40px', padding: '0 20px' },
+
+  // Product List (extends the customer card layout with price/GST rows)
+  productCard: {
+    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '18px',
+    padding: '18px 18px', marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '10px',
+    boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  productCardSelected: { boxShadow: '0 0 0 2px #0F766E, 0 2px 10px rgba(15, 23, 42, 0.05)' },
+  productCardTopRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  productDetailRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  productDetailLabel: { fontSize: '14.5px', fontWeight: '500', color: '#334155' },
+  productDetailValue: { fontSize: '15.5px', fontWeight: '700', color: '#0F172A' },
+
+  headerAddBtn: {
+    background: '#ffffff', border: 'none', borderRadius: '11px', width: '36px', height: '36px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
+  },
+  termsTabRow: { padding: '18px 18px 0', maxWidth: '460px', margin: '0 auto', boxSizing: 'border-box' },
+  termsTabActive: {
+    display: 'inline-block', fontSize: '17px', fontWeight: '700', color: '#0F766E',
+    borderBottom: '2px solid #0F766E', paddingBottom: '10px',
+  },
+  termCard: {
+    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '16px',
+    padding: '16px 16px', marginBottom: '10px', fontSize: '14.5px', color: '#0F172A', fontWeight: '500',
+    boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)', cursor: 'pointer', fontFamily: 'inherit', lineHeight: '1.5',
+  },
+  termCardSelected: { boxShadow: '0 0 0 2px #0F766E, 0 2px 10px rgba(15, 23, 42, 0.05)' },
+  doneBtnWrap: { position: 'fixed', left: 0, right: 0, bottom: '18px', padding: '0 18px', boxSizing: 'border-box' },
+  doneBtn: {
+    width: '100%', maxWidth: '460px', margin: '0 auto', display: 'block', height: '52px', borderRadius: '30px',
+    border: 'none', background: '#0F766E', color: '#ffffff', fontSize: '15px', fontWeight: '700',
+    letterSpacing: '1px', cursor: 'pointer',
+  },
+
+  // Modals / bottom sheets
+  modalOverlay: {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.5)',
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 2000,
+  },
+  bottomSheet: {
+    background: '#ffffff', width: '100%', maxWidth: '460px', borderRadius: '24px 24px 0 0',
+    padding: '10px 20px 28px', boxSizing: 'border-box', maxHeight: '85vh', overflowY: 'auto',
+  },
+  sheetHandle: { width: '40px', height: '4px', borderRadius: '2px', background: '#E2E8F0', margin: '4px auto 18px' },
+  sheetTitle: { fontSize: '19px', fontWeight: '700', color: '#0F172A', margin: '0 0 16px' },
+  sheetSmallLabel: { display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#64748B', letterSpacing: '0.4px', margin: '0 0 8px' },
+  sheetSmallLabelInline: { fontSize: '14.5px', fontWeight: '500', color: '#334155' },
+  taxableRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 2px 8px' },
+  checkbox: { width: '20px', height: '20px', accentColor: '#0F766E', cursor: 'pointer' },
+
+  fab: {
+    position: 'fixed', right: '20px', bottom: '26px', width: '68px', height: '68px', borderRadius: '50%',
+    background: '#0F766E', color: '#ffffff', border: 'none', cursor: 'pointer', zIndex: 30,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1px',
+    fontSize: '8.5px', fontWeight: '700', letterSpacing: '0.2px', lineHeight: '1.15', padding: '4px',
+    boxShadow: '0 10px 22px rgba(15, 118, 110, 0.4)',
+  },
+  fabCompact: {
+    position: 'fixed', right: '20px', bottom: '26px', width: '68px', height: '68px', borderRadius: '50%',
+    background: '#0F766E', color: '#ffffff', border: 'none', cursor: 'pointer', zIndex: 30,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1px',
+    fontSize: '8.5px', fontWeight: '700', letterSpacing: '0.2px', lineHeight: '1.15', padding: '4px',
+    boxShadow: '0 10px 22px rgba(15, 118, 110, 0.4)',
+  },
+
+  // Add / Edit Customer form
+  formBody: { padding: '22px 18px 40px', maxWidth: '460px', margin: '0 auto', boxSizing: 'border-box', background: '#ffffff' },
+  fieldInput: {
+    width: '100%', boxSizing: 'border-box', background: '#F1F3F6', border: 'none', borderRadius: '16px',
+    padding: '17px 16px', fontSize: '15px', color: '#0F172A', fontWeight: '500', fontFamily: 'inherit',
+    outline: 'none', marginBottom: '12px',
+  },
+  nameFieldWrap: { position: 'relative' },
+  nameFieldIcon: {
+    position: 'absolute', right: '8px', top: '8px', width: '38px', height: '38px', borderRadius: '11px',
+    background: 'linear-gradient(145deg, #12786B, #0A3D38)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  suffixFieldWrap: { position: 'relative' },
+  suffixFieldIcon: {
+    position: 'absolute', right: '16px', top: '17px', fontSize: '15px', fontWeight: '600', color: '#334155',
+  },
+  descriptionTextarea: {
+    width: '100%', boxSizing: 'border-box', background: '#F1F3F6', border: 'none', borderRadius: '16px',
+    padding: '16px', fontSize: '15px', color: '#0F172A', fontWeight: '500', fontFamily: 'inherit',
+    outline: 'none', minHeight: '110px', resize: 'vertical', marginBottom: '4px',
+  },
+  charCount: { textAlign: 'right', fontSize: '12px', color: '#94A3B8', fontWeight: '500', marginBottom: '12px' },
+  sectionBar: {
+    background: '#EEF0F4', color: '#0F172A', fontWeight: '700', fontSize: '14.5px',
+    borderRadius: '14px', padding: '13px 16px', margin: '18px 0 12px',
+  },
+  shippingTextarea: {
+    width: '100%', boxSizing: 'border-box', background: '#F1F3F6', border: 'none', borderRadius: '16px',
+    padding: '16px', fontSize: '15px', color: '#0F172A', fontWeight: '500', fontFamily: 'inherit',
+    outline: 'none', minHeight: '110px', resize: 'vertical', marginBottom: '12px',
+  },
+  // Persistent-label fields (label always visible, never relies on placeholder alone)
+  labeledFieldBox: {
+    width: '100%', boxSizing: 'border-box', background: '#F1F3F6', border: '1.5px solid transparent',
+    borderRadius: '16px', padding: '9px 16px 11px', marginBottom: '12px', fontFamily: 'inherit',
+  },
+  labeledFieldBoxError: { border: '1.5px solid #DC2626' },
+  labeledFieldLabel: { display: 'block', fontSize: '11.5px', color: '#64748B', fontWeight: '600', marginBottom: '2px', letterSpacing: '0.1px' },
+  labeledFieldInput: {
+    width: '100%', border: 'none', outline: 'none', background: 'transparent', padding: 0,
+    fontSize: '15px', color: '#0F172A', fontWeight: '500', fontFamily: 'inherit',
+  },
+  labeledFieldButton: {
+    width: '100%', border: 'none', outline: 'none', background: 'transparent', padding: 0, textAlign: 'left',
+    fontSize: '15px', color: '#0F172A', fontWeight: '500', fontFamily: 'inherit', cursor: 'pointer',
+  },
+  fieldErrorText: { color: '#DC2626', fontSize: '12px', fontWeight: '500', margin: '-8px 0 12px 4px' },
+
+  addBtn: {
+    width: '100%', height: '52px', borderRadius: '16px', border: 'none', background: '#0F766E',
+    color: '#ffffff', fontSize: '15.5px', fontWeight: '700', letterSpacing: '1px', cursor: 'pointer', marginTop: '10px',
+  },
+};
+
+const makeQuotationStyles = {
+  infoPanel: { background: '#F3F5F9', borderRadius: '16px', padding: '16px 16px 18px', marginBottom: '16px' },
+  infoRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '14px' },
+  infoLabel: { fontSize: '13px', color: '#334155', fontWeight: '500' },
+  infoValue: { fontSize: '17px', fontWeight: '700', color: '#0F172A', marginTop: '4px' },
+  otherInfoRow: { display: 'flex', alignItems: 'center', gap: '8px' },
+  otherInfoInput: {
+    flex: 1, border: 'none', outline: 'none', background: 'transparent', fontSize: '14.5px',
+    color: '#0F172A', fontFamily: 'inherit', fontWeight: '500', borderBottom: '1px solid #CBD5E1', padding: '2px 0',
+  },
+
+  sectionCard: {
+    width: '100%', textAlign: 'left', background: '#F3F5F9', border: 'none', borderRadius: '16px',
+    padding: '16px 16px', marginBottom: '14px', cursor: 'pointer', fontFamily: 'inherit', display: 'block',
+  },
+  sectionCardTopRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  sectionCardLabel: { fontSize: '15.5px', fontWeight: '800', color: '#0F172A', letterSpacing: '0.3px' },
+  plusBadge: {
+    width: '32px', height: '32px', borderRadius: '50%', background: '#0F766E',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  sectionCardBody: { marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' },
+  sectionCardLine: { fontSize: '14px', fontWeight: '600', color: '#1E293B' },
+  sectionCardSubLine: { fontSize: '12.5px', fontWeight: '500', color: '#64748B', margin: 0 },
+  lineRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  lineRowRight: { display: 'flex', alignItems: 'center', gap: '10px' },
+  removeX: { fontSize: '17px', color: '#94A3B8', cursor: 'pointer', lineHeight: 1, padding: '0 2px' },
+  // Standardized Remove icon button for the Quotation Module - matches the Remove icon
+  // and styling used in the Attendance Module for the Project Name field (plain FiTrash2
+  // icon, no background badge, consistent red color and size). Use this everywhere a
+  // Remove action appears within the Quotation Module so it never renders as a black
+  // icon or an "X" cross.
+  removeIconBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: '28px', height: '28px', padding: 0, background: 'transparent',
+    border: 'none', cursor: 'pointer', flexShrink: 0,
+  },
+
+  bottomBar: {
+    position: 'fixed', left: '18px', right: '18px', bottom: '18px', maxWidth: '424px', margin: '0 auto',
+    background: '#0F766E', borderRadius: '30px', padding: '12px 12px 12px 22px',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 10px 24px rgba(15,23,42,0.3)',
+  },
+  bottomBarLabel: { fontSize: '12px', color: '#CBD5E1', fontWeight: '500' },
+  bottomBarAmount: { fontSize: '19px', color: '#ffffff', fontWeight: '700', marginTop: '2px' },
+  generateBtn: {
+    background: '#ffffff', border: 'none', borderRadius: '24px', padding: '14px 30px',
+    fontSize: '15px', fontWeight: '700', color: '#0F172A', cursor: 'pointer',
+  },
 };
