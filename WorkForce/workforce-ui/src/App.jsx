@@ -662,6 +662,11 @@ const isValidMobileNumber = (value) => {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const isValidEmailAddress = (value) => EMAIL_REGEX.test((value || '').trim());
 
+// ===== PIN code validation =====
+// Standard Indian PIN code: exactly 6 digits, first digit 1-9 (0 is not a valid leading digit).
+const PINCODE_REGEX = /^[1-9][0-9]{5}$/;
+const isValidPincode = (value) => PINCODE_REGEX.test((value || '').trim());
+
 // ===== HSN code validation =====
 // HSN/SAC codes on Indian tax documents are numeric, 4/6/8 digits long.
 const HSN_REGEX = /^\d{4}(\d{2}){0,2}$/;
@@ -752,6 +757,14 @@ const api = {
     }
     return response.json();
   }
+};
+
+// ===== CUSTOMERS SERVICE ===== (Backed by CustomersController.cs)
+const customerService = {
+  getCustomers: (userId) => api.get(`/customers?userId=${userId}`),
+  createCustomer: (userId, data) => api.post(`/customers?userId=${userId}`, data),
+  updateCustomer: (id, data) => api.put(`/customers/${id}`, data),
+  deleteCustomer: (id) => api.delete(`/customers/${id}`),
 };
 
 // ===== DOCUMENTS SERVICE (Quotations, Invoices, Purchase Orders, Proforma =====
@@ -876,9 +889,284 @@ const loadUserProjects = async (userId) => {
     setLoadingProjects(false);
   }
 };
+// ===== Add these service definitions after the existing services =====
 
+// ===== BUSINESS INFO SERVICE =====
+const businessInfoService = {
+  getBusinessInfo: (userId) => api.get(`/businessinfo?userId=${userId}`),
+  updateBusinessInfo: (userId, data) => api.put(`/businessinfo?userId=${userId}`, data),
+};
+
+// ===== PRODUCTS SERVICE =====
+const productsService = {
+  getProducts: (userId) => api.get(`/products?userId=${userId}`),
+  getProduct: (id) => api.get(`/products/${id}`),
+  createProduct: (userId, data) => api.post(`/products?userId=${userId}`, data),
+  updateProduct: (id, data) => api.put(`/products/${id}`, data),
+  deleteProduct: (id) => api.delete(`/products/${id}`),
+};
+
+// ===== INVOICES SERVICE =====
+const invoicesService = {
+  getInvoices: (userId) => api.get(`/documents/invoices?userId=${userId}`),
+  getInvoice: (id) => api.get(`/documents/invoices/${id}`),
+  createInvoice: (userId, data) => api.post(`/documents/invoices?userId=${userId}`, data),
+  updateInvoice: (id, data) => api.put(`/documents/invoices/${id}`, data),
+  updateInvoiceStatus: (id, status) => api.patch(`/documents/invoices/${id}/status`, status),
+  deleteInvoice: (id) => api.delete(`/documents/invoices/${id}`),
+};
+
+// ===== PURCHASE ORDERS SERVICE =====
+const purchaseOrdersService = {
+  getPurchaseOrders: (userId) => api.get(`/documents/purchaseorders?userId=${userId}`),
+  getPurchaseOrder: (id) => api.get(`/documents/purchaseorders/${id}`),
+  createPurchaseOrder: (userId, data) => api.post(`/documents/purchaseorders?userId=${userId}`, data),
+  updatePurchaseOrder: (id, data) => api.put(`/documents/purchaseorders/${id}`, data),
+  updatePurchaseOrderStatus: (id, status) => api.patch(`/documents/purchaseorders/${id}/status`, status),
+  deletePurchaseOrder: (id) => api.delete(`/documents/purchaseorders/${id}`),
+};
+
+// ===== PROFORMA INVOICES SERVICE =====
+const proformaInvoicesService = {
+  getProformaInvoices: (userId) => api.get(`/documents/proformainvoices?userId=${userId}`),
+  getProformaInvoice: (id) => api.get(`/documents/proformainvoices/${id}`),
+  createProformaInvoice: (userId, data) => api.post(`/documents/proformainvoices?userId=${userId}`, data),
+  updateProformaInvoice: (id, data) => api.put(`/documents/proformainvoices/${id}`, data),
+  updateProformaInvoiceStatus: (id, status) => api.patch(`/documents/proformainvoices/${id}/status`, status),
+  deleteProformaInvoice: (id) => api.delete(`/documents/proformainvoices/${id}`),
+};
+
+// ===== DELIVERY NOTES SERVICE =====
+const deliveryNotesService = {
+  getDeliveryNotes: (userId) => api.get(`/documents/deliverynotes?userId=${userId}`),
+  getDeliveryNote: (id) => api.get(`/documents/deliverynotes/${id}`),
+  createDeliveryNote: (userId, data) => api.post(`/documents/deliverynotes?userId=${userId}`, data),
+  updateDeliveryNote: (id, data) => api.put(`/documents/deliverynotes/${id}`, data),
+  updateDeliveryNoteStatus: (id, status) => api.patch(`/documents/deliverynotes/${id}/status`, status),
+  deleteDeliveryNote: (id) => api.delete(`/documents/deliverynotes/${id}`),
+};
+
+// ===== RECEIPTS SERVICE =====
+const receiptsService = {
+  getReceipts: (userId) => api.get(`/documents/receipts?userId=${userId}`),
+  getReceipt: (id) => api.get(`/documents/receipts/${id}`),
+  createReceipt: (userId, data) => api.post(`/documents/receipts?userId=${userId}`, data),
+  updateReceipt: (id, data) => api.put(`/documents/receipts/${id}`, data),
+  updateReceiptStatus: (id, status) => api.patch(`/documents/receipts/${id}/status`, status),
+  deleteReceipt: (id) => api.delete(`/documents/receipts/${id}`),
+};
+
+// ===== SETTINGS SERVICE =====
+const settingsService = {
+  // Get all settings in one call
+  getSettings: (userId) => api.get(`/documents/settings?userId=${userId}`),
+  // Individual settings updates
+  updateQuotationSettings: (userId, data) => api.put(`/documents/settings/quotation?userId=${userId}`, data),
+  updateInvoiceSettings: (userId, data) => api.put(`/documents/settings/invoice?userId=${userId}`, data),
+  updatePurchaseOrderSettings: (userId, data) => api.put(`/documents/settings/purchaseorder?userId=${userId}`, data),
+  updateProformaInvoiceSettings: (userId, data) => api.put(`/documents/settings/proformainvoice?userId=${userId}`, data),
+  updateDeliveryNoteSettings: (userId, data) => api.put(`/documents/settings/deliverynote?userId=${userId}`, data),
+  updateReceiptSettings: (userId, data) => api.put(`/documents/settings/receipt?userId=${userId}`, data),
+  updateColumnHeadingSettings: (userId, data) => api.put(`/documents/settings/columnheading?userId=${userId}`, data),
+};
+
+// ===== TERMS SERVICE =====
+const termsService = {
+  getTerms: (userId, documentType) => api.get(`/documents/terms?userId=${userId}&documentType=${documentType}`),
+  createTerm: (userId, documentType, data) => api.post(`/documents/terms?userId=${userId}&documentType=${documentType}`, data),
+  deleteTerm: (id) => api.delete(`/documents/terms/${id}`),
+};
 // Add this state near other state declarations
-const [loadingQuotations, setLoadingQuotations] = useState(false);
+// ===== LOAD BUSINESS INFO =====
+const [loadingBusinessInfo, setLoadingBusinessInfo] = useState(false);
+const loadUserBusinessInfo = async (userId) => {
+  try {
+    setLoadingBusinessInfo(true);
+    const response = await businessInfoService.getBusinessInfo(userId);
+    if (response) {
+      setBusinessInfo(prev => ({
+        ...prev,
+        logoImg: response.logoImg || null,
+        signatureImg: response.signatureImg || null,
+        businessName: response.businessName || prev.businessName,
+        contactName: response.contactName || '',
+        email: response.email || '',
+        phone: response.phone || '',
+        addressLine1: response.addressLine1 || '',
+        addressLine2: response.addressLine2 || '',
+        addressLine3: response.city || '',
+        otherInfo: response.otherInfo || '',
+        businessCategory: response.businessCategory || '',
+        taxLabel: response.taxLabel || 'GSTIN',
+        taxNumber: response.taxNumber || '',
+        state: response.state || '',
+        pincode: response.pincode || '',
+        bankAccountName: response.bankAccountName || '',
+        bankAccountNumber: response.bankAccountNumber || '',
+        bankName: response.bankName || '',
+        ifscCode: response.ifscCode || '',
+        upiId: response.upiId || '',
+      }));
+      try { localStorage.setItem(BUSINESS_INFO_STORAGE_KEY, JSON.stringify(businessInfo)); } catch { /* ignore */ }
+    }
+  } catch (error) {
+    console.error('Error loading business info:', error);
+  } finally {
+    setLoadingBusinessInfo(false);
+  }
+};
+
+// ===== LOAD PRODUCTS =====
+const [loadingProducts, setLoadingProducts] = useState(false);
+const loadUserProducts = async (userId) => {
+  try {
+    setLoadingProducts(true);
+    const response = await productsService.getProducts(userId);
+    setProducts(response);
+    try { localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading products:', error);
+    // Keep local cache on failure
+  } finally {
+    setLoadingProducts(false);
+  }
+};
+
+// ===== LOAD INVOICES =====
+const [loadingInvoices, setLoadingInvoices] = useState(false);
+const loadUserInvoices = async (userId) => {
+  try {
+    setLoadingInvoices(true);
+    const response = await invoicesService.getInvoices(userId);
+    setInvoices(response);
+    try { localStorage.setItem(INVOICES_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading invoices:', error);
+  } finally {
+    setLoadingInvoices(false);
+  }
+};
+
+// ===== LOAD PURCHASE ORDERS =====
+const [loadingPurchaseOrders, setLoadingPurchaseOrders] = useState(false);
+const loadUserPurchaseOrders = async (userId) => {
+  try {
+    setLoadingPurchaseOrders(true);
+    const response = await purchaseOrdersService.getPurchaseOrders(userId);
+    setPurchaseOrders(response);
+    try { localStorage.setItem(PURCHASE_ORDERS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading purchase orders:', error);
+  } finally {
+    setLoadingPurchaseOrders(false);
+  }
+};
+
+// ===== LOAD PROFORMA INVOICES =====
+const [loadingProformaInvoices, setLoadingProformaInvoices] = useState(false);
+const loadUserProformaInvoices = async (userId) => {
+  try {
+    setLoadingProformaInvoices(true);
+    const response = await proformaInvoicesService.getProformaInvoices(userId);
+    setProformaInvoices(response);
+    try { localStorage.setItem(PROFORMA_INVOICES_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading proforma invoices:', error);
+  } finally {
+    setLoadingProformaInvoices(false);
+  }
+};
+
+// ===== LOAD DELIVERY NOTES =====
+const [loadingDeliveryNotes, setLoadingDeliveryNotes] = useState(false);
+const loadUserDeliveryNotes = async (userId) => {
+  try {
+    setLoadingDeliveryNotes(true);
+    const response = await deliveryNotesService.getDeliveryNotes(userId);
+    setDeliveryNotes(response);
+    try { localStorage.setItem(DELIVERY_NOTES_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading delivery notes:', error);
+  } finally {
+    setLoadingDeliveryNotes(false);
+  }
+};
+
+// ===== LOAD RECEIPTS =====
+const [loadingReceipts, setLoadingReceipts] = useState(false);
+const loadUserReceipts = async (userId) => {
+  try {
+    setLoadingReceipts(true);
+    const response = await receiptsService.getReceipts(userId);
+    setReceipts(response);
+    try { localStorage.setItem(RECEIPTS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading receipts:', error);
+  } finally {
+    setLoadingReceipts(false);
+  }
+};
+
+// ===== LOAD SETTINGS =====
+const [loadingSettings, setLoadingSettings] = useState(false);
+const loadUserSettings = async (userId) => {
+  try {
+    setLoadingSettings(true);
+    const response = await settingsService.getSettings(userId);
+    
+    if (response.quotation) {
+      setQuotationSettings(prev => ({ ...prev, ...response.quotation }));
+      localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(response.quotation));
+    }
+    if (response.invoice) {
+      setInvoiceSettings(prev => ({ ...prev, ...response.invoice }));
+      localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(response.invoice));
+    }
+    if (response.purchaseOrder) {
+      setPurchaseOrderSettings(prev => ({ ...prev, ...response.purchaseOrder }));
+      localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(response.purchaseOrder));
+    }
+    if (response.proformaInvoice) {
+      setProformaInvoiceSettings(prev => ({ ...prev, ...response.proformaInvoice }));
+      localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(response.proformaInvoice));
+    }
+    if (response.deliveryNote) {
+      setDeliveryNoteSettings(prev => ({ ...prev, ...response.deliveryNote }));
+      localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(response.deliveryNote));
+    }
+    if (response.receipt) {
+      setReceiptSettings(prev => ({ ...prev, ...response.receipt }));
+      localStorage.setItem(RECEIPT_SETTINGS_STORAGE_KEY, JSON.stringify(response.receipt));
+    }
+    if (response.columnHeading) {
+      setColumnHeadingSettings(prev => ({ ...prev, ...response.columnHeading }));
+      localStorage.setItem(COLUMN_HEADING_SETTINGS_STORAGE_KEY, JSON.stringify(response.columnHeading));
+    }
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  } finally {
+    setLoadingSettings(false);
+  }
+};
+
+// ===== LOAD TERMS =====
+const loadUserTerms = async (userId) => {
+  try {
+    // Load terms for each document type
+    const types = ['Quotation', 'Invoice', 'PurchaseOrder', 'ProformaInvoice', 'DeliveryNote'];
+    const results = await Promise.all(
+      types.map(type => termsService.getTerms(userId, type).catch(() => []))
+    );
+    
+    if (results[0]) setQuotationTerms(results[0]);
+    if (results[1]) setInvoiceTerms(results[1]);
+    if (results[2]) setPurchaseOrderTerms(results[2]);
+    if (results[3]) setProformaInvoiceTerms(results[3]);
+    if (results[4]) setDeliveryNoteTerms(results[4]);
+  } catch (error) {
+    console.error('Error loading terms:', error);
+  }
+};
 // Loads this user's quotations from the server and replaces local state +
 // the localStorage cache with what the DB actually has, the same pattern
 // used for loadUserProjects above.
@@ -894,6 +1182,26 @@ const loadUserQuotations = async (userId) => {
     // so the user can still see their last-known quotations while offline.
   } finally {
     setLoadingQuotations(false);
+  }
+};
+
+// Add this state near other state declarations
+const [loadingCustomers, setLoadingCustomers] = useState(false);
+// Loads this user's customers from the server and replaces local state +
+// the localStorage cache with what the DB actually has - same pattern as
+// loadUserQuotations above. This is what makes customer.id a real numeric
+// DB id instead of the old client-generated string id.
+const loadUserCustomers = async (userId) => {
+  try {
+    setLoadingCustomers(true);
+    const response = await customerService.getCustomers(userId);
+    setCustomers(response);
+    try { localStorage.setItem(CUSTOMERS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+  } catch (error) {
+    console.error('Error loading customers:', error);
+    // Keep whatever was already loaded from the localStorage cache on failure.
+  } finally {
+    setLoadingCustomers(false);
   }
 };
 
@@ -984,7 +1292,7 @@ const paymentService = {
       phone: loggedInUser?.mobileNumber ? `+91 ${loggedInUser.mobileNumber}` : '',
       addressLine1: '', addressLine2: '', addressLine3: '',
       otherInfo: '', businessCategory: '',
-      taxLabel: 'GSTIN', taxNumber: '', state: '',
+      taxLabel: 'GSTIN', taxNumber: '', state: '', pincode: '',
       bankAccountName: '', bankAccountNumber: '', bankName: '', ifscCode: '', upiId: '',
     };
   });
@@ -994,29 +1302,87 @@ const paymentService = {
     setBusinessInfo(prev => ({ ...prev, [key]: value }));
     if (businessInfoErrors[key]) setBusinessInfoErrors(prev => ({ ...prev, [key]: false }));
   };
-  const handleUpdateBusinessInfo = () => {
-    const errors = {};
-    if (businessInfo.email.trim() && !isValidEmailAddress(businessInfo.email)) errors.email = 'Enter a valid email address';
-    if (businessInfo.phone.trim() && !isValidMobileNumber(businessInfo.phone)) errors.phone = 'Enter a valid 10-digit mobile number';
-    if (businessInfo.taxNumber.trim()) {
-      if (businessInfo.taxLabel === 'GSTIN' && !isValidGSTIN(businessInfo.taxNumber)) errors.taxNumber = 'Enter a valid GSTIN';
-      if (businessInfo.taxLabel === 'PAN' && !isValidPAN(businessInfo.taxNumber)) errors.taxNumber = 'Enter a valid PAN';
-    }
-    if (businessInfo.upiId.trim() && !isValidUPI(businessInfo.upiId)) errors.upiId = 'Enter a valid UPI ID';
-    if (businessInfo.ifscCode.trim() && !isValidIFSC(businessInfo.ifscCode)) errors.ifscCode = 'Enter a valid 11-character IFSC code';
-    if (Object.keys(errors).length > 0) {
-      setBusinessInfoErrors(errors);
-      showAlert('Please correct the highlighted fields.', 'error');
-      return;
-    }
-    setBusinessInfoErrors({});
-    try {
-      localStorage.setItem(BUSINESS_INFO_STORAGE_KEY, JSON.stringify(businessInfo));
-      showSuccess('Business info updated.');
-    } catch {
-      showAlert('Could not save business info on this device.');
-    }
-  };
+  const handleUpdateBusinessInfo = async () => {
+  const errors = {};
+  if (businessInfo.email.trim() && !isValidEmailAddress(businessInfo.email)) errors.email = 'Enter a valid email address';
+  if (businessInfo.phone.trim() && !isValidMobileNumber(businessInfo.phone)) errors.phone = 'Enter a valid 10-digit mobile number';
+  if (businessInfo.taxNumber.trim()) {
+    if (businessInfo.taxLabel === 'GSTIN' && !isValidGSTIN(businessInfo.taxNumber)) errors.taxNumber = 'Enter a valid GSTIN';
+    if (businessInfo.taxLabel === 'PAN' && !isValidPAN(businessInfo.taxNumber)) errors.taxNumber = 'Enter a valid PAN';
+  }
+  if (businessInfo.upiId.trim() && !isValidUPI(businessInfo.upiId)) errors.upiId = 'Enter a valid UPI ID';
+  if ((businessInfo.pincode || '').trim() && !isValidPincode(businessInfo.pincode)) errors.pincode = 'Enter a valid 6-digit PIN code';
+  if (businessInfo.ifscCode.trim() && !isValidIFSC(businessInfo.ifscCode)) errors.ifscCode = 'Enter a valid 11-character IFSC code';
+  
+  if (Object.keys(errors).length > 0) {
+    setBusinessInfoErrors(errors);
+    showAlert('Please correct the highlighted fields.', 'error');
+    return;
+  }
+  
+  setBusinessInfoErrors({});
+  
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save business info.');
+    return;
+  }
+
+  try {
+    const result = await businessInfoService.updateBusinessInfo(loggedInUser.userId, {
+      logoImg: businessInfo.logoImg,
+      signatureImg: businessInfo.signatureImg,
+      businessName: businessInfo.businessName,
+      contactName: businessInfo.contactName,
+      email: businessInfo.email,
+      phone: businessInfo.phone,
+      addressLine1: businessInfo.addressLine1,
+      addressLine2: businessInfo.addressLine2,
+      city: businessInfo.addressLine3,
+      otherInfo: businessInfo.otherInfo,
+      businessCategory: businessInfo.businessCategory,
+      taxLabel: businessInfo.taxLabel,
+      taxNumber: businessInfo.taxNumber,
+      state: businessInfo.state,
+      pincode: businessInfo.pincode,
+      bankAccountName: businessInfo.bankAccountName,
+      bankAccountNumber: businessInfo.bankAccountNumber,
+      bankName: businessInfo.bankName,
+      ifscCode: businessInfo.ifscCode,
+      upiId: businessInfo.upiId,
+    });
+    
+    // Update local state with server response
+    setBusinessInfo(prev => ({
+      ...prev,
+      logoImg: result.logoImg || prev.logoImg,
+      signatureImg: result.signatureImg || prev.signatureImg,
+      businessName: result.businessName || prev.businessName,
+      contactName: result.contactName || prev.contactName,
+      email: result.email || prev.email,
+      phone: result.phone || prev.phone,
+      addressLine1: result.addressLine1 || prev.addressLine1,
+      addressLine2: result.addressLine2 || prev.addressLine2,
+      addressLine3: result.city || prev.addressLine3,
+      otherInfo: result.otherInfo || prev.otherInfo,
+      businessCategory: result.businessCategory || prev.businessCategory,
+      taxLabel: result.taxLabel || prev.taxLabel,
+      taxNumber: result.taxNumber || prev.taxNumber,
+      state: result.state || prev.state,
+      pincode: result.pincode || prev.pincode,
+      bankAccountName: result.bankAccountName || prev.bankAccountName,
+      bankAccountNumber: result.bankAccountNumber || prev.bankAccountNumber,
+      bankName: result.bankName || prev.bankName,
+      ifscCode: result.ifscCode || prev.ifscCode,
+      upiId: result.upiId || prev.upiId,
+    }));
+    
+    try { localStorage.setItem(BUSINESS_INFO_STORAGE_KEY, JSON.stringify(businessInfo)); } catch { /* ignore */ }
+    showSuccess('Business info updated.');
+  } catch (error) {
+    console.error('Error updating business info:', error);
+    showAlert('Could not save business info. Please try again.');
+  }
+};
   const handleCloseBankDetailsModal = () => {
     if (businessInfo.ifscCode.trim() && !isValidIFSC(businessInfo.ifscCode)) {
       setBusinessInfoErrors(prev => ({ ...prev, ifscCode: 'Enter a valid 11-character IFSC code' }));
@@ -1240,8 +1606,8 @@ const paymentService = {
             )}
           </div>
           <div style={{ display: 'flex', gap: '14px', marginTop: '14px' }}>
-            <button type="button" onClick={closeImageCropper} style={{ flex: 1.3, height: '46px', borderRadius: '14px', border: '1.5px solid #E2E8F0', background: '#ffffff', color: '#334155', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-            <button type="button" onClick={handleConfirmImageCrop} style={{ ...businessInfoStyles.modalSaveBtn, width: 'auto', flex: 0.7, marginTop: 0 }}>Crop</button>
+            <button type="button" onClick={closeImageCropper} style={{ flex: 1, height: '46px', borderRadius: '14px', border: '1.5px solid #E2E8F0', background: '#ffffff', color: '#334155', fontSize: '14.5px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+            <button type="button" onClick={handleConfirmImageCrop} style={{ ...businessInfoStyles.modalSaveBtn, width: 'auto', flex: 1, marginTop: 0 }}>Crop</button>
           </div>
         </div>
       </div>
@@ -1272,14 +1638,20 @@ const paymentService = {
   });
   const [activeSettingsSheet, setActiveSettingsSheet] = useState(null);
   const updateQuotationSettingField = (key, value) => setQuotationSettings(prev => ({ ...prev, [key]: value }));
-  const handleUpdateQuotationSettings = () => {
-    try {
-      localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(quotationSettings));
-      showSuccess('Quotation settings updated.');
-    } catch {
-      showAlert('Could not save quotation settings on this device.');
-    }
-  };
+  const handleUpdateQuotationSettings = async () => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save settings.');
+    return;
+  }
+  try {
+    await settingsService.updateQuotationSettings(loggedInUser.userId, quotationSettings);
+    try { localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(quotationSettings)); } catch { /* ignore */ }
+    showSuccess('Quotation settings updated.');
+  } catch (error) {
+    console.error('Error updating quotation settings:', error);
+    showAlert('Could not save settings. Please try again.');
+  }
+};
 
   // ===== Quotations module: Invoice Settings =====
   const [invoiceSettings, setInvoiceSettings] = useState(() => {
@@ -1454,7 +1826,9 @@ const paymentService = {
   // ===== Quotations module: Customer List / Add Customer =====
   const emptyCustomerForm = {
     name: '', companyName: '', email: '', mobile: '',
-    addressLine1: '', addressLine2: '', addressLine3: '', otherInfo: '', gstin: '', state: '',
+    addressLine1: '', addressLine2: '', addressLine3: '', otherInfo: '', gstin: '', state: '', pincode: '',
+    shippingSameAsBilling: false,
+    shippingAddressLine1: '', shippingAddressLine2: '', shippingCity: '', shippingState: '', shippingPincode: '',
     shippingAddress: '', billingAddress: '',
   };
   const [customers, setCustomers] = useState(() => {
@@ -1473,6 +1847,8 @@ const paymentService = {
   const [customerGstinError, setCustomerGstinError] = useState(false);
   const [customerMobileError, setCustomerMobileError] = useState(false);
   const [customerEmailError, setCustomerEmailError] = useState(false);
+  const [customerPincodeError, setCustomerPincodeError] = useState(false);
+  const [customerShippingPincodeError, setCustomerShippingPincodeError] = useState(false);
   const [showStatePicker, setShowStatePicker] = useState(false);
   const [stateSearchQuery, setStateSearchQuery] = useState('');
   // Which form the shared State picker below should write its selection into -
@@ -1494,6 +1870,8 @@ const paymentService = {
     setCustomerGstinError(false);
     setCustomerMobileError(false);
     setCustomerEmailError(false);
+    setCustomerPincodeError(false);
+    setCustomerShippingPincodeError(false);
     setStateSearchQuery('');
     setQuotationSubView('addCustomer');
   };
@@ -1504,10 +1882,12 @@ const paymentService = {
     setCustomerGstinError(false);
     setCustomerMobileError(false);
     setCustomerEmailError(false);
+    setCustomerPincodeError(false);
+    setCustomerShippingPincodeError(false);
     setStateSearchQuery('');
     setQuotationSubView('addCustomer');
   };
-  const handleSaveCustomer = () => {
+  const handleSaveCustomer = async () => {
     if (!customerForm.name.trim()) {
       showAlert('Please enter the customer name.');
       return;
@@ -1524,32 +1904,81 @@ const paymentService = {
       return;
     }
     setCustomerEmailError(false);
+    if (customerForm.pincode.trim() && !isValidPincode(customerForm.pincode)) {
+      setCustomerPincodeError(true);
+      showAlert('Please enter a valid 6-digit PIN code.', 'error');
+      return;
+    }
+    setCustomerPincodeError(false);
     if (customerForm.gstin.trim() && !isValidGSTIN(customerForm.gstin)) {
       setCustomerGstinError(true);
       showAlert('Please enter correct GST number.', 'error');
       return;
     }
     setCustomerGstinError(false);
-    if (editingCustomerId) {
-      persistCustomers(customers.map((c) => (c.id === editingCustomerId ? { ...customerForm, id: editingCustomerId } : c)));
-      showSuccess('Customer updated successfully.');
-    } else {
-      const newCustomer = { ...customerForm, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
-      persistCustomers([...customers, newCustomer]);
-      showSuccess('Customer added successfully.');
+    if (
+      !customerForm.shippingSameAsBilling &&
+      customerForm.shippingPincode.trim() &&
+      !isValidPincode(customerForm.shippingPincode)
+    ) {
+      setCustomerShippingPincodeError(true);
+      showAlert('Please enter a valid 6-digit shipping PIN code.', 'error');
+      return;
     }
-    setQuotationSubView(customerFormReturnView);
+    setCustomerShippingPincodeError(false);
+
+    // Build the flat billing/shipping address strings that quotations, invoices,
+    // and other documents read - kept in sync with the structured fields above,
+    // and copied straight from billing when "Same as Billing Address" is checked.
+    const billingAddress = [
+      customerForm.addressLine1, customerForm.addressLine2, customerForm.addressLine3,
+      customerForm.state ? toTitleCase(customerForm.state) : '', customerForm.pincode,
+    ].filter(Boolean).join(', ');
+    const shippingAddress = customerForm.shippingSameAsBilling
+      ? billingAddress
+      : [
+          customerForm.shippingAddressLine1, customerForm.shippingAddressLine2, customerForm.shippingCity,
+          customerForm.shippingState ? toTitleCase(customerForm.shippingState) : '', customerForm.shippingPincode,
+        ].filter(Boolean).join(', ');
+    const finalCustomerForm = { ...customerForm, billingAddress, shippingAddress };
+
+    if (!loggedInUser?.userId) {
+      showAlert('You need to be signed in to save a customer.');
+      return;
+    }
+
+    try {
+      if (editingCustomerId) {
+        const saved = await customerService.updateCustomer(editingCustomerId, finalCustomerForm);
+        persistCustomers(customers.map((c) => (c.id === editingCustomerId ? saved : c)));
+        showSuccess('Customer updated successfully.');
+      } else {
+        const saved = await customerService.createCustomer(loggedInUser.userId, finalCustomerForm);
+        persistCustomers([...customers, saved]);
+        showSuccess('Customer added successfully.');
+      }
+      setQuotationSubView(customerFormReturnView);
+    } catch (error) {
+      console.error('Error saving customer:', error);
+      showAlert('Could not save the customer to the server. Please try again.');
+    }
   };
   const handleDeleteCustomer = (customer) => {
-    showConfirm(`Delete customer "${customer.name}"?`, () => {
-      persistCustomers(customers.filter((c) => c.id !== customer.id));
-      if (quotationForm.customerId === customer.id) {
-        setQuotationForm((prev) => ({ ...prev, customerId: null }));
+    showConfirm(`Delete customer "${customer.name}"?`, async () => {
+      try {
+        await customerService.deleteCustomer(customer.id);
+        persistCustomers(customers.filter((c) => c.id !== customer.id));
+        if (quotationForm.customerId === customer.id) {
+          setQuotationForm((prev) => ({ ...prev, customerId: null }));
+        }
+        if (invoiceForm.customerId === customer.id) {
+          setInvoiceForm((prev) => ({ ...prev, customerId: null }));
+        }
+        showSuccess('Customer deleted.');
+      } catch (error) {
+        console.error('Error deleting customer:', error);
+        showAlert('Could not delete the customer on the server. Please try again.');
       }
-      if (invoiceForm.customerId === customer.id) {
-        setInvoiceForm((prev) => ({ ...prev, customerId: null }));
-      }
-      showSuccess('Customer deleted.');
     });
   };
   const filteredCustomers = customers.filter((c) => {
@@ -1599,41 +2028,74 @@ const paymentService = {
     setProductGstError(false);
     setQuotationSubView('addProduct');
   };
-  const handleSaveProduct = () => {
-    if (!productForm.name.trim()) {
-      showAlert('Please enter the product name.');
-      return;
-    }
-    if (String(productForm.gst).trim() !== '' && (isNaN(Number(productForm.gst)) || Number(productForm.gst) < 0 || Number(productForm.gst) > 100)) {
-      setProductGstError(true);
-      showAlert('Please enter a valid GST percentage (0-100).', 'error');
-      return;
-    }
-    setProductGstError(false);
-    if (productForm.hsn.trim() && !isValidHSN(productForm.hsn)) {
-      setProductHsnError(true);
-      showAlert('Please enter a valid HSN code (4, 6, or 8 digits).', 'error');
-      return;
-    }
-    setProductHsnError(false);
+  const handleSaveProduct = async () => {
+  if (!productForm.name.trim()) {
+    showAlert('Please enter the product name.');
+    return;
+  }
+  if (String(productForm.gst).trim() !== '' && (isNaN(Number(productForm.gst)) || Number(productForm.gst) < 0 || Number(productForm.gst) > 100)) {
+    setProductGstError(true);
+    showAlert('Please enter a valid GST percentage (0-100).', 'error');
+    return;
+  }
+  setProductGstError(false);
+  if (productForm.hsn.trim() && !isValidHSN(productForm.hsn)) {
+    setProductHsnError(true);
+    showAlert('Please enter a valid HSN code (4, 6, or 8 digits).', 'error');
+    return;
+  }
+  setProductHsnError(false);
+
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save a product.');
+    return;
+  }
+
+  try {
     if (editingProductId) {
-      persistProducts(products.map((p) => (p.id === editingProductId ? { ...productForm, id: editingProductId } : p)));
+      const saved = await productsService.updateProduct(editingProductId, {
+        name: productForm.name,
+        price: Number(productForm.price) || 0,
+        gst: Number(productForm.gst) || 0,
+        description: productForm.description || '',
+        unit: productForm.unit || '',
+        hsn: productForm.hsn || '',
+      });
+      persistProducts(products.map((p) => (p.id === editingProductId ? saved : p)));
       showSuccess('Product updated successfully.');
     } else {
-      const newProduct = { ...productForm, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
-      persistProducts([...products, newProduct]);
+      const saved = await productsService.createProduct(loggedInUser.userId, {
+        name: productForm.name,
+        price: Number(productForm.price) || 0,
+        gst: Number(productForm.gst) || 0,
+        description: productForm.description || '',
+        unit: productForm.unit || '',
+        hsn: productForm.hsn || '',
+      });
+      persistProducts([...products, saved]);
       showSuccess('Product added successfully.');
     }
     setQuotationSubView(productFormReturnView);
-  };
-  const handleDeleteProduct = (product) => {
-    showConfirm(`Delete product "${product.name}"?`, () => {
+  } catch (error) {
+    console.error('Error saving product:', error);
+    showAlert('Could not save the product. Please try again.');
+  }
+};
+
+const handleDeleteProduct = (product) => {
+  showConfirm(`Delete product "${product.name}"?`, async () => {
+    try {
+      await productsService.deleteProduct(product.id);
       persistProducts(products.filter((p) => p.id !== product.id));
       setQuotationForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== product.id) }));
       setInvoiceForm((prev) => ({ ...prev, products: prev.products.filter((p) => p.productId !== product.id) }));
       showSuccess('Product deleted.');
-    });
-  };
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      showAlert('Could not delete the product. Please try again.');
+    }
+  });
+};
   const filteredProducts = products.filter((p) => {
     const q = productSearchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -2048,14 +2510,27 @@ const paymentService = {
     setTermsModalContext(context);
     setIsAddTermsModalOpen(true);
   };
-  const handleAddTerm = () => {
-    if (!newTermText.trim()) {
-      showAlert('Please enter the terms and condition text.');
-      return;
-    }
-    const newTerm = { id: genId(), text: newTermText.trim() };
+  // Find the openAddTermsModal function and update handleAddTerm:
+
+const handleAddTerm = async () => {
+  if (!newTermText.trim()) {
+    showAlert('Please enter the terms and condition text.');
+    return;
+  }
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save terms.');
+    return;
+  }
+
+  try {
+    const newTerm = await termsService.createTerm(
+      loggedInUser.userId, 
+      termsModalContext, 
+      { text: newTermText.trim() }
+    );
     const catalog = getTermsCatalogByContext(termsModalContext);
     persistTermsByContext(termsModalContext, [...catalog, newTerm]);
+    
     if (termsModalContext === 'invoice') {
       setInvoiceTermsDraftSelectedIds((prev) => [...prev, newTerm.id]);
     } else if (termsModalContext === 'purchaseOrder') {
@@ -2068,12 +2543,18 @@ const paymentService = {
       setTermsDraftSelectedIds((prev) => [...prev, newTerm.id]);
     }
     setIsAddTermsModalOpen(false);
-  };
+  } catch (error) {
+    console.error('Error adding term:', error);
+    showAlert('Could not save the term. Please try again.');
+  }
+};
   const selectedQuotationTerms = quotationTerms.filter((term) => quotationForm.termsIds.includes(term.id));
   // Deletes a term from exactly one document type's own catalog/selection - the other
   // 4 document types' catalogs and selected terms are left completely untouched.
-  const handleDeleteTerm = (term, context = 'quotation') => {
-    showConfirm('Delete this term and condition?', () => {
+  const handleDeleteTerm = async (term, context = 'quotation') => {
+  showConfirm('Delete this term and condition?', async () => {
+    try {
+      await termsService.deleteTerm(term.id);
       const catalog = getTermsCatalogByContext(context);
       persistTermsByContext(context, catalog.filter((t) => t.id !== term.id));
       if (context === 'invoice') {
@@ -2093,8 +2574,12 @@ const paymentService = {
         setQuotationForm((prev) => ({ ...prev, termsIds: prev.termsIds.filter((id) => id !== term.id) }));
       }
       showSuccess('Term deleted.');
-    });
-  };
+    } catch (error) {
+      console.error('Error deleting term:', error);
+      showAlert('Could not delete the term. Please try again.');
+    }
+  });
+};
 
 
   const quotationProductsTotal = quotationForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
@@ -2102,71 +2587,51 @@ const paymentService = {
   const quotationAmountDue = Math.round(quotationProductsTotal + quotationOtherChargesTotal);
 
   const handleGenerateQuotation = async () => {
-    if (!quotationForm.customerId) {
-      showAlert('Please select a customer.');
-      return;
-    }
-    if (quotationForm.products.length === 0) {
-      showAlert('Please add at least one product.');
-      return;
-    }
-    if (!loggedInUser?.userId) {
-      showAlert('You need to be signed in to save a quotation.');
-      return;
-    }
+  if (!quotationForm.customerId) {
+    showAlert('Please select a customer.');
+    return;
+  }
+  if (quotationForm.products.length === 0) {
+    showAlert('Please add at least one product.');
+    return;
+  }
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save a quotation.');
+    return;
+  }
 
-    const customerSnapshot = {
-      customerName: selectedQuotationCustomer?.name || 'Unknown',
-      customerCompany: selectedQuotationCustomer?.companyName || '',
-      customerMobile: selectedQuotationCustomer?.mobile || '',
-      customerEmail: selectedQuotationCustomer?.email || '',
-      customerAddressLine1: selectedQuotationCustomer?.addressLine1 || '',
-      customerAddressLine2: selectedQuotationCustomer?.addressLine2 || '',
-      customerAddressLine3: selectedQuotationCustomer?.addressLine3 || '',
-      customerBillingAddress: selectedQuotationCustomer?.billingAddress || '',
-      customerShippingAddress: selectedQuotationCustomer?.shippingAddress || '',
-    };
+  const customerSnapshot = {
+    customerName: selectedQuotationCustomer?.name || 'Unknown',
+    customerCompany: selectedQuotationCustomer?.companyName || '',
+    customerMobile: selectedQuotationCustomer?.mobile || '',
+    customerEmail: selectedQuotationCustomer?.email || '',
+    customerAddressLine1: selectedQuotationCustomer?.addressLine1 || '',
+    customerAddressLine2: selectedQuotationCustomer?.addressLine2 || '',
+    customerAddressLine3: selectedQuotationCustomer?.addressLine3 || '',
+    customerBillingAddress: selectedQuotationCustomer?.billingAddress || '',
+    customerShippingAddress: selectedQuotationCustomer?.shippingAddress || '',
+  };
 
-    // Payload matches QuotationRequestDto - quotationNo is required by the
-    // entity (MaxLength 50, Required), and Date is parsed server-side with
-    // DateTime.TryParse against whatever culture the server is running under,
-    // so keep sending it in the same 'dd/MM/yyyy' shape the form already uses.
-    const payload = { ...quotationForm, ...customerSnapshot };
+  const payload = { ...quotationForm, ...customerSnapshot };
 
+  try {
     if (editingQuotationId) {
-      // Optimistically update the list so the UI feels instant, then reconcile
-      // with whatever the server actually persisted (grandTotal, updatedAt, and
-      // any snapshot fields are authoritative from the server).
-      const optimistic = quotations.map((q) => (
-        q.id === editingQuotationId
-          ? { ...q, ...payload, grandTotal: quotationAmountDue, updatedAt: new Date().toISOString() }
-          : q
-      ));
-      setQuotations(optimistic);
-      try {
-        const saved = await documentService.updateQuotation(editingQuotationId, payload);
-        persistQuotations(quotations.map((q) => (q.id === editingQuotationId ? saved : q)));
-        showSuccess('Quotation updated successfully.');
-        setEditingQuotationId(null);
-        setQuotationSubView('quotationDetail');
-      } catch (error) {
-        console.error('Error updating quotation:', error);
-        persistQuotations(quotations); // revert the optimistic change
-        showAlert('Could not update the quotation on the server. Please try again.');
-      }
-      return;
-    }
-
-    try {
+      const saved = await documentService.updateQuotation(editingQuotationId, payload);
+      persistQuotations(quotations.map((q) => (q.id === editingQuotationId ? saved : q)));
+      showSuccess('Quotation updated successfully.');
+      setEditingQuotationId(null);
+      setQuotationSubView('quotationDetail');
+    } else {
       const created = await documentService.createQuotation(loggedInUser.userId, payload);
       persistQuotations([...quotations, created]);
       showSuccess('Quotation generated successfully.');
-      setQuotationSubView('quotationList'); // Navigate to list instead of null
-    } catch (error) {
-      console.error('Error creating quotation:', error);
-      showAlert('Could not save the quotation to the server. Please try again.');
+      setQuotationSubView('quotationList');
     }
-  };
+  } catch (error) {
+    console.error('Error saving quotation:', error);
+    showAlert('Could not save the quotation. Please try again.');
+  }
+};
 
 
   // ===== Quotations module: Make Purchase Order =====
@@ -2345,54 +2810,52 @@ const paymentService = {
   const purchaseOrderOtherChargesTotal = purchaseOrderForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
   const purchaseOrderAmountDue = Math.round(purchaseOrderProductsTotal + purchaseOrderOtherChargesTotal);
 
-  const handleGeneratePurchaseOrder = () => {
-    if (!purchaseOrderForm.customerId) {
-      showAlert('Please select a customer.');
-      return;
-    }
-    if (purchaseOrderForm.products.length === 0) {
-      showAlert('Please add at least one product.');
-      return;
-    }
+  const handleGeneratePurchaseOrder = async () => {
+  if (!purchaseOrderForm.customerId) {
+    showAlert('Please select a customer.');
+    return;
+  }
+  if (purchaseOrderForm.products.length === 0) {
+    showAlert('Please add at least one product.');
+    return;
+  }
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save a purchase order.');
+    return;
+  }
 
-    const customerSnapshot = {
-      customerName: selectedPurchaseOrderCustomer?.name || 'Unknown',
-      customerCompany: selectedPurchaseOrderCustomer?.companyName || '',
-      customerMobile: selectedPurchaseOrderCustomer?.mobile || '',
-      customerEmail: selectedPurchaseOrderCustomer?.email || '',
-      customerAddressLine1: selectedPurchaseOrderCustomer?.addressLine1 || '',
-      customerAddressLine2: selectedPurchaseOrderCustomer?.addressLine2 || '',
-      customerAddressLine3: selectedPurchaseOrderCustomer?.addressLine3 || '',
-      customerBillingAddress: selectedPurchaseOrderCustomer?.billingAddress || '',
-      customerShippingAddress: selectedPurchaseOrderCustomer?.shippingAddress || '',
-    };
+  const customerSnapshot = {
+    customerName: selectedPurchaseOrderCustomer?.name || 'Unknown',
+    customerCompany: selectedPurchaseOrderCustomer?.companyName || '',
+    customerMobile: selectedPurchaseOrderCustomer?.mobile || '',
+    customerEmail: selectedPurchaseOrderCustomer?.email || '',
+    customerAddressLine1: selectedPurchaseOrderCustomer?.addressLine1 || '',
+    customerAddressLine2: selectedPurchaseOrderCustomer?.addressLine2 || '',
+    customerAddressLine3: selectedPurchaseOrderCustomer?.addressLine3 || '',
+    customerBillingAddress: selectedPurchaseOrderCustomer?.billingAddress || '',
+    customerShippingAddress: selectedPurchaseOrderCustomer?.shippingAddress || '',
+  };
 
+  const payload = { ...purchaseOrderForm, ...customerSnapshot };
+
+  try {
     if (editingPurchaseOrderId) {
-      persistPurchaseOrders(purchaseOrders.map((o) => (
-        o.id === editingPurchaseOrderId
-          ? { ...o, ...purchaseOrderForm, grandTotal: purchaseOrderAmountDue, ...customerSnapshot, updatedAt: new Date().toISOString() }
-          : o
-      )));
+      const saved = await purchaseOrdersService.updatePurchaseOrder(editingPurchaseOrderId, payload);
+      persistPurchaseOrders(purchaseOrders.map((o) => (o.id === editingPurchaseOrderId ? saved : o)));
       showSuccess('Purchase Order updated successfully.');
       setEditingPurchaseOrderId(null);
       setQuotationSubView('purchaseOrderDetail');
-      return;
+    } else {
+      const created = await purchaseOrdersService.createPurchaseOrder(loggedInUser.userId, payload);
+      persistPurchaseOrders([...purchaseOrders, created]);
+      showSuccess('Purchase Order generated successfully.');
+      setQuotationSubView('purchaseOrderList');
     }
-
-    const newId = genId();
-    const newPurchaseOrder = {
-      id: newId,
-      ...purchaseOrderForm,
-      grandTotal: purchaseOrderAmountDue,
-      createdAt: new Date().toISOString(),
-      ...customerSnapshot,
-    };
-
-    persistPurchaseOrders([...purchaseOrders, newPurchaseOrder]);
-
-    showSuccess('Purchase Order generated successfully.');
-    setQuotationSubView('purchaseOrderList');
-  };
+  } catch (error) {
+    console.error('Error saving purchase order:', error);
+    showAlert('Could not save the purchase order. Please try again.');
+  }
+};
 
   // ===== Quotations module: Make Proforma Invoice =====
   const emptyProformaInvoiceForm = () => ({
@@ -2617,56 +3080,52 @@ const paymentService = {
   const proformaInvoicePaidTotal = proformaInvoiceForm.paidInfo.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const proformaInvoiceAmountDue = Math.max(0, proformaInvoiceGrandTotal - proformaInvoicePaidTotal);
 
-  const handleGenerateProformaInvoice = () => {
-    if (!proformaInvoiceForm.customerId) {
-      showAlert('Please select a customer.');
-      return;
-    }
-    if (proformaInvoiceForm.products.length === 0) {
-      showAlert('Please add at least one product.');
-      return;
-    }
+  const handleGenerateProformaInvoice = async () => {
+  if (!proformaInvoiceForm.customerId) {
+    showAlert('Please select a customer.');
+    return;
+  }
+  if (proformaInvoiceForm.products.length === 0) {
+    showAlert('Please add at least one product.');
+    return;
+  }
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save a proforma invoice.');
+    return;
+  }
 
-    const customerSnapshot = {
-      customerName: selectedProformaInvoiceCustomer?.name || 'Unknown',
-      customerCompany: selectedProformaInvoiceCustomer?.companyName || '',
-      customerMobile: selectedProformaInvoiceCustomer?.mobile || '',
-      customerEmail: selectedProformaInvoiceCustomer?.email || '',
-      customerAddressLine1: selectedProformaInvoiceCustomer?.addressLine1 || '',
-      customerAddressLine2: selectedProformaInvoiceCustomer?.addressLine2 || '',
-      customerAddressLine3: selectedProformaInvoiceCustomer?.addressLine3 || '',
-      customerBillingAddress: selectedProformaInvoiceCustomer?.billingAddress || '',
-      customerShippingAddress: selectedProformaInvoiceCustomer?.shippingAddress || '',
-    };
+  const customerSnapshot = {
+    customerName: selectedProformaInvoiceCustomer?.name || 'Unknown',
+    customerCompany: selectedProformaInvoiceCustomer?.companyName || '',
+    customerMobile: selectedProformaInvoiceCustomer?.mobile || '',
+    customerEmail: selectedProformaInvoiceCustomer?.email || '',
+    customerAddressLine1: selectedProformaInvoiceCustomer?.addressLine1 || '',
+    customerAddressLine2: selectedProformaInvoiceCustomer?.addressLine2 || '',
+    customerAddressLine3: selectedProformaInvoiceCustomer?.addressLine3 || '',
+    customerBillingAddress: selectedProformaInvoiceCustomer?.billingAddress || '',
+    customerShippingAddress: selectedProformaInvoiceCustomer?.shippingAddress || '',
+  };
 
+  const payload = { ...proformaInvoiceForm, ...customerSnapshot };
+
+  try {
     if (editingProformaInvoiceId) {
-      persistProformaInvoices(proformaInvoices.map((inv) => (
-        inv.id === editingProformaInvoiceId
-          ? { ...inv, ...proformaInvoiceForm, grandTotal: proformaInvoiceGrandTotal, paidTotal: proformaInvoicePaidTotal, balanceDue: proformaInvoiceAmountDue, ...customerSnapshot, updatedAt: new Date().toISOString() }
-          : inv
-      )));
+      const saved = await proformaInvoicesService.updateProformaInvoice(editingProformaInvoiceId, payload);
+      persistProformaInvoices(proformaInvoices.map((inv) => (inv.id === editingProformaInvoiceId ? saved : inv)));
       showSuccess('Proforma Invoice updated successfully.');
       setEditingProformaInvoiceId(null);
       setQuotationSubView('proformaInvoiceDetail');
-      return;
+    } else {
+      const created = await proformaInvoicesService.createProformaInvoice(loggedInUser.userId, payload);
+      persistProformaInvoices([...proformaInvoices, created]);
+      showSuccess('Proforma Invoice generated successfully.');
+      setQuotationSubView('proformaInvoiceList');
     }
-
-    const newId = genId();
-    const newProformaInvoice = {
-      id: newId,
-      ...proformaInvoiceForm,
-      grandTotal: proformaInvoiceGrandTotal,
-      paidTotal: proformaInvoicePaidTotal,
-      balanceDue: proformaInvoiceAmountDue,
-      createdAt: new Date().toISOString(),
-      ...customerSnapshot,
-    };
-
-    persistProformaInvoices([...proformaInvoices, newProformaInvoice]);
-
-    showSuccess('Proforma Invoice generated successfully.');
-    setQuotationSubView('proformaInvoiceList');
-  };
+  } catch (error) {
+    console.error('Error saving proforma invoice:', error);
+    showAlert('Could not save the proforma invoice. Please try again.');
+  }
+};
 
   // ===== Quotations module: Make Delivery Note =====
   const emptyDeliveryNoteForm = () => ({
@@ -2821,53 +3280,52 @@ const paymentService = {
   };
   const selectedDeliveryNoteTerms = deliveryNoteTerms.filter((term) => deliveryNoteForm.termsIds.includes(term.id));
 
-  const handleGenerateDeliveryNote = () => {
-    if (!deliveryNoteForm.customerId) {
-      showAlert('Please select a customer.');
-      return;
-    }
-    if (deliveryNoteForm.products.length === 0) {
-      showAlert('Please add at least one product.');
-      return;
-    }
+  const handleGenerateDeliveryNote = async () => {
+  if (!deliveryNoteForm.customerId) {
+    showAlert('Please select a customer.');
+    return;
+  }
+  if (deliveryNoteForm.products.length === 0) {
+    showAlert('Please add at least one product.');
+    return;
+  }
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save a delivery note.');
+    return;
+  }
 
-    const customerSnapshot = {
-      customerName: selectedDeliveryNoteCustomer?.name || 'Unknown',
-      customerCompany: selectedDeliveryNoteCustomer?.companyName || '',
-      customerMobile: selectedDeliveryNoteCustomer?.mobile || '',
-      customerEmail: selectedDeliveryNoteCustomer?.email || '',
-      customerAddressLine1: selectedDeliveryNoteCustomer?.addressLine1 || '',
-      customerAddressLine2: selectedDeliveryNoteCustomer?.addressLine2 || '',
-      customerAddressLine3: selectedDeliveryNoteCustomer?.addressLine3 || '',
-      customerBillingAddress: selectedDeliveryNoteCustomer?.billingAddress || '',
-      customerShippingAddress: selectedDeliveryNoteCustomer?.shippingAddress || '',
-    };
+  const customerSnapshot = {
+    customerName: selectedDeliveryNoteCustomer?.name || 'Unknown',
+    customerCompany: selectedDeliveryNoteCustomer?.companyName || '',
+    customerMobile: selectedDeliveryNoteCustomer?.mobile || '',
+    customerEmail: selectedDeliveryNoteCustomer?.email || '',
+    customerAddressLine1: selectedDeliveryNoteCustomer?.addressLine1 || '',
+    customerAddressLine2: selectedDeliveryNoteCustomer?.addressLine2 || '',
+    customerAddressLine3: selectedDeliveryNoteCustomer?.addressLine3 || '',
+    customerBillingAddress: selectedDeliveryNoteCustomer?.billingAddress || '',
+    customerShippingAddress: selectedDeliveryNoteCustomer?.shippingAddress || '',
+  };
 
+  const payload = { ...deliveryNoteForm, ...customerSnapshot };
+
+  try {
     if (editingDeliveryNoteId) {
-      persistDeliveryNotes(deliveryNotes.map((dn) => (
-        dn.id === editingDeliveryNoteId
-          ? { ...dn, ...deliveryNoteForm, ...customerSnapshot, updatedAt: new Date().toISOString() }
-          : dn
-      )));
+      const saved = await deliveryNotesService.updateDeliveryNote(editingDeliveryNoteId, payload);
+      persistDeliveryNotes(deliveryNotes.map((dn) => (dn.id === editingDeliveryNoteId ? saved : dn)));
       showSuccess('Delivery Note updated successfully.');
       setEditingDeliveryNoteId(null);
       setQuotationSubView('deliveryNoteDetail');
-      return;
+    } else {
+      const created = await deliveryNotesService.createDeliveryNote(loggedInUser.userId, payload);
+      persistDeliveryNotes([...deliveryNotes, created]);
+      showSuccess('Delivery Note generated successfully.');
+      setQuotationSubView('deliveryNoteList');
     }
-
-    const newId = genId();
-    const newDeliveryNote = {
-      id: newId,
-      ...deliveryNoteForm,
-      createdAt: new Date().toISOString(),
-      ...customerSnapshot,
-    };
-
-    persistDeliveryNotes([...deliveryNotes, newDeliveryNote]);
-
-    showSuccess('Delivery Note generated successfully.');
-    setQuotationSubView('deliveryNoteList');
-  };
+  } catch (error) {
+    console.error('Error saving delivery note:', error);
+    showAlert('Could not save the delivery note. Please try again.');
+  }
+};
 
   // ===== Invoices module: Make Invoice =====
   const emptyInvoiceForm = () => ({
@@ -3094,56 +3552,52 @@ const paymentService = {
   const invoicePaidTotal = invoiceForm.paidInfo.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const invoiceAmountDue = Math.max(0, invoiceGrandTotal - invoicePaidTotal);
 
-  const handleGenerateInvoice = () => {
-    if (!invoiceForm.customerId) {
-      showAlert('Please select a customer.');
-      return;
-    }
-    if (invoiceForm.products.length === 0) {
-      showAlert('Please add at least one product.');
-      return;
-    }
+  const handleGenerateInvoice = async () => {
+  if (!invoiceForm.customerId) {
+    showAlert('Please select a customer.');
+    return;
+  }
+  if (invoiceForm.products.length === 0) {
+    showAlert('Please add at least one product.');
+    return;
+  }
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save an invoice.');
+    return;
+  }
 
-    const customerSnapshot = {
-      customerName: selectedInvoiceCustomer?.name || 'Unknown',
-      customerCompany: selectedInvoiceCustomer?.companyName || '',
-      customerMobile: selectedInvoiceCustomer?.mobile || '',
-      customerEmail: selectedInvoiceCustomer?.email || '',
-      customerAddressLine1: selectedInvoiceCustomer?.addressLine1 || '',
-      customerAddressLine2: selectedInvoiceCustomer?.addressLine2 || '',
-      customerAddressLine3: selectedInvoiceCustomer?.addressLine3 || '',
-      customerBillingAddress: selectedInvoiceCustomer?.billingAddress || '',
-      customerShippingAddress: selectedInvoiceCustomer?.shippingAddress || '',
-    };
+  const customerSnapshot = {
+    customerName: selectedInvoiceCustomer?.name || 'Unknown',
+    customerCompany: selectedInvoiceCustomer?.companyName || '',
+    customerMobile: selectedInvoiceCustomer?.mobile || '',
+    customerEmail: selectedInvoiceCustomer?.email || '',
+    customerAddressLine1: selectedInvoiceCustomer?.addressLine1 || '',
+    customerAddressLine2: selectedInvoiceCustomer?.addressLine2 || '',
+    customerAddressLine3: selectedInvoiceCustomer?.addressLine3 || '',
+    customerBillingAddress: selectedInvoiceCustomer?.billingAddress || '',
+    customerShippingAddress: selectedInvoiceCustomer?.shippingAddress || '',
+  };
 
+  const payload = { ...invoiceForm, ...customerSnapshot };
+
+  try {
     if (editingInvoiceId) {
-      persistInvoices(invoices.map((inv) => (
-        inv.id === editingInvoiceId
-          ? { ...inv, ...invoiceForm, grandTotal: invoiceGrandTotal, paidTotal: invoicePaidTotal, balanceDue: invoiceAmountDue, ...customerSnapshot, updatedAt: new Date().toISOString() }
-          : inv
-      )));
+      const saved = await invoicesService.updateInvoice(editingInvoiceId, payload);
+      persistInvoices(invoices.map((inv) => (inv.id === editingInvoiceId ? saved : inv)));
       showSuccess('Invoice updated successfully.');
       setEditingInvoiceId(null);
       setQuotationSubView('invoiceDetail');
-      return;
+    } else {
+      const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
+      persistInvoices([...invoices, created]);
+      showSuccess('Invoice generated successfully.');
+      setQuotationSubView('invoiceList');
     }
-
-    const newId = genId();
-    const newInvoice = {
-      id: newId,
-      ...invoiceForm,
-      grandTotal: invoiceGrandTotal,
-      paidTotal: invoicePaidTotal,
-      balanceDue: invoiceAmountDue,
-      createdAt: new Date().toISOString(),
-      ...customerSnapshot,
-    };
-
-    persistInvoices([...invoices, newInvoice]);
-
-    showSuccess('Invoice generated successfully.');
-    setQuotationSubView('invoiceList');
-  };
+  } catch (error) {
+    console.error('Error saving invoice:', error);
+    showAlert('Could not save the invoice. Please try again.');
+  }
+};
 
   // ===== Receipts module: Make Receipt =====
   const emptyReceiptForm = () => ({
@@ -3231,53 +3685,52 @@ const paymentService = {
 
   const receiptPaidAmount = Number(receiptForm.paidAmount) || 0;
 
-  const handleGenerateReceipt = () => {
-    if (!receiptForm.customerId) {
-      showAlert('Please select a customer.');
-      return;
-    }
-    if (!receiptForm.paidAmount || Number(receiptForm.paidAmount) <= 0) {
-      showAlert('Please add payment info.');
-      return;
-    }
+  const handleGenerateReceipt = async () => {
+  if (!receiptForm.customerId) {
+    showAlert('Please select a customer.');
+    return;
+  }
+  if (!receiptForm.paidAmount || Number(receiptForm.paidAmount) <= 0) {
+    showAlert('Please add payment info.');
+    return;
+  }
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save a receipt.');
+    return;
+  }
 
-    const customerSnapshot = {
-      customerName: selectedReceiptCustomer?.name || 'Unknown',
-      customerCompany: selectedReceiptCustomer?.companyName || '',
-      customerMobile: selectedReceiptCustomer?.mobile || '',
-      customerEmail: selectedReceiptCustomer?.email || '',
-      customerAddressLine1: selectedReceiptCustomer?.addressLine1 || '',
-      customerAddressLine2: selectedReceiptCustomer?.addressLine2 || '',
-      customerAddressLine3: selectedReceiptCustomer?.addressLine3 || '',
-      customerBillingAddress: selectedReceiptCustomer?.billingAddress || '',
-      customerShippingAddress: selectedReceiptCustomer?.shippingAddress || '',
-    };
+  const customerSnapshot = {
+    customerName: selectedReceiptCustomer?.name || 'Unknown',
+    customerCompany: selectedReceiptCustomer?.companyName || '',
+    customerMobile: selectedReceiptCustomer?.mobile || '',
+    customerEmail: selectedReceiptCustomer?.email || '',
+    customerAddressLine1: selectedReceiptCustomer?.addressLine1 || '',
+    customerAddressLine2: selectedReceiptCustomer?.addressLine2 || '',
+    customerAddressLine3: selectedReceiptCustomer?.addressLine3 || '',
+    customerBillingAddress: selectedReceiptCustomer?.billingAddress || '',
+    customerShippingAddress: selectedReceiptCustomer?.shippingAddress || '',
+  };
 
+  const payload = { ...receiptForm, ...customerSnapshot };
+
+  try {
     if (editingReceiptId) {
-      persistReceipts(receipts.map((r) => (
-        r.id === editingReceiptId
-          ? { ...r, ...receiptForm, paidAmount: receiptPaidAmount, ...customerSnapshot, updatedAt: new Date().toISOString() }
-          : r
-      )));
+      const saved = await receiptsService.updateReceipt(editingReceiptId, payload);
+      persistReceipts(receipts.map((r) => (r.id === editingReceiptId ? saved : r)));
       showSuccess('Receipt updated successfully.');
       setEditingReceiptId(null);
       setQuotationSubView('receiptDetail');
-      return;
+    } else {
+      const created = await receiptsService.createReceipt(loggedInUser.userId, payload);
+      persistReceipts([...receipts, created]);
+      showSuccess('Receipt generated successfully.');
+      setQuotationSubView('receiptList');
     }
-
-    const newReceipt = {
-      id: genId(),
-      ...receiptForm,
-      paidAmount: receiptPaidAmount,
-      createdAt: new Date().toISOString(),
-      ...customerSnapshot,
-    };
-
-    persistReceipts([...receipts, newReceipt]);
-
-    showSuccess('Receipt generated successfully.');
-    setQuotationSubView('receiptList');
-  };
+  } catch (error) {
+    console.error('Error saving receipt:', error);
+    showAlert('Could not save the receipt. Please try again.');
+  }
+};
 
   // ===== Shared: Duplicate / Edit / Status / Share for all document modules =====
   const [editingQuotationId, setEditingQuotationId] = useState(null);
@@ -3438,9 +3891,12 @@ const paymentService = {
   // otherwise be 5 separate lines, so more product rows fit on the first PDF page.
   const buildCustomerLines = (entity) => {
     const companyNameLine = (entity.customerCompany && entity.customerName)
-      ? `${entity.customerCompany} - ${entity.customerName}`
+      ? `${entity.customerCompany} -> ${entity.customerName}`
       : (entity.customerCompany || entity.customerName);
-    const addressLine = [entity.customerAddressLine1, entity.customerAddressLine2, entity.customerAddressLine3].filter(Boolean).join(', ');
+    // Prefer the full billing address (Address Line 1, Address Line 2, City, State, Pincode)
+    // saved on the entity; fall back to the raw line1-3 join for older records that predate it.
+    const addressLine = entity.customerBillingAddress
+      || [entity.customerAddressLine1, entity.customerAddressLine2, entity.customerAddressLine3].filter(Boolean).join(', ');
     return [
       companyNameLine,
       addressLine,
@@ -4545,91 +5001,178 @@ const paymentService = {
       showAlert('Could not duplicate the quotation on the server. Please try again.');
     }
   };
-  const handleSetQuotationStatus = async (status) => {
-    const previous = quotations;
-    persistQuotations(quotations.map((q) => (q.id === selectedQuotationId ? { ...q, status } : q)));
-    setShowQuotationStatusSheet(false);
-    setShowQuotationMoreSheet(false);
-    try {
-      await documentService.updateQuotationStatus(selectedQuotationId, status);
-    } catch (error) {
-      console.error('Error updating quotation status:', error);
-      persistQuotations(previous); // revert on failure
-      showAlert('Could not update the quotation status on the server. Please try again.');
-    }
-  };
+ const handleSetQuotationStatus = async (status) => {
+  const previous = quotations;
+  persistQuotations(quotations.map((q) => (q.id === selectedQuotationId ? { ...q, status } : q)));
+  setShowQuotationStatusSheet(false);
+  setShowQuotationMoreSheet(false);
+  try {
+    await documentService.updateQuotationStatus(selectedQuotationId, status);
+  } catch (error) {
+    console.error('Error updating quotation status:', error);
+    persistQuotations(previous);
+    showAlert('Could not update the quotation status. Please try again.');
+  }
+};
   const handleShareQuotation = (q) => {
     shareQuotationPdf(q);
   };
 
   // ----- Purchase Order: Duplicate / Edit / Status / Share -----
-  const openEditPurchaseOrder = (o) => {
-    setEditingPurchaseOrderId(o.id);
-    setPurchaseOrderForm({
-      date: o.date, purchaseOrderNo: o.purchaseOrderNo, otherInfo: o.otherInfo || '',
-      customerId: o.customerId, products: o.products || [], otherCharges: o.otherCharges || [], termsIds: o.termsIds || [],
-    });
-    setQuotationSubView('makePurchaseOrder');
+ const openEditPurchaseOrder = (o) => {
+  setEditingPurchaseOrderId(o.id);
+  setPurchaseOrderForm({
+    date: o.date, 
+    purchaseOrderNo: o.purchaseOrderNo, 
+    otherInfo: o.otherInfo || '',
+    customerId: o.customerId, 
+    products: o.products || [], 
+    otherCharges: o.otherCharges || [], 
+    termsIds: o.termsIds || [],
+  });
+  setQuotationSubView('makePurchaseOrder');
+};
+  const handleDuplicatePurchaseOrder = async (o) => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to duplicate a purchase order.');
+    return;
+  }
+  const { id, createdAt, updatedAt, status, ...rest } = o;
+  const payload = { 
+    ...rest, 
+    purchaseOrderNo: getNextPurchaseOrderNumber(), 
+    date: formatQuotationDate(new Date()) 
   };
-  const handleDuplicatePurchaseOrder = (o) => {
-    const duplicate = { ...o, id: genId(), purchaseOrderNo: getNextPurchaseOrderNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
-    persistPurchaseOrders([...purchaseOrders, duplicate]);
+  try {
+    const created = await purchaseOrdersService.createPurchaseOrder(loggedInUser.userId, payload);
+    persistPurchaseOrders([...purchaseOrders, created]);
     showSuccess('Purchase Order duplicated successfully.');
     setQuotationSubView('purchaseOrderList');
-  };
-  const handleSetPurchaseOrderStatus = (status) => {
-    persistPurchaseOrders(purchaseOrders.map((o) => (o.id === selectedPurchaseOrderId ? { ...o, status } : o)));
-    setShowPurchaseOrderStatusSheet(false);
-    setShowPurchaseOrderMoreSheet(false);
-  };
+  } catch (error) {
+    console.error('Error duplicating purchase order:', error);
+    showAlert('Could not duplicate the purchase order. Please try again.');
+  }
+};
+  const handleSetPurchaseOrderStatus = async (status) => {
+  const previous = purchaseOrders;
+  persistPurchaseOrders(purchaseOrders.map((o) => (o.id === selectedPurchaseOrderId ? { ...o, status } : o)));
+  setShowPurchaseOrderStatusSheet(false);
+  setShowPurchaseOrderMoreSheet(false);
+  try {
+    await purchaseOrdersService.updatePurchaseOrderStatus(selectedPurchaseOrderId, status);
+  } catch (error) {
+    console.error('Error updating purchase order status:', error);
+    persistPurchaseOrders(previous);
+    showAlert('Could not update the purchase order status. Please try again.');
+  }
+};
   const handleSharePurchaseOrder = (o) => {
     shareStandardDocumentPdf(buildPurchaseOrderDocModel(o), `PurchaseOrder_${o.purchaseOrderNo || ''}`);
   };
 
   // ----- Proforma Invoice: Duplicate / Edit / Status / Share -----
   const openEditProformaInvoice = (inv) => {
-    setEditingProformaInvoiceId(inv.id);
-    setProformaInvoiceForm({
-      date: inv.date, proformaInvoiceNo: inv.proformaInvoiceNo, dueDate: inv.dueDate || '', poNo: inv.poNo || '', otherInfo: inv.otherInfo || '',
-      customerId: inv.customerId, products: inv.products || [], otherCharges: inv.otherCharges || [], termsIds: inv.termsIds || [], paidInfo: inv.paidInfo || [],
-    });
-    setQuotationSubView('makeProformaInvoice');
+  setEditingProformaInvoiceId(inv.id);
+  setProformaInvoiceForm({
+    date: inv.date, 
+    proformaInvoiceNo: inv.proformaInvoiceNo, 
+    dueDate: inv.dueDate || '', 
+    poNo: inv.poNo || '', 
+    otherInfo: inv.otherInfo || '',
+    customerId: inv.customerId, 
+    products: inv.products || [], 
+    otherCharges: inv.otherCharges || [], 
+    termsIds: inv.termsIds || [], 
+    paidInfo: inv.paidInfo || [],
+  });
+  setQuotationSubView('makeProformaInvoice');
+};
+  const handleDuplicateProformaInvoice = async (inv) => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to duplicate a proforma invoice.');
+    return;
+  }
+  const { id, createdAt, updatedAt, status, ...rest } = inv;
+  const payload = { 
+    ...rest, 
+    proformaInvoiceNo: getNextProformaInvoiceNumber(), 
+    date: formatQuotationDate(new Date()) 
   };
-  const handleDuplicateProformaInvoice = (inv) => {
-    const duplicate = { ...inv, id: genId(), proformaInvoiceNo: getNextProformaInvoiceNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
-    persistProformaInvoices([...proformaInvoices, duplicate]);
+  try {
+    const created = await proformaInvoicesService.createProformaInvoice(loggedInUser.userId, payload);
+    persistProformaInvoices([...proformaInvoices, created]);
     showSuccess('Proforma Invoice duplicated successfully.');
     setQuotationSubView('proformaInvoiceList');
-  };
-  const handleSetProformaInvoiceStatus = (status) => {
-    persistProformaInvoices(proformaInvoices.map((inv) => (inv.id === selectedProformaInvoiceId ? { ...inv, status } : inv)));
-    setShowProformaInvoiceStatusSheet(false);
-    setShowProformaInvoiceMoreSheet(false);
-  };
+  } catch (error) {
+    console.error('Error duplicating proforma invoice:', error);
+    showAlert('Could not duplicate the proforma invoice. Please try again.');
+  }
+};
+  const handleSetProformaInvoiceStatus = async (status) => {
+  const previous = proformaInvoices;
+  persistProformaInvoices(proformaInvoices.map((inv) => (inv.id === selectedProformaInvoiceId ? { ...inv, status } : inv)));
+  setShowProformaInvoiceStatusSheet(false);
+  setShowProformaInvoiceMoreSheet(false);
+  try {
+    await proformaInvoicesService.updateProformaInvoiceStatus(selectedProformaInvoiceId, status);
+  } catch (error) {
+    console.error('Error updating proforma invoice status:', error);
+    persistProformaInvoices(previous);
+    showAlert('Could not update the proforma invoice status. Please try again.');
+  }
+};
   const handleShareProformaInvoice = (inv) => {
     shareStandardDocumentPdf(buildProformaInvoiceDocModel(inv), `ProformaInvoice_${inv.proformaInvoiceNo || ''}`);
   };
 
   // ----- Delivery Note: Duplicate / Edit / Status / Share -----
   const openEditDeliveryNote = (dn) => {
-    setEditingDeliveryNoteId(dn.id);
-    setDeliveryNoteForm({
-      date: dn.date, deliveryNoteNo: dn.deliveryNoteNo, refNo: dn.refNo || '', otherInfo: dn.otherInfo || '',
-      customerId: dn.customerId, products: dn.products || [], termsIds: dn.termsIds || [],
-    });
-    setQuotationSubView('makeDeliveryNote');
+  setEditingDeliveryNoteId(dn.id);
+  setDeliveryNoteForm({
+    date: dn.date, 
+    deliveryNoteNo: dn.deliveryNoteNo, 
+    refNo: dn.refNo || '', 
+    otherInfo: dn.otherInfo || '',
+    customerId: dn.customerId, 
+    products: dn.products || [], 
+    termsIds: dn.termsIds || [],
+  });
+  setQuotationSubView('makeDeliveryNote');
+};
+  const handleDuplicateDeliveryNote = async (dn) => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to duplicate a delivery note.');
+    return;
+  }
+  const { id, createdAt, updatedAt, status, ...rest } = dn;
+  const payload = { 
+    ...rest, 
+    deliveryNoteNo: getNextDeliveryNoteNumber(), 
+    date: formatQuotationDate(new Date()) 
   };
-  const handleDuplicateDeliveryNote = (dn) => {
-    const duplicate = { ...dn, id: genId(), deliveryNoteNo: getNextDeliveryNoteNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
-    persistDeliveryNotes([...deliveryNotes, duplicate]);
+  try {
+    const created = await deliveryNotesService.createDeliveryNote(loggedInUser.userId, payload);
+    persistDeliveryNotes([...deliveryNotes, created]);
     showSuccess('Delivery Note duplicated successfully.');
     setQuotationSubView('deliveryNoteList');
-  };
-  const handleSetDeliveryNoteStatus = (status) => {
-    persistDeliveryNotes(deliveryNotes.map((dn) => (dn.id === selectedDeliveryNoteId ? { ...dn, status } : dn)));
-    setShowDeliveryNoteStatusSheet(false);
-    setShowDeliveryNoteMoreSheet(false);
-  };
+  } catch (error) {
+    console.error('Error duplicating delivery note:', error);
+    showAlert('Could not duplicate the delivery note. Please try again.');
+  }
+};
+  const handleSetDeliveryNoteStatus = async (status) => {
+  const previous = deliveryNotes;
+  persistDeliveryNotes(deliveryNotes.map((dn) => (dn.id === selectedDeliveryNoteId ? { ...dn, status } : dn)));
+  setShowDeliveryNoteStatusSheet(false);
+  setShowDeliveryNoteMoreSheet(false);
+  try {
+    await deliveryNotesService.updateDeliveryNoteStatus(selectedDeliveryNoteId, status);
+  } catch (error) {
+    console.error('Error updating delivery note status:', error);
+    persistDeliveryNotes(previous);
+    showAlert('Could not update the delivery note status. Please try again.');
+  }
+};
   const handleShareDeliveryNote = (dn) => {
     shareStandardDocumentPdf(buildDeliveryNoteDocModel(dn), `DeliveryNote_${dn.deliveryNoteNo || ''}`);
   };
@@ -4643,36 +5186,79 @@ const paymentService = {
     });
     setQuotationSubView('makeInvoice');
   };
-  const handleDuplicateInvoice = (inv) => {
-    const duplicate = { ...inv, id: genId(), invoiceNo: getNextInvoiceNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
-    persistInvoices([...invoices, duplicate]);
+  const handleDuplicateInvoice = async (inv) => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to duplicate an invoice.');
+    return;
+  }
+  const { id, createdAt, updatedAt, status, ...rest } = inv;
+  const payload = { 
+    ...rest, 
+    invoiceNo: getNextInvoiceNumber(), 
+    date: formatQuotationDate(new Date()) 
+  };
+  try {
+    const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
+    persistInvoices([...invoices, created]);
     showSuccess('Invoice duplicated successfully.');
     setQuotationSubView('invoiceList');
-  };
-  const handleSetInvoiceStatus = (status) => {
-    persistInvoices(invoices.map((inv) => (inv.id === selectedInvoiceId ? { ...inv, status } : inv)));
-    setShowInvoiceStatusSheet(false);
-    setShowInvoiceMoreSheet(false);
-  };
+  } catch (error) {
+    console.error('Error duplicating invoice:', error);
+    showAlert('Could not duplicate the invoice. Please try again.');
+  }
+};
+  const handleSetInvoiceStatus = async (status) => {
+  const previous = invoices;
+  persistInvoices(invoices.map((inv) => (inv.id === selectedInvoiceId ? { ...inv, status } : inv)));
+  setShowInvoiceStatusSheet(false);
+  setShowInvoiceMoreSheet(false);
+  try {
+    await invoicesService.updateInvoiceStatus(selectedInvoiceId, status);
+  } catch (error) {
+    console.error('Error updating invoice status:', error);
+    persistInvoices(previous);
+    showAlert('Could not update the invoice status. Please try again.');
+  }
+};
   const handleShareInvoice = (inv) => {
     shareStandardDocumentPdf(buildInvoiceDocModel(inv), `Invoice_${inv.invoiceNo || ''}`);
   };
 
   // ----- Receipt: Duplicate / Edit / Status / Share -----
   const openEditReceipt = (r) => {
-    setEditingReceiptId(r.id);
-    setReceiptForm({
-      date: r.date, receiptNo: r.receiptNo, customerId: r.customerId,
-      paymentMode: r.paymentMode || '', referenceNo: r.referenceNo || '', paidAmount: r.paidAmount != null ? String(r.paidAmount) : '', paymentFor: r.paymentFor || '',
-    });
-    setQuotationSubView('makeReceipt');
+  setEditingReceiptId(r.id);
+  setReceiptForm({
+    date: r.date, 
+    receiptNo: r.receiptNo, 
+    customerId: r.customerId,
+    paymentMode: r.paymentMode || '', 
+    referenceNo: r.referenceNo || '', 
+    paidAmount: r.paidAmount != null ? String(r.paidAmount) : '', 
+    paymentFor: r.paymentFor || '',
+  });
+  setQuotationSubView('makeReceipt');
+};
+  const handleDuplicateReceipt = async (r) => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to duplicate a receipt.');
+    return;
+  }
+  const { id, createdAt, updatedAt, status, ...rest } = r;
+  const payload = { 
+    ...rest, 
+    receiptNo: getNextReceiptNumber(), 
+    date: formatQuotationDate(new Date()) 
   };
-  const handleDuplicateReceipt = (r) => {
-    const duplicate = { ...r, id: genId(), receiptNo: getNextReceiptNumber(), date: formatQuotationDate(new Date()), createdAt: new Date().toISOString(), status: undefined };
-    persistReceipts([...receipts, duplicate]);
+  try {
+    const created = await receiptsService.createReceipt(loggedInUser.userId, payload);
+    persistReceipts([...receipts, created]);
     showSuccess('Receipt duplicated successfully.');
     setQuotationSubView('receiptList');
-  };
+  } catch (error) {
+    console.error('Error duplicating receipt:', error);
+    showAlert('Could not duplicate the receipt. Please try again.');
+  }
+};
   const handleSetReceiptStatus = (status) => {
     persistReceipts(receipts.map((r) => (r.id === selectedReceiptId ? { ...r, status } : r)));
     setShowReceiptStatusSheet(false);
@@ -6784,8 +7370,19 @@ const paymentService = {
 
 useEffect(() => {
   if (isUserAuthenticated && loggedInUser?.userId) {
-    loadUserProjects(loggedInUser.userId);
-    loadUserQuotations(loggedInUser.userId);
+    const userId = loggedInUser.userId;
+    loadUserProjects(userId);
+    loadUserQuotations(userId);
+    loadUserCustomers(userId);
+    loadUserProducts(userId);
+    loadUserInvoices(userId);
+    loadUserPurchaseOrders(userId);
+    loadUserProformaInvoices(userId);
+    loadUserDeliveryNotes(userId);
+    loadUserReceipts(userId);
+    loadUserBusinessInfo(userId);
+    loadUserSettings(userId);
+    loadUserTerms(userId);
   }
 }, [isUserAuthenticated, loggedInUser]);
 
@@ -6839,6 +7436,7 @@ useEffect(() => {
         if (isUserAuthenticated && loggedInUser?.userId) {
           await loadUserProjects(loggedInUser.userId);
           await loadUserQuotations(loggedInUser.userId);
+          await loadUserCustomers(loggedInUser.userId);
         }
       } finally {
         setIsReconnecting(false);
@@ -7342,7 +7940,6 @@ useEffect(() => {
             </div>
 
             <div style={moduleHomeStyles.panel}>
-              <h2 style={moduleHomeStyles.panelLabel}>Discover</h2>
               <div style={moduleHomeStyles.tileGrid}>
                 <div
                   role="button"
@@ -7354,7 +7951,7 @@ useEffect(() => {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
-                    aria-label="Watch Employee, Attendance and Payments video"
+                    aria-label="Watch Mark Attendance video"
                     style={moduleHomeStyles.tilePlayBadge}
                   >
                     <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
@@ -7362,7 +7959,7 @@ useEffect(() => {
                   <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #2554EB, #0B3C9B)' }}>
                     <HiOutlineUserGroup size={20} color="#ffffff" />
                   </span>
-                  <span style={moduleHomeStyles.tileTitleAdjustable}>Employee, Attendance and Payments</span>
+                  <span style={moduleHomeStyles.tileTitleAdjustable}>Mark Attendance</span>
                 </div>
                 <div
                   role="button"
@@ -7374,7 +7971,7 @@ useEffect(() => {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
-                    aria-label="Watch Quotation, Invoice, Purchase and Delivery video"
+                    aria-label="Watch Make Quotation video"
                     style={moduleHomeStyles.tilePlayBadge}
                   >
                     <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
@@ -7382,7 +7979,7 @@ useEffect(() => {
                   <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #14B8A6, #0F766E)' }}>
                     <FiFileText size={19} color="#ffffff" />
                   </span>
-                  <span style={moduleHomeStyles.tileTitleAdjustable}>Quotation, Invoice, Purchase and Delivery</span>
+                  <span style={moduleHomeStyles.tileTitleAdjustable}>Make Quotation</span>
                 </div>
               </div>
             </div>
@@ -7652,6 +8249,23 @@ useEffect(() => {
               <FieldInput label="Address Line 1" value={businessInfo.addressLine1} onChange={(v) => updateBusinessField('addressLine1', v)} />
               <FieldInput label="Address Line 2" value={businessInfo.addressLine2} onChange={(v) => updateBusinessField('addressLine2', v)} />
               <FieldInput label="City" value={businessInfo.addressLine3} onChange={(v) => updateBusinessField('addressLine3', v)} />
+              <button
+                type="button"
+                onClick={() => { setStateFieldTarget('business'); setStateSearchQuery(''); setShowStatePicker(true); }}
+                style={{ ...businessInfoStyles.fieldBox, width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}
+              >
+                <span style={businessInfoStyles.fieldLabel}>State</span>
+                <span style={{ ...businessInfoStyles.fieldInputEl, color: businessInfo.state ? '#0F172A' : '#94A3B8' }}>
+                  {businessInfo.state ? toTitleCase(businessInfo.state) : 'Select State'}
+                </span>
+              </button>
+              <FieldInput
+                label="PIN Code"
+                value={businessInfo.pincode || ''}
+                onChange={(v) => updateBusinessField('pincode', v.replace(/\D/g, '').slice(0, 6))}
+                type="tel"
+                error={businessInfoErrors.pincode}
+              />
               <FieldInput label="Business Category" value={businessInfo.businessCategory} onChange={(v) => updateBusinessField('businessCategory', v)} />
 
               <div style={businessInfoStyles.sectionBar}>Tax Details</div>
@@ -7672,16 +8286,6 @@ useEffect(() => {
                 </div>
               </div>
               <FieldInput label="GSTIN/PAN/VAT/Business Number" value={businessInfo.taxNumber} onChange={(v) => updateBusinessField('taxNumber', v)} error={businessInfoErrors.taxNumber} />
-              <button
-                type="button"
-                onClick={() => { setStateFieldTarget('business'); setStateSearchQuery(''); setShowStatePicker(true); }}
-                style={{ ...businessInfoStyles.fieldBox, width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}
-              >
-                <span style={businessInfoStyles.fieldLabel}>State</span>
-                <span style={{ ...businessInfoStyles.fieldInputEl, color: businessInfo.state ? '#0F172A' : '#94A3B8' }}>
-                  {businessInfo.state ? toTitleCase(businessInfo.state) : 'Select State'}
-                </span>
-              </button>
 
               <div style={businessInfoStyles.sectionBar}>Payment Instructions - Bank Details</div>
               <button type="button" onClick={() => setIsBankDetailsModalOpen(true)} style={businessInfoStyles.bankCard}>
@@ -8966,6 +9570,26 @@ useEffect(() => {
                 onChange={(e) => updateCustomerField('addressLine3', e.target.value)}
               />
               <LabeledField
+                label="State"
+                as="button"
+                onClick={() => { setStateFieldTarget('customer'); setStateSearchQuery(''); setShowStatePicker(true); }}
+                inputStyle={{ color: customerForm.state ? '#0F172A' : '#94A3B8' }}
+              >
+                {customerForm.state ? toTitleCase(customerForm.state) : 'Select State'}
+              </LabeledField>
+              <LabeledField
+                label="PIN Code"
+                type="text"
+                inputMode="numeric"
+                value={customerForm.pincode}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                  updateCustomerField('pincode', digits);
+                  if (customerPincodeError) setCustomerPincodeError(false);
+                }}
+                error={customerPincodeError ? 'Enter a valid 6-digit PIN code' : null}
+              />
+              <LabeledField
                 label="GST Number"
                 type="text"
                 value={customerForm.gstin}
@@ -8975,22 +9599,74 @@ useEffect(() => {
                 }}
                 error={customerGstinError ? 'Enter a valid GST number' : null}
               />
-              <LabeledField
-                label="State"
-                as="button"
-                onClick={() => { setStateFieldTarget('customer'); setStateSearchQuery(''); setShowStatePicker(true); }}
-                inputStyle={{ color: customerForm.state ? '#0F172A' : '#94A3B8' }}
-              >
-                {customerForm.state ? toTitleCase(customerForm.state) : 'Select State'}
-              </LabeledField>
 
               <div style={customerModuleStyles.sectionBar}>Shipping Details</div>
-              <LabeledField
-                label="Shipping Address"
-                as="textarea"
-                value={customerForm.shippingAddress}
-                onChange={(e) => updateCustomerField('shippingAddress', e.target.value)}
-              />
+              <div style={customerModuleStyles.taxableRow}>
+                <span style={customerModuleStyles.sheetSmallLabelInline}>Same as Billing Address</span>
+                <input
+                  type="checkbox"
+                  checked={customerForm.shippingSameAsBilling}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setCustomerForm((prev) => ({
+                      ...prev,
+                      shippingSameAsBilling: checked,
+                      ...(checked ? {
+                        shippingAddressLine1: prev.addressLine1,
+                        shippingAddressLine2: prev.addressLine2,
+                        shippingCity: prev.addressLine3,
+                        shippingState: prev.state,
+                        shippingPincode: prev.pincode,
+                      } : null),
+                    }));
+                    if (checked) setCustomerShippingPincodeError(false);
+                  }}
+                  style={customerModuleStyles.checkbox}
+                />
+              </div>
+
+              {!customerForm.shippingSameAsBilling && (
+                <>
+                  <LabeledField
+                    label="Shipping Address Line 1"
+                    type="text"
+                    value={customerForm.shippingAddressLine1}
+                    onChange={(e) => updateCustomerField('shippingAddressLine1', e.target.value)}
+                  />
+                  <LabeledField
+                    label="Shipping Address Line 2"
+                    type="text"
+                    value={customerForm.shippingAddressLine2}
+                    onChange={(e) => updateCustomerField('shippingAddressLine2', e.target.value)}
+                  />
+                  <LabeledField
+                    label="Shipping City"
+                    type="text"
+                    value={customerForm.shippingCity}
+                    onChange={(e) => updateCustomerField('shippingCity', e.target.value)}
+                  />
+                  <LabeledField
+                    label="Shipping State"
+                    as="button"
+                    onClick={() => { setStateFieldTarget('customerShipping'); setStateSearchQuery(''); setShowStatePicker(true); }}
+                    inputStyle={{ color: customerForm.shippingState ? '#0F172A' : '#94A3B8' }}
+                  >
+                    {customerForm.shippingState ? toTitleCase(customerForm.shippingState) : 'Select State'}
+                  </LabeledField>
+                  <LabeledField
+                    label="Shipping PIN Code"
+                    type="text"
+                    inputMode="numeric"
+                    value={customerForm.shippingPincode}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                      updateCustomerField('shippingPincode', digits);
+                      if (customerShippingPincodeError) setCustomerShippingPincodeError(false);
+                    }}
+                    error={customerShippingPincodeError ? 'Enter a valid 6-digit PIN code' : null}
+                  />
+                </>
+              )}
 
               <button type="button" onClick={handleSaveCustomer} style={customerModuleStyles.addBtn}>
                 {editingCustomerId ? 'Update' : 'Add'}
@@ -9023,6 +9699,7 @@ useEffect(() => {
                           type="button"
                           onClick={() => {
                             if (stateFieldTarget === 'business') updateBusinessField('state', s);
+                            else if (stateFieldTarget === 'customerShipping') updateCustomerField('shippingState', s);
                             else updateCustomerField('state', s);
                             setShowStatePicker(false);
                             setStateSearchQuery('');
@@ -10768,9 +11445,18 @@ useEffect(() => {
               </button>
               <button
                 onClick={() => {
-                  showConfirm('Delete this purchase order?', () => {
-                    persistPurchaseOrders(purchaseOrders.filter(q => q.id !== selectedPurchaseOrderId));
+                  showConfirm('Delete this purchase order?', async () => {
+                    const previous = purchaseOrders;
+                    const deletedId = selectedPurchaseOrderId;
+                    persistPurchaseOrders(purchaseOrders.filter(o => o.id !== deletedId));
                     setQuotationSubView('purchaseOrderList');
+                    try {
+                      await purchaseOrdersService.deletePurchaseOrder(deletedId);
+                    } catch (error) {
+                      console.error('Error deleting purchase order:', error);
+                      persistPurchaseOrders(previous);
+                      showAlert('Could not delete the purchase order. Please try again.');
+                    }
                   });
                 }}
                 style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
@@ -11658,11 +12344,20 @@ useEffect(() => {
               </button>
               <button
                 onClick={() => {
-                  showConfirm('Delete this proforma invoice?', () => {
-                    persistProformaInvoices(proformaInvoices.filter(q => q.id !== selectedProformaInvoiceId));
-                    setQuotationSubView('proformaInvoiceList');
-                  });
-                }}
+  showConfirm('Delete this proforma invoice?', async () => {
+    const previous = proformaInvoices;
+    const deletedId = selectedProformaInvoiceId;
+    persistProformaInvoices(proformaInvoices.filter(inv => inv.id !== deletedId));
+    setQuotationSubView('proformaInvoiceList');
+    try {
+      await proformaInvoicesService.deleteProformaInvoice(deletedId);
+    } catch (error) {
+      console.error('Error deleting proforma invoice:', error);
+      persistProformaInvoices(previous);
+      showAlert('Could not delete the proforma invoice. Please try again.');
+    }
+  });
+}}
                 style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
               >
                 <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
@@ -12268,11 +12963,20 @@ useEffect(() => {
               </button>
               <button
                 onClick={() => {
-                  showConfirm('Delete this delivery note?', () => {
-                    persistDeliveryNotes(deliveryNotes.filter(q => q.id !== selectedDeliveryNoteId));
-                    setQuotationSubView('deliveryNoteList');
-                  });
-                }}
+  showConfirm('Delete this delivery note?', async () => {
+    const previous = deliveryNotes;
+    const deletedId = selectedDeliveryNoteId;
+    persistDeliveryNotes(deliveryNotes.filter(dn => dn.id !== deletedId));
+    setQuotationSubView('deliveryNoteList');
+    try {
+      await deliveryNotesService.deleteDeliveryNote(deletedId);
+    } catch (error) {
+      console.error('Error deleting delivery note:', error);
+      persistDeliveryNotes(previous);
+      showAlert('Could not delete the delivery note. Please try again.');
+    }
+  });
+}}
                 style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
               >
                 <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
@@ -13160,9 +13864,18 @@ useEffect(() => {
               </button>
               <button
                 onClick={() => {
-                  showConfirm('Delete this invoice?', () => {
-                    persistInvoices(invoices.filter(inv => inv.id !== selectedInvoiceId));
+                  showConfirm('Delete this invoice?', async () => {
+                    const previous = invoices;
+                    const deletedId = selectedInvoiceId;
+                    persistInvoices(invoices.filter(inv => inv.id !== deletedId));
                     setQuotationSubView('invoiceList');
+                    try {
+                      await invoicesService.deleteInvoice(deletedId);
+                    } catch (error) {
+                      console.error('Error deleting invoice:', error);
+                      persistInvoices(previous);
+                      showAlert('Could not delete the invoice. Please try again.');
+                    }
                   });
                 }}
                 style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
@@ -13553,12 +14266,12 @@ useEffect(() => {
                     <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>To,</p>
                     <p style={docStyles.toName}>
                       {(currentReceipt.customerCompany && currentReceipt.customerName)
-                        ? `${currentReceipt.customerCompany} - ${currentReceipt.customerName}`
+                        ? `${currentReceipt.customerCompany} -> ${currentReceipt.customerName}`
                         : (currentReceipt.customerCompany || currentReceipt.customerName)}
                     </p>
-                    {[currentReceipt.customerAddressLine1, currentReceipt.customerAddressLine2, currentReceipt.customerAddressLine3].filter(Boolean).length > 0 && (
+                    {(currentReceipt.customerBillingAddress || [currentReceipt.customerAddressLine1, currentReceipt.customerAddressLine2, currentReceipt.customerAddressLine3].filter(Boolean).join(', ')) && (
                       <p style={docStyles.contactLine}>
-                        {[currentReceipt.customerAddressLine1, currentReceipt.customerAddressLine2, currentReceipt.customerAddressLine3].filter(Boolean).join(', ')}
+                        {currentReceipt.customerBillingAddress || [currentReceipt.customerAddressLine1, currentReceipt.customerAddressLine2, currentReceipt.customerAddressLine3].filter(Boolean).join(', ')}
                       </p>
                     )}
                     {currentReceipt.customerMobile && (
@@ -13626,11 +14339,20 @@ useEffect(() => {
               </button>
               <button
                 onClick={() => {
-                  showConfirm('Delete this receipt?', () => {
-                    persistReceipts(receipts.filter(r => r.id !== selectedReceiptId));
-                    setQuotationSubView('receiptList');
-                  });
-                }}
+  showConfirm('Delete this receipt?', async () => {
+    const previous = receipts;
+    const deletedId = selectedReceiptId;
+    persistReceipts(receipts.filter(r => r.id !== deletedId));
+    setQuotationSubView('receiptList');
+    try {
+      await receiptsService.deleteReceipt(deletedId);
+    } catch (error) {
+      console.error('Error deleting receipt:', error);
+      persistReceipts(previous);
+      showAlert('Could not delete the receipt. Please try again.');
+    }
+  });
+}}
                 style={{ ...docActionBarStyles.btn, color: '#DC2626' }}
               >
                 <span style={docActionBarStyles.iconWrap}><FiTrash2 size={20} color="#DC2626" /></span>
@@ -13667,12 +14389,12 @@ useEffect(() => {
         { key: 'settings', label: 'SETTINGS', icon: HiOutlineCog6Tooth },
       ];
       const discoverTiles = [
-        { key: 'quotationList', title: 'Make Quotation' },
-        { key: 'invoiceList', title: 'Make Invoice' },
-        { key: 'purchaseOrder', title: 'Make Purchase Order' },
-        { key: 'proformaInvoice', title: 'Make Proforma Invoice' },
-        { key: 'deliveryNote', title: 'Make Delivery Note' },
-        { key: 'receipt', title: 'Make Receipt' },
+        { key: 'quotationList', title: 'Quotation' },
+        { key: 'invoiceList', title: 'Invoice' },
+        { key: 'purchaseOrder', title: 'Purchase Order' },
+        { key: 'proformaInvoice', title: 'Proforma Invoice' },
+        { key: 'deliveryNote', title: 'Delivery Note' },
+        { key: 'receipt', title: 'Receipt' },
       ];
       // TODO: remaining tiles (terms as a Discover tile, quotationList, and the other 6 Discover tiles) still no-op —
       // wire these up once the destination screens are defined.
