@@ -6,6 +6,7 @@ namespace LMPTS.Application.DTOs
     {
         public string? LogoImg { get; set; }
         public string? SignatureImg { get; set; }
+        public string? QrCodeImg { get; set; }
         public string? BusinessName { get; set; }
         public string? ContactName { get; set; }
         public string? Email { get; set; }

@@ -77,6 +77,7 @@ namespace LMPTS.API.Controllers
                 UserId = info.UserId,
                 LogoImg = info.LogoImg,
                 SignatureImg = info.SignatureImg,
+                QrCodeImg = info.QrCodeImg,
                 BusinessName = info.BusinessName,
                 ContactName = info.ContactName,
                 Email = info.Email,
@@ -103,6 +104,7 @@ namespace LMPTS.API.Controllers
         {
             if (!string.IsNullOrEmpty(dto.LogoImg)) entity.LogoImg = dto.LogoImg;
             if (!string.IsNullOrEmpty(dto.SignatureImg)) entity.SignatureImg = dto.SignatureImg;
+            if (!string.IsNullOrEmpty(dto.QrCodeImg)) entity.QrCodeImg = dto.QrCodeImg;
             entity.BusinessName = dto.BusinessName;
             entity.ContactName = dto.ContactName;
             entity.Email = dto.Email;

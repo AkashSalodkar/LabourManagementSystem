@@ -5,7 +5,7 @@ namespace LMPTS.Application.DTOs
     // Product Line Item
     public class DocumentProductDto
     {
-        public string? ProductId { get; set; }
+        public int? ProductId { get; set; }
         public string Name { get; set; } = string.Empty;
         public decimal Price { get; set; }
         public decimal Gst { get; set; }

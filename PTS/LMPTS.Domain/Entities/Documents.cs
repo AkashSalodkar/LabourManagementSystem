@@ -12,6 +12,7 @@ namespace LMPTS.Domain.Entities
         [Required]
         public int UserId { get; set; }
 
+        [Required]
         [Column(TypeName = "date")]
         public DateTime Date { get; set; }
 
@@ -59,9 +60,15 @@ namespace LMPTS.Domain.Entities
         [ForeignKey(nameof(CustomerId))]
         public virtual Customer? Customer { get; set; }
 
-        public virtual ICollection<DocumentProduct> Products { get; set; } = new List<DocumentProduct>();
-        public virtual ICollection<DocumentOtherCharge> OtherCharges { get; set; } = new List<DocumentOtherCharge>();
-        public virtual ICollection<DocumentTermSelection> TermSelections { get; set; } = new List<DocumentTermSelection>();
+        // NOTE: This class intentionally does NOT declare navigation collections to
+        // DocumentProduct/DocumentOtherCharge/DocumentTermSelection. Those tables are
+        // shared across all five document types (Quotation, Invoice, PurchaseOrder,
+        // ProformaInvoice, DeliveryNote), distinguished only by the DocumentType string
+        // column — a polymorphic association enforced in application code
+        // (see DocumentsController.SaveDocumentChildren), not a real relational FK.
+        // A navigation property here would make EF infer a hard foreign key from the
+        // shared DocumentId column to *this* table specifically, which breaks the moment
+        // the same row needs to satisfy that same column against four other tables too.
     }
 
     [Table("Quotations")]
@@ -72,7 +79,7 @@ namespace LMPTS.Domain.Entities
         public string QuotationNo { get; set; } = string.Empty;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal GrandTotal { get; set; }
+        public decimal GrandTotal { get; set; } = 0;
     }
 
     [Table("PurchaseOrders")]
@@ -83,7 +90,7 @@ namespace LMPTS.Domain.Entities
         public string PurchaseOrderNo { get; set; } = string.Empty;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal GrandTotal { get; set; }
+        public decimal GrandTotal { get; set; } = 0;
     }
 
     [Table("ProformaInvoices")]
@@ -100,15 +107,14 @@ namespace LMPTS.Domain.Entities
         public string? PoNo { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal GrandTotal { get; set; }
+        public decimal GrandTotal { get; set; } = 0;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal PaidTotal { get; set; }
+        public decimal PaidTotal { get; set; } = 0;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal BalanceDue { get; set; }
+        public decimal BalanceDue { get; set; } = 0;
 
-        public virtual ICollection<DocumentPaidInfo> PaidInfos { get; set; } = new List<DocumentPaidInfo>();
     }
 
     [Table("Invoices")]
@@ -125,15 +131,14 @@ namespace LMPTS.Domain.Entities
         public string? PoNo { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal GrandTotal { get; set; }
+        public decimal GrandTotal { get; set; } = 0;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal PaidTotal { get; set; }
+        public decimal PaidTotal { get; set; } = 0;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal BalanceDue { get; set; }
+        public decimal BalanceDue { get; set; } = 0;
 
-        public virtual ICollection<DocumentPaidInfo> PaidInfos { get; set; } = new List<DocumentPaidInfo>();
     }
 
     [Table("DeliveryNotes")]
@@ -157,6 +162,7 @@ namespace LMPTS.Domain.Entities
         [Required]
         public int UserId { get; set; }
 
+        [Required]
         [Column(TypeName = "date")]
         public DateTime Date { get; set; }
 
@@ -173,7 +179,7 @@ namespace LMPTS.Domain.Entities
         public string? ReferenceNo { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal? PaidAmount { get; set; }
+        public decimal PaidAmount { get; set; } = 0; // Changed to non-nullable with default
 
         public string? PaymentFor { get; set; }
 

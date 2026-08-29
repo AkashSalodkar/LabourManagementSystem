@@ -602,22 +602,6 @@ namespace LMPTS.Infrastructure.Data
                     .HasForeignKey(e => e.CustomerId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // Children still cascade
-                entity.HasMany(e => e.Products)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.OtherCharges)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.TermSelections)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
                 entity.HasIndex(e => e.UserId);
                 entity.HasIndex(e => e.CustomerId);
                 entity.HasIndex(e => e.QuotationNo);
@@ -661,27 +645,6 @@ namespace LMPTS.Infrastructure.Data
                     .HasForeignKey(e => e.CustomerId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // Children still cascade
-                entity.HasMany(e => e.Products)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.OtherCharges)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.TermSelections)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.PaidInfos)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
                 entity.HasIndex(e => e.UserId);
                 entity.HasIndex(e => e.CustomerId);
                 entity.HasIndex(e => e.InvoiceNo);
@@ -720,22 +683,6 @@ namespace LMPTS.Infrastructure.Data
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)
                     .OnDelete(DeleteBehavior.Restrict);
-
-                // Children still cascade
-                entity.HasMany(e => e.Products)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.OtherCharges)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.TermSelections)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasIndex(e => e.UserId);
                 entity.HasIndex(e => e.CustomerId);
@@ -780,27 +727,6 @@ namespace LMPTS.Infrastructure.Data
                     .HasForeignKey(e => e.CustomerId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // Children still cascade
-                entity.HasMany(e => e.Products)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.OtherCharges)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.TermSelections)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.PaidInfos)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
                 entity.HasIndex(e => e.UserId);
                 entity.HasIndex(e => e.CustomerId);
                 entity.HasIndex(e => e.ProformaInvoiceNo);
@@ -839,22 +765,6 @@ namespace LMPTS.Infrastructure.Data
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)
                     .OnDelete(DeleteBehavior.Restrict);
-
-                // Children still cascade
-                entity.HasMany(e => e.Products)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.OtherCharges)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasMany(e => e.TermSelections)
-                    .WithOne()
-                    .HasForeignKey(e => e.DocumentId)
-                    .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasIndex(e => e.UserId);
                 entity.HasIndex(e => e.CustomerId);

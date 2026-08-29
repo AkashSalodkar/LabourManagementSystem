@@ -18,10 +18,10 @@ namespace LMPTS.Domain.Entities
         public string Name { get; set; } = string.Empty;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal? Price { get; set; }
+        public decimal Price { get; set; } = 0;  // Changed to non-nullable with default
 
         [Column(TypeName = "decimal(5,2)")]
-        public decimal? Gst { get; set; }
+        public decimal Gst { get; set; } = 0;    // Changed to non-nullable with default
 
         public string? Description { get; set; }
 

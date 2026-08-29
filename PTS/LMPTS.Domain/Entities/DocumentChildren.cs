@@ -12,7 +12,7 @@ namespace LMPTS.Domain.Entities
 
         [Required]
         [MaxLength(20)]
-        public string DocumentType { get; set; } = string.Empty; // Quotation, Invoice, etc.
+        public string DocumentType { get; set; } = string.Empty;
 
         [Required]
         public int DocumentId { get; set; }
@@ -24,13 +24,13 @@ namespace LMPTS.Domain.Entities
         public string ProductName { get; set; } = string.Empty;
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal Price { get; set; }
+        public decimal Price { get; set; } = 0; // Added default
 
         [Column(TypeName = "decimal(5,2)")]
-        public decimal Gst { get; set; }
+        public decimal Gst { get; set; } = 0; // Added default
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal Qty { get; set; }
+        public decimal Qty { get; set; } = 1; // Added default
 
         [MaxLength(20)]
         public string? Unit { get; set; }
@@ -69,9 +69,9 @@ namespace LMPTS.Domain.Entities
         public string Label { get; set; } = "Other Charges";
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal Amount { get; set; }
+        public decimal Amount { get; set; } = 0; // Added default
 
-        public bool IsTaxable { get; set; }
+        public bool IsTaxable { get; set; } = false; // Added default
 
         [Column(TypeName = "datetime")]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -89,16 +89,17 @@ namespace LMPTS.Domain.Entities
 
         [Required]
         [MaxLength(20)]
-        public string DocumentType { get; set; } = string.Empty; // "Invoice" or "ProformaInvoice"
+        public string DocumentType { get; set; } = string.Empty;
 
         [Required]
         public int DocumentId { get; set; }
 
+        [Required]
         [Column(TypeName = "date")]
         public DateTime Date { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
-        public decimal Amount { get; set; }
+        public decimal Amount { get; set; } = 0; // Added default
 
         public string? Note { get; set; }
 

@@ -12,9 +12,12 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.4.2"),
+        .package(name: "CapacitorCommunityContacts", path: "..\..\..\node_modules\@capacitor-community\contacts"),
+        .package(name: "CapacitorFirebaseAuthentication", path: "..\..\..\node_modules\@capacitor-firebase\authentication"),
         .package(name: "CapacitorApp", path: "..\..\..\node_modules\@capacitor\app"),
         .package(name: "CapacitorBrowser", path: "..\..\..\node_modules\@capacitor\browser"),
         .package(name: "CapacitorFilesystem", path: "..\..\..\node_modules\@capacitor\filesystem"),
+        .package(name: "CapacitorNetwork", path: "..\..\..\node_modules\@capacitor\network"),
         .package(name: "CapacitorShare", path: "..\..\..\node_modules\@capacitor\share")
     ],
     targets: [
@@ -23,9 +26,12 @@ let package = Package(
             dependencies: [
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm"),
+                .product(name: "CapacitorCommunityContacts", package: "CapacitorCommunityContacts"),
+                .product(name: "CapacitorFirebaseAuthentication", package: "CapacitorFirebaseAuthentication"),
                 .product(name: "CapacitorApp", package: "CapacitorApp"),
                 .product(name: "CapacitorBrowser", package: "CapacitorBrowser"),
                 .product(name: "CapacitorFilesystem", package: "CapacitorFilesystem"),
+                .product(name: "CapacitorNetwork", package: "CapacitorNetwork"),
                 .product(name: "CapacitorShare", package: "CapacitorShare")
             ]
         )

@@ -16,6 +16,8 @@ namespace LMPTS.Domain.Entities
         public string? LogoImg { get; set; }
         public string? SignatureImg { get; set; }
 
+        public string? QrCodeImg { get; set; }   // add this line
+
         [MaxLength(100)]
         public string? BusinessName { get; set; }
 

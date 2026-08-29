@@ -27,10 +27,9 @@ namespace LMPTS.API.Controllers
                 var customers = await _context.Customers
                     .Where(c => c.UserId == userId)
                     .OrderBy(c => c.Name)
-                    .Select(c => MapToResponse(c))
                     .ToListAsync();
 
-                return Ok(customers);
+                return Ok(customers.Select(c => MapToResponse(c)));
             }
             catch (Exception ex)
             {
@@ -140,12 +139,18 @@ namespace LMPTS.API.Controllers
                 Mobile = customer.Mobile,
                 AddressLine1 = customer.AddressLine1,
                 AddressLine2 = customer.AddressLine2,
-                City = customer.City,
+                AddressLine3 = customer.City,  // Map City to AddressLine3 for frontend
                 OtherInfo = customer.OtherInfo,
                 Gstin = customer.Gstin,
                 State = customer.State,
-                ShippingAddress = customer.ShippingAddress,
+                Pincode = customer.Pincode,
+                ShippingAddressLine1 = customer.ShippingAddressLine1,
+                ShippingAddressLine2 = customer.ShippingAddressLine2,
+                ShippingCity = customer.ShippingCity,
+                ShippingState = customer.ShippingState,
+                ShippingPincode = customer.ShippingPincode,
                 BillingAddress = customer.BillingAddress,
+                ShippingAddress = customer.ShippingAddress,
                 CreatedAt = customer.CreatedAt,
                 UpdatedAt = customer.UpdatedAt
             };
@@ -159,12 +164,18 @@ namespace LMPTS.API.Controllers
             entity.Mobile = dto.Mobile;
             entity.AddressLine1 = dto.AddressLine1;
             entity.AddressLine2 = dto.AddressLine2;
-            entity.City = dto.City;
+            entity.City = dto.AddressLine3;  // Map AddressLine3 to City
             entity.OtherInfo = dto.OtherInfo;
             entity.Gstin = dto.Gstin;
             entity.State = dto.State;
-            entity.ShippingAddress = dto.ShippingAddress;
+            entity.Pincode = dto.Pincode;
+            entity.ShippingAddressLine1 = dto.ShippingAddressLine1;
+            entity.ShippingAddressLine2 = dto.ShippingAddressLine2;
+            entity.ShippingCity = dto.ShippingCity;
+            entity.ShippingState = dto.ShippingState;
+            entity.ShippingPincode = dto.ShippingPincode;
             entity.BillingAddress = dto.BillingAddress;
+            entity.ShippingAddress = dto.ShippingAddress;
         }
     }
 }

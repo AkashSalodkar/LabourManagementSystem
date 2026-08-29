@@ -4,6 +4,7 @@ using LMPTS.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LMPTS.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826160954_UpdateCustomerModule")]
+    partial class UpdateCustomerModule
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -132,9 +135,6 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<string>("Phone")
                         .HasMaxLength(15)
                         .HasColumnType("nvarchar(15)");
-
-                    b.Property<string>("QrCodeImg")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("SignatureImg")
                         .HasColumnType("nvarchar(max)");
@@ -534,6 +534,8 @@ namespace LMPTS.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DocumentId");
+
                     b.HasIndex("DocumentType", "DocumentId");
 
                     b.ToTable("DocumentOtherCharges");
@@ -575,6 +577,8 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasDefaultValueSql("GETDATE()");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
 
                     b.HasIndex("DocumentType", "DocumentId");
 
@@ -636,6 +640,8 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasDefaultValueSql("GETDATE()");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
 
                     b.HasIndex("ProductId");
 
@@ -706,6 +712,8 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
 
                     b.HasIndex("TermId");
 
@@ -949,7 +957,7 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<decimal>("Gst")
+                    b.Property<decimal?>("Gst")
                         .HasColumnType("decimal(5,2)");
 
                     b.Property<string>("Hsn")
@@ -961,7 +969,7 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<decimal>("Price")
+                    b.Property<decimal?>("Price")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Unit")
@@ -1594,7 +1602,7 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
-                    b.Property<decimal>("PaidAmount")
+                    b.Property<decimal?>("PaidAmount")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("PaymentFor")
@@ -2308,8 +2316,86 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("LMPTS.Domain.Entities.DocumentOtherCharge", b =>
+                {
+                    b.HasOne("LMPTS.Domain.Entities.DeliveryNote", null)
+                        .WithMany("OtherCharges")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.Invoice", null)
+                        .WithMany("OtherCharges")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.ProformaInvoice", null)
+                        .WithMany("OtherCharges")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.PurchaseOrder", null)
+                        .WithMany("OtherCharges")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.Quotation", null)
+                        .WithMany("OtherCharges")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("LMPTS.Domain.Entities.DocumentPaidInfo", b =>
+                {
+                    b.HasOne("LMPTS.Domain.Entities.Invoice", null)
+                        .WithMany("PaidInfos")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.ProformaInvoice", null)
+                        .WithMany("PaidInfos")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("LMPTS.Domain.Entities.DocumentProduct", b =>
                 {
+                    b.HasOne("LMPTS.Domain.Entities.DeliveryNote", null)
+                        .WithMany("Products")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.Invoice", null)
+                        .WithMany("Products")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.ProformaInvoice", null)
+                        .WithMany("Products")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.PurchaseOrder", null)
+                        .WithMany("Products")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.Quotation", null)
+                        .WithMany("Products")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("LMPTS.Domain.Entities.Product", "Product")
                         .WithMany()
                         .HasForeignKey("ProductId")
@@ -2331,6 +2417,36 @@ namespace LMPTS.Infrastructure.Migrations
 
             modelBuilder.Entity("LMPTS.Domain.Entities.DocumentTermSelection", b =>
                 {
+                    b.HasOne("LMPTS.Domain.Entities.DeliveryNote", null)
+                        .WithMany("TermSelections")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.Invoice", null)
+                        .WithMany("TermSelections")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.ProformaInvoice", null)
+                        .WithMany("TermSelections")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.PurchaseOrder", null)
+                        .WithMany("TermSelections")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("LMPTS.Domain.Entities.Quotation", null)
+                        .WithMany("TermSelections")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("LMPTS.Domain.Entities.DocumentTerm", "Term")
                         .WithMany()
                         .HasForeignKey("TermId")
@@ -2617,9 +2733,58 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Navigation("Worker");
                 });
 
+            modelBuilder.Entity("LMPTS.Domain.Entities.DeliveryNote", b =>
+                {
+                    b.Navigation("OtherCharges");
+
+                    b.Navigation("Products");
+
+                    b.Navigation("TermSelections");
+                });
+
+            modelBuilder.Entity("LMPTS.Domain.Entities.Invoice", b =>
+                {
+                    b.Navigation("OtherCharges");
+
+                    b.Navigation("PaidInfos");
+
+                    b.Navigation("Products");
+
+                    b.Navigation("TermSelections");
+                });
+
+            modelBuilder.Entity("LMPTS.Domain.Entities.ProformaInvoice", b =>
+                {
+                    b.Navigation("OtherCharges");
+
+                    b.Navigation("PaidInfos");
+
+                    b.Navigation("Products");
+
+                    b.Navigation("TermSelections");
+                });
+
             modelBuilder.Entity("LMPTS.Domain.Entities.Project", b =>
                 {
                     b.Navigation("Workers");
+                });
+
+            modelBuilder.Entity("LMPTS.Domain.Entities.PurchaseOrder", b =>
+                {
+                    b.Navigation("OtherCharges");
+
+                    b.Navigation("Products");
+
+                    b.Navigation("TermSelections");
+                });
+
+            modelBuilder.Entity("LMPTS.Domain.Entities.Quotation", b =>
+                {
+                    b.Navigation("OtherCharges");
+
+                    b.Navigation("Products");
+
+                    b.Navigation("TermSelections");
                 });
 
             modelBuilder.Entity("LMPTS.Domain.Entities.User", b =>
