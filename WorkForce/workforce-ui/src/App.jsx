@@ -1,7 +1,6 @@
 import './firebase';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber as firebaseSignInWithPhoneNumber } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
-import { Contacts } from '@capacitor-community/contacts';
 import { useState, useEffect, useRef, Fragment } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
@@ -623,6 +622,7 @@ function LabeledField({ label, as = 'input', error, rightElement, boxStyle, inpu
 async function pickPhoneContact() {
   try {
     if (Capacitor.isNativePlatform()) {
+      const { Contacts } = await import('@capacitor-community/contacts');
       const permission = await Contacts.requestPermissions();
       if (permission?.contacts && permission.contacts !== 'granted') return null;
       const result = await Contacts.pickContact({
