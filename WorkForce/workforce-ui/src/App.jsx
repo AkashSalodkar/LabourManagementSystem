@@ -1,6 +1,7 @@
 import './firebase';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber as firebaseSignInWithPhoneNumber } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
+import { Contacts } from '@capacitor-community/contacts';
 import { useState, useEffect, useRef, Fragment } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
@@ -27,6 +28,14 @@ const PURCHASE_ORDER_SETTINGS_STORAGE_KEY = 'workforce_app_purchase_order_settin
 const PROFORMA_INVOICE_SETTINGS_STORAGE_KEY = 'workforce_app_proforma_invoice_settings';
 const DELIVERY_NOTE_SETTINGS_STORAGE_KEY = 'workforce_app_delivery_note_settings';
 const RECEIPT_SETTINGS_STORAGE_KEY = 'workforce_app_receipt_settings';
+// Bump this whenever the Top/Bottom Message Default/Customize/Hide feature's stored shape
+// changes in a way that makes old saved data untrustworthy (e.g. an older build that used
+// to pre-fill "Customize" with preset text). Settings saved under an older version are
+// migrated back to "Default" mode on load rather than trying to guess whether their text
+// is "real" custom content or stale leftovers - the user can always re-enter Customize and
+// type their own message, which will then be saved under the current version and trusted
+// on every later load.
+const MESSAGE_MODE_SCHEMA_VERSION = 2;
 const COLUMN_HEADING_SETTINGS_STORAGE_KEY = 'workforce_app_column_heading_settings';
 const CUSTOMERS_STORAGE_KEY = 'workforce_app_customers';
 const PRODUCTS_STORAGE_KEY = 'workforce_app_products';
@@ -574,21 +583,99 @@ function LabeledField({ label, as = 'input', error, rightElement, boxStyle, inpu
     <div>
       <div style={box}>
         <label style={customerModuleStyles.labeledFieldLabel}>{label}</label>
+        {/* The field itself lives in a flex:1 wrapper so a fixed-size rightElement
+            (e.g. the contact-picker icon) always sits pinned to the right edge and
+            vertically centered on this row, no matter how wide/narrow the input's
+            own content makes it. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {as === 'textarea' ? (
-            <textarea {...fieldProps} style={{ ...customerModuleStyles.labeledFieldInput, resize: 'vertical', minHeight: '64px', ...inputStyle }} />
-          ) : as === 'button' ? (
-            <button type="button" {...fieldProps} style={{ ...customerModuleStyles.labeledFieldButton, ...inputStyle }}>
-              {children}
-            </button>
-          ) : (
-            <input {...fieldProps} style={{ ...customerModuleStyles.labeledFieldInput, ...inputStyle }} />
-          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {as === 'textarea' ? (
+              <textarea {...fieldProps} style={{ ...customerModuleStyles.labeledFieldInput, resize: 'vertical', minHeight: '64px', ...inputStyle }} />
+            ) : as === 'button' ? (
+              <button type="button" {...fieldProps} style={{ ...customerModuleStyles.labeledFieldButton, ...inputStyle }}>
+                {children}
+              </button>
+            ) : (
+              <input {...fieldProps} style={{ ...customerModuleStyles.labeledFieldInput, ...inputStyle }} />
+            )}
+          </div>
           {rightElement}
         </div>
       </div>
       {error && typeof error === 'string' && <p style={customerModuleStyles.fieldErrorText}>{error}</p>}
     </div>
+  );
+}
+
+// ===== Native "pick a contact" helper =====
+// Opens the phone's own Contacts app so the user can choose an existing contact,
+// then hands back whatever we could read off it. Used by both the Add/Edit
+// Customer form and the Add/Edit Employee form's contact-book icon.
+// - On a native Capacitor build this uses @capacitor-community/contacts, which
+//   shows the real system contact picker and (once the user picks someone) only
+//   returns that one contact's details - no broad "read all contacts" permission
+//   prompt is needed for the picker itself.
+// - In a mobile browser that supports the web Contact Picker API, we fall back to
+//   navigator.contacts.select so the icon still works there.
+// - Anywhere else (e.g. desktop browser preview) it simply does nothing.
+// Returns { name, phone, email } (fields may be empty strings) or null if the
+// user cancelled, denied permission, or no contact API is available.
+async function pickPhoneContact() {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      const permission = await Contacts.requestPermissions();
+      if (permission?.contacts && permission.contacts !== 'granted') return null;
+      const result = await Contacts.pickContact({
+        projection: { name: true, phones: true, emails: true },
+      });
+      const contact = result?.contact;
+      if (!contact) return null;
+      const name = contact.name?.display
+        || [contact.name?.given, contact.name?.family].filter(Boolean).join(' ')
+        || '';
+      const rawPhone = contact.phones?.[0]?.number || '';
+      const phone = rawPhone.replace(/\D/g, '').slice(-10);
+      const email = contact.emails?.[0]?.address || '';
+      return { name: name.trim(), phone, email: email.trim() };
+    }
+    if (typeof navigator !== 'undefined' && navigator.contacts && navigator.contacts.select) {
+      const [contact] = await navigator.contacts.select(['name', 'tel', 'email'], { multiple: false });
+      if (!contact) return null;
+      const name = (contact.name && contact.name[0]) || '';
+      const rawPhone = (contact.tel && contact.tel[0]) || '';
+      const phone = rawPhone.replace(/\D/g, '').slice(-10);
+      const email = (contact.email && contact.email[0]) || '';
+      return { name: name.trim(), phone, email: email.trim() };
+    }
+  } catch (err) {
+    // User cancelling the picker, or permission being denied, both land here -
+    // treat it the same as "nothing picked" rather than surfacing an error.
+    console.error('Contact pick failed:', err);
+  }
+  return null;
+}
+
+// Small round contact-book button used next to a Name field to launch
+// pickPhoneContact() and hand the result to the caller's onPick callback.
+function ContactPickButton({ onPick, style, ariaLabel = 'Pick from contacts' }) {
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        const picked = await pickPhoneContact();
+        if (picked) onPick(picked);
+      }}
+      aria-label={ariaLabel}
+      style={{
+        border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0,
+        width: '38px', height: '38px', borderRadius: '11px',
+        background: 'linear-gradient(145deg, #12786B, #0A3D38)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        ...style,
+      }}
+    >
+      <FaAddressBook size={16} color="#ffffff" />
+    </button>
   );
 }
 
@@ -988,6 +1075,7 @@ const loadUserBusinessInfo = async (userId) => {
         ...prev,
         logoImg: response.logoImg || null,
         signatureImg: response.signatureImg || null,
+        qrCodeImg: response.qrCodeImg || null,
         businessName: response.businessName || prev.businessName,
         contactName: response.contactName || '',
         email: response.email || '',
@@ -1115,20 +1203,26 @@ const loadUserSettings = async (userId) => {
     const response = await settingsService.getSettings(userId);
     
     if (response.quotation) {
-      setQuotationSettings(prev => ({ ...prev, ...response.quotation }));
-      localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(response.quotation));
+      // Normalize any legacy/invalid GST Display value (e.g. old "No Tax") coming
+      // from the server to the supported Yes/No options, defaulting to "Yes".
+      const normalizedQuotation = { ...response.quotation, taxType: response.quotation.taxType === 'No' ? 'No' : 'Yes' };
+      setQuotationSettings(prev => ({ ...prev, ...normalizedQuotation }));
+      localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedQuotation));
     }
     if (response.invoice) {
-      setInvoiceSettings(prev => ({ ...prev, ...response.invoice }));
-      localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(response.invoice));
+      const normalizedInvoice = { ...response.invoice, taxType: response.invoice.taxType === 'No' ? 'No' : 'Yes' };
+      setInvoiceSettings(prev => ({ ...prev, ...normalizedInvoice }));
+      localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedInvoice));
     }
     if (response.purchaseOrder) {
-      setPurchaseOrderSettings(prev => ({ ...prev, ...response.purchaseOrder }));
-      localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(response.purchaseOrder));
+      const normalizedPurchaseOrder = { ...response.purchaseOrder, taxType: response.purchaseOrder.taxType === 'No' ? 'No' : 'Yes' };
+      setPurchaseOrderSettings(prev => ({ ...prev, ...normalizedPurchaseOrder }));
+      localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedPurchaseOrder));
     }
     if (response.proformaInvoice) {
-      setProformaInvoiceSettings(prev => ({ ...prev, ...response.proformaInvoice }));
-      localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(response.proformaInvoice));
+      const normalizedProformaInvoice = { ...response.proformaInvoice, taxType: response.proformaInvoice.taxType === 'No' ? 'No' : 'Yes' };
+      setProformaInvoiceSettings(prev => ({ ...prev, ...normalizedProformaInvoice }));
+      localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedProformaInvoice));
     }
     if (response.deliveryNote) {
       setDeliveryNoteSettings(prev => ({ ...prev, ...response.deliveryNote }));
@@ -1286,7 +1380,7 @@ const paymentService = {
       // Corrupted/unreadable localStorage entry - fall back to defaults below.
     }
     return {
-      logoImg: null, signatureImg: null,
+      logoImg: null, signatureImg: null, qrCodeImg: null,
       businessName: (loggedInUser?.industry || '').toLowerCase(),
       contactName: '', email: '',
       phone: loggedInUser?.mobileNumber ? `+91 ${loggedInUser.mobileNumber}` : '',
@@ -1331,6 +1425,7 @@ const paymentService = {
     const result = await businessInfoService.updateBusinessInfo(loggedInUser.userId, {
       logoImg: businessInfo.logoImg,
       signatureImg: businessInfo.signatureImg,
+      qrCodeImg: businessInfo.qrCodeImg,
       businessName: businessInfo.businessName,
       contactName: businessInfo.contactName,
       email: businessInfo.email,
@@ -1356,6 +1451,7 @@ const paymentService = {
       ...prev,
       logoImg: result.logoImg || prev.logoImg,
       signatureImg: result.signatureImg || prev.signatureImg,
+      qrCodeImg: result.qrCodeImg || prev.qrCodeImg,
       businessName: result.businessName || prev.businessName,
       contactName: result.contactName || prev.contactName,
       email: result.email || prev.email,
@@ -1378,6 +1474,7 @@ const paymentService = {
     
     try { localStorage.setItem(BUSINESS_INFO_STORAGE_KEY, JSON.stringify(businessInfo)); } catch { /* ignore */ }
     showSuccess('Business info updated.');
+    setQuotationSubView(null);
   } catch (error) {
     console.error('Error updating business info:', error);
     showAlert('Could not save business info. Please try again.');
@@ -1407,6 +1504,8 @@ const paymentService = {
   const logoPhotoInputRef = useRef(null);
   const signatureCameraInputRef = useRef(null);
   const signaturePhotoInputRef = useRef(null);
+  const qrCodeCameraInputRef = useRef(null);
+  const qrCodePhotoInputRef = useRef(null);
   const signatureCanvasRef = useRef(null);
   const signatureDrawingRef = useRef(false);
   const openImageActionSheet = (type) => setImageActionSheet(type);
@@ -1552,7 +1651,7 @@ const paymentService = {
   // Update Profile avatar picker, so every "pick a photo" flow in the app crops the same way.
   const renderImageCropperModal = () => {
     if (!imageCropper) return null;
-    const cropTitle = imageCropper.key === 'signatureImg' ? 'Crop Signature' : 'Crop Photo';
+    const cropTitle = imageCropper.key === 'signatureImg' ? 'Crop Signature' : (imageCropper.key === 'qrCodeImg' ? 'Crop QR Code' : 'Crop Photo');
     // zIndex explicitly bumped above the shared modalOverlay (2000) so the cropper
     // always sits on top of whichever modal launched it - e.g. Update Profile (9999).
     return (
@@ -1615,30 +1714,110 @@ const paymentService = {
   };
 
   // ===== Quotations module: Quotation Settings =====
-  const [quotationSettings, setQuotationSettings] = useState(() => {
+  // Professional default copy used whenever "Default" mode is selected for the top/bottom
+  // message (also the fallback text for brand-new settings before the user has customized).
+  const QUOTATION_DEFAULT_TOP_MESSAGE = 'Thank you for considering us. Please find our quotation below';
+  const QUOTATION_DEFAULT_BOTTOM_MESSAGE = 'We look forward to working with you';
+  // The true, hardcoded factory defaults for Quotation Settings - used (a) as the very
+  // first-run values before anything has ever been saved, and (b) by the Reset button,
+  // which must always land on these exact values regardless of whatever was previously
+  // saved/modified (i.e. Reset does NOT just reload the last-saved localStorage copy).
+  const getDefaultQuotationSettings = () => ({
+    numberPrefix: 'Quote-',
+    serialNumber: '5',
+    discountType: 'No Discount',
+    taxType: 'Yes',
+    showProductHSN: 'No',
+    showShippingAddress: 'No',
+    topMessageMode: 'Default',
+    topMessage: QUOTATION_DEFAULT_TOP_MESSAGE,
+    bottomMessageMode: 'Default',
+    bottomMessage: QUOTATION_DEFAULT_BOTTOM_MESSAGE,
+    showBankInfo: 'No',
+    showUpiInfo: 'No',
+    showSignature: 'Yes',
+    messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+  });
+  // Reads Quotation Settings from local storage (normalizing legacy fields), or falls back
+  // to getDefaultQuotationSettings() below. Used only as the initial state on load - the
+  // Reset button below intentionally does NOT use this (see getDefaultQuotationSettings).
+  const loadQuotationSettings = () => {
     try {
       const saved = localStorage.getItem(QUOTATION_SETTINGS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Normalize any legacy/invalid GST Display value (e.g. old "No Tax") to the
+        // supported Yes/No options, defaulting to "Yes".
+        {
+          // Settings saved under an older schema version (before this migration existed,
+          // or by a build that used to pre-fill "Customize" with preset text) can't be
+          // trusted to reflect a real user choice - migrate them straight back to
+          // "Default" mode/text. Settings already on the current version are honored as-is,
+          // including a genuine Customize selection with the user's own typed message.
+          const isCurrentSchema = parsed.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+          const topMode = isCurrentSchema ? (parsed.topMessageMode || 'Default') : 'Default';
+          const bottomMode = isCurrentSchema ? (parsed.bottomMessageMode || 'Default') : 'Default';
+          return {
+            ...parsed,
+            taxType: parsed.taxType === 'No' ? 'No' : 'Yes',
+            messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+            topMessageMode: topMode,
+            topMessage: topMode === 'Default' ? QUOTATION_DEFAULT_TOP_MESSAGE : parsed.topMessage,
+            bottomMessageMode: bottomMode,
+            bottomMessage: bottomMode === 'Default' ? QUOTATION_DEFAULT_BOTTOM_MESSAGE : parsed.bottomMessage,
+          };
+        }
+      }
     } catch {
       // Corrupted/unreadable localStorage entry - fall back to defaults below.
     }
-    return {
-      numberPrefix: 'Quote-',
-      serialNumber: '5',
-      discountType: 'No Discount',
-      taxType: 'No Tax',
-      showProductHSN: 'No',
-      showShippingAddress: 'No',
-      topMessage: 'Dear Sir/Mam,\nThank you for your valuable inquiry. We are pleased to quote as below:',
-      bottomMessage: 'We hope you find our offer to be in line with your requirement.',
-      showBankInfo: 'Yes',
-      showUpiInfo: 'Yes',
-      showSignature: 'Yes',
-    };
-  });
+    return getDefaultQuotationSettings();
+  };
+  const [quotationSettings, setQuotationSettings] = useState(loadQuotationSettings);
+  // Reset always reverts to the original factory defaults - regardless of any previously
+  // saved or modified settings - and persists that reset immediately (to local storage and,
+  // if signed in, to the server) so it takes effect for the next Quotation created, the same
+  // way Update does. Any already-created Quotation documents keep their own frozen
+  // docSnapshot and are unaffected until the user opens and re-saves them.
+  const handleResetQuotationSettings = () => {
+    showConfirm('Reset Quotation Settings to the default values? This will discard any saved or unsaved changes.', async () => {
+      const defaults = getDefaultQuotationSettings();
+      setQuotationSettings(defaults);
+      try { localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(defaults)); } catch { /* ignore */ }
+      if (loggedInUser?.userId) {
+        try {
+          await settingsService.updateQuotationSettings(loggedInUser.userId, defaults);
+        } catch (error) {
+          console.error('Error resetting quotation settings on server:', error);
+        }
+      }
+      showSuccess('Quotation settings reset to default.');
+    }, { confirmLabel: 'Reset', tone: 'warning' });
+  };
   const [activeSettingsSheet, setActiveSettingsSheet] = useState(null);
   const updateQuotationSettingField = (key, value) => setQuotationSettings(prev => ({ ...prev, [key]: value }));
-  const handleUpdateQuotationSettings = async () => {
+  // Applies a Top/Bottom Message mode change (Customize / Default / Hide) for Quotation
+  // Settings: switching to Customize always gives the user a blank draft to type into,
+  // UNLESS they already have real custom text saved (i.e. they're re-entering Customize
+  // mode with something they'd previously typed themselves) - it never pre-fills the
+  // professional preset text. Switching to Default fills it with the professional preset
+  // text (read-only). Hide simply stops the message from showing on the document (the
+  // underlying text, if any, is left untouched).
+  const applyQuotationMessageMode = (kind, mode) => {
+    const messageField = kind === 'top' ? 'topMessage' : 'bottomMessage';
+    const modeField = kind === 'top' ? 'topMessageMode' : 'bottomMessageMode';
+    const defaultMsg = kind === 'top' ? QUOTATION_DEFAULT_TOP_MESSAGE : QUOTATION_DEFAULT_BOTTOM_MESSAGE;
+    setQuotationSettings(prev => {
+      const hasRealCustomText = prev[modeField] === 'Customize' && prev[messageField] && prev[messageField] !== defaultMsg;
+      return {
+        ...prev,
+        [modeField]: mode,
+        [messageField]: mode === 'Customize' ? (hasRealCustomText ? prev[messageField] : '') : mode === 'Default' ? defaultMsg : prev[messageField],
+      };
+    });
+  };
+  // ✅ CORRECT - Calls the API
+const handleUpdateQuotationSettings = async () => {
   if (!loggedInUser?.userId) {
     showAlert('You need to be signed in to save settings.');
     return;
@@ -1654,127 +1833,465 @@ const paymentService = {
 };
 
   // ===== Quotations module: Invoice Settings =====
-  const [invoiceSettings, setInvoiceSettings] = useState(() => {
+  // Professional default copy used whenever "Default" mode is selected for the top/bottom
+  // message (also the fallback text for brand-new settings before the user has customized).
+  const INVOICE_DEFAULT_TOP_MESSAGE = 'Thank you for your continued business. Please find the invoice details below';
+  const INVOICE_DEFAULT_BOTTOM_MESSAGE = 'Thank you for your prompt payment';
+  // The true, hardcoded factory defaults for Invoice Settings - used (a) as the very
+  // first-run values before anything has ever been saved, and (b) by the Reset button,
+  // which must always land on these exact values regardless of whatever was previously
+  // saved/modified (i.e. Reset does NOT just reload the last-saved localStorage copy).
+  const getDefaultInvoiceSettings = () => ({
+    numberPrefix: 'INV-',
+    serialNumber: '2',
+    discountType: 'No Discount',
+    taxType: 'Yes',
+    showProductHSN: 'No',
+    showShippingAddress: 'No',
+    topMessageMode: 'Default',
+    topMessage: INVOICE_DEFAULT_TOP_MESSAGE,
+    bottomMessageMode: 'Default',
+    bottomMessage: INVOICE_DEFAULT_BOTTOM_MESSAGE,
+    showBankInfo: 'No',
+    showUpiInfo: 'No',
+    showSignature: 'Yes',
+    messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+  });
+  // Reads Invoice Settings from local storage (normalizing legacy fields), or falls back to
+  // getDefaultInvoiceSettings() below. Used only as the initial state on load - the Reset
+  // button below intentionally does NOT use this (see getDefaultInvoiceSettings).
+  const loadInvoiceSettings = () => {
     try {
       const saved = localStorage.getItem(INVOICE_SETTINGS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Normalize any legacy/invalid GST Display value (e.g. old "No Tax") to the
+        // supported Yes/No options, defaulting to "Yes". Settings saved under an older
+        // schema version (before this migration existed, or by a build that used to
+        // pre-fill "Customize" with preset text) can't be trusted to reflect a real user
+        // choice - migrate them straight back to "Default" mode/text. Settings already on
+        // the current version are honored as-is, including a genuine Customize selection.
+        const isCurrentSchema = parsed.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+        const topMode = isCurrentSchema ? (parsed.topMessageMode || 'Default') : 'Default';
+        const bottomMode = isCurrentSchema ? (parsed.bottomMessageMode || 'Default') : 'Default';
+        return {
+          ...parsed,
+          taxType: parsed.taxType === 'No' ? 'No' : 'Yes',
+          messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+          topMessageMode: topMode,
+          topMessage: topMode === 'Default' ? INVOICE_DEFAULT_TOP_MESSAGE : parsed.topMessage,
+          bottomMessageMode: bottomMode,
+          bottomMessage: bottomMode === 'Default' ? INVOICE_DEFAULT_BOTTOM_MESSAGE : parsed.bottomMessage,
+        };
+      }
     } catch {
       // Corrupted/unreadable localStorage entry - fall back to defaults below.
     }
-    return {
-      numberPrefix: 'INV-',
-      serialNumber: '2',
-      discountType: 'No Discount',
-      taxType: 'No Tax',
-      showProductHSN: 'No',
-      topMessage: '',
-      bottomMessage: '',
-      showBankInfo: 'Yes',
-      showUpiInfo: 'Yes',
-      showSignature: 'Yes',
-    };
-  });
-  const updateInvoiceSettingField = (key, value) => setInvoiceSettings(prev => ({ ...prev, [key]: value }));
-  const handleUpdateInvoiceSettings = () => {
-    try {
-      localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(invoiceSettings));
-      showSuccess('Invoice settings updated.');
-    } catch {
-      showAlert('Could not save invoice settings on this device.');
-    }
+    return getDefaultInvoiceSettings();
   };
+  const [invoiceSettings, setInvoiceSettings] = useState(loadInvoiceSettings);
+  // Reset always reverts to the original factory defaults - regardless of any previously
+  // saved or modified settings - and persists that reset immediately (to local storage and,
+  // if signed in, to the server) so it takes effect for the next Invoice created, the same
+  // way Update does. Any already-created Invoice documents keep their own frozen
+  // docSnapshot and are unaffected until the user opens and re-saves them.
+  const handleResetInvoiceSettings = () => {
+    showConfirm('Reset Invoice Settings to the default values? This will discard any saved or unsaved changes.', async () => {
+      const defaults = getDefaultInvoiceSettings();
+      setInvoiceSettings(defaults);
+      try { localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(defaults)); } catch { /* ignore */ }
+      if (loggedInUser?.userId) {
+        try {
+          await settingsService.updateInvoiceSettings(loggedInUser.userId, defaults);
+        } catch (error) {
+          console.error('Error resetting invoice settings on server:', error);
+        }
+      }
+      showSuccess('Invoice settings reset to default.');
+    }, { confirmLabel: 'Reset', tone: 'warning' });
+  };
+  const updateInvoiceSettingField = (key, value) => setInvoiceSettings(prev => ({ ...prev, [key]: value }));
+  // Applies a Top/Bottom Message mode change (Customize / Default / Hide) for Invoice
+  // Settings: switching to Customize always gives the user a blank draft to type into,
+  // UNLESS they already have real custom text saved (i.e. they're re-entering Customize
+  // mode with something they'd previously typed themselves) - it never pre-fills the
+  // professional preset text. Switching to Default fills it with the professional preset
+  // text (read-only). Hide simply stops the message from showing on the document (the
+  // underlying text, if any, is left untouched).
+  const applyInvoiceMessageMode = (kind, mode) => {
+    const messageField = kind === 'top' ? 'topMessage' : 'bottomMessage';
+    const modeField = kind === 'top' ? 'topMessageMode' : 'bottomMessageMode';
+    const defaultMsg = kind === 'top' ? INVOICE_DEFAULT_TOP_MESSAGE : INVOICE_DEFAULT_BOTTOM_MESSAGE;
+    setInvoiceSettings(prev => {
+      const hasRealCustomText = prev[modeField] === 'Customize' && prev[messageField] && prev[messageField] !== defaultMsg;
+      return {
+        ...prev,
+        [modeField]: mode,
+        [messageField]: mode === 'Customize' ? (hasRealCustomText ? prev[messageField] : '') : mode === 'Default' ? defaultMsg : prev[messageField],
+      };
+    });
+  };
+  const handleUpdateInvoiceSettings = async () => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save settings.');
+    return;
+  }
+  try {
+    await settingsService.updateInvoiceSettings(loggedInUser.userId, invoiceSettings);
+    try { localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(invoiceSettings)); } catch { /* ignore */ }
+    showSuccess('Invoice settings updated.');
+    setQuotationSubView('settingsMenu');
+  } catch (error) {
+    console.error('Error updating invoice settings:', error);
+    showAlert('Could not save settings. Please try again.');
+  }
+};
 
   // ===== Quotations module: Purchase Order Settings =====
-  const [purchaseOrderSettings, setPurchaseOrderSettings] = useState(() => {
+  // Professional default copy used whenever "Default" mode is selected for the top/bottom
+  // message (also the fallback text for brand-new settings before the user has customized).
+  const PURCHASE_ORDER_DEFAULT_TOP_MESSAGE = 'Dear Sir/Madam,\nThank you for your interest. Please find below the purchase order for your review and approval.';
+  const PURCHASE_ORDER_DEFAULT_BOTTOM_MESSAGE = 'Thank you for your prompt attention to this order';
+  // The true, hardcoded factory defaults for Purchase Order Settings - used (a) as the very
+  // first-run values before anything has ever been saved, and (b) by the Reset button,
+  // which must always land on these exact values regardless of whatever was previously
+  // saved/modified (i.e. Reset does NOT just reload the last-saved localStorage copy).
+  const getDefaultPurchaseOrderSettings = () => ({
+    numberPrefix: 'PO-',
+    serialNumber: '1',
+    discountType: 'No Discount',
+    taxType: 'Yes',
+    showProductHSN: 'No',
+    showShippingAddress: 'No',
+    topMessageMode: 'Default',
+    topMessage: PURCHASE_ORDER_DEFAULT_TOP_MESSAGE,
+    bottomMessageMode: 'Default',
+    bottomMessage: PURCHASE_ORDER_DEFAULT_BOTTOM_MESSAGE,
+    showBankInfo: 'No',
+    showUpiInfo: 'No',
+    showSignature: 'Yes',
+    messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+  });
+  // Reads Purchase Order Settings from local storage (normalizing legacy fields), or falls
+  // back to getDefaultPurchaseOrderSettings() below. Used only as the initial state on load -
+  // the Reset button below intentionally does NOT use this (see getDefaultPurchaseOrderSettings).
+  const loadPurchaseOrderSettings = () => {
     try {
       const saved = localStorage.getItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Normalize any legacy/invalid GST Display value (e.g. old "No Tax") to the
+        // supported Yes/No options, defaulting to "Yes". Settings saved under an older
+        // schema version (before this migration existed, or by a build that used to
+        // pre-fill "Customize" with preset text) can't be trusted to reflect a real user
+        // choice - migrate them straight back to "Default" mode/text. Settings already on
+        // the current version are honored as-is, including a genuine Customize selection.
+        const isCurrentSchema = parsed.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+        const topMode = isCurrentSchema ? (parsed.topMessageMode || 'Default') : 'Default';
+        const bottomMode = isCurrentSchema ? (parsed.bottomMessageMode || 'Default') : 'Default';
+        return {
+          ...parsed,
+          taxType: parsed.taxType === 'No' ? 'No' : 'Yes',
+          messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+          topMessageMode: topMode,
+          topMessage: topMode === 'Default' ? PURCHASE_ORDER_DEFAULT_TOP_MESSAGE : parsed.topMessage,
+          bottomMessageMode: bottomMode,
+          bottomMessage: bottomMode === 'Default' ? PURCHASE_ORDER_DEFAULT_BOTTOM_MESSAGE : parsed.bottomMessage,
+        };
+      }
     } catch {
       // Corrupted/unreadable localStorage entry - fall back to defaults below.
     }
-    return {
-      numberPrefix: 'PO-',
-      serialNumber: '1',
-      discountType: 'No Discount',
-      taxType: 'No Tax',
-      showProductHSN: 'No',
-      topMessage: 'Dear Sir/Mam,\nWe are pleased to submit the purchase order as below.',
-      bottomMessage: 'Your prompt attention to this order is greatly appreciated, and we look forward to a successful transaction.',
-      showBankInfo: 'No',
-      showUpiInfo: 'No',
-      showSignature: 'Yes',
-    };
-  });
-  const updatePurchaseOrderSettingField = (key, value) => setPurchaseOrderSettings(prev => ({ ...prev, [key]: value }));
-  const handleUpdatePurchaseOrderSettings = () => {
-    try {
-      localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(purchaseOrderSettings));
-      showSuccess('Purchase order settings updated.');
-    } catch {
-      showAlert('Could not save purchase order settings on this device.');
-    }
+    return getDefaultPurchaseOrderSettings();
   };
+  const [purchaseOrderSettings, setPurchaseOrderSettings] = useState(loadPurchaseOrderSettings);
+  // Reset always reverts to the original factory defaults - regardless of any previously
+  // saved or modified settings - and persists that reset immediately (to local storage and,
+  // if signed in, to the server) so it takes effect for the next Purchase Order created, the
+  // same way Update does. Any already-created Purchase Order documents keep their own frozen
+  // docSnapshot and are unaffected until the user opens and re-saves them.
+  const handleResetPurchaseOrderSettings = () => {
+    showConfirm('Reset Purchase Order Settings to the default values? This will discard any saved or unsaved changes.', async () => {
+      const defaults = getDefaultPurchaseOrderSettings();
+      setPurchaseOrderSettings(defaults);
+      try { localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(defaults)); } catch { /* ignore */ }
+      if (loggedInUser?.userId) {
+        try {
+          await settingsService.updatePurchaseOrderSettings(loggedInUser.userId, defaults);
+        } catch (error) {
+          console.error('Error resetting purchase order settings on server:', error);
+        }
+      }
+      showSuccess('Purchase order settings reset to default.');
+    }, { confirmLabel: 'Reset', tone: 'warning' });
+  };
+  const updatePurchaseOrderSettingField = (key, value) => setPurchaseOrderSettings(prev => ({ ...prev, [key]: value }));
+  // Applies a Top/Bottom Message mode change (Customize / Default / Hide) for Purchase Order
+  // Settings: switching to Customize always gives the user a blank draft to type into,
+  // UNLESS they already have real custom text saved (i.e. they're re-entering Customize
+  // mode with something they'd previously typed themselves) - it never pre-fills the
+  // professional preset text. Switching to Default fills it with the professional preset
+  // text (read-only). Hide simply stops the message from showing on the document (the
+  // underlying text, if any, is left untouched).
+  const applyPurchaseOrderMessageMode = (kind, mode) => {
+    const messageField = kind === 'top' ? 'topMessage' : 'bottomMessage';
+    const modeField = kind === 'top' ? 'topMessageMode' : 'bottomMessageMode';
+    const defaultMsg = kind === 'top' ? PURCHASE_ORDER_DEFAULT_TOP_MESSAGE : PURCHASE_ORDER_DEFAULT_BOTTOM_MESSAGE;
+    setPurchaseOrderSettings(prev => {
+      const hasRealCustomText = prev[modeField] === 'Customize' && prev[messageField] && prev[messageField] !== defaultMsg;
+      return {
+        ...prev,
+        [modeField]: mode,
+        [messageField]: mode === 'Customize' ? (hasRealCustomText ? prev[messageField] : '') : mode === 'Default' ? defaultMsg : prev[messageField],
+      };
+    });
+  };
+  const handleUpdatePurchaseOrderSettings = async () => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save settings.');
+    return;
+  }
+  try {
+    await settingsService.updatePurchaseOrderSettings(loggedInUser.userId, purchaseOrderSettings);
+    try { localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(purchaseOrderSettings)); } catch { /* ignore */ }
+    showSuccess('Purchase order settings updated.');
+    setQuotationSubView('settingsMenu');
+  } catch (error) {
+    console.error('Error updating purchase order settings:', error);
+    showAlert('Could not save settings. Please try again.');
+  }
+};
 
   // ===== Quotations module: Proforma Invoice Settings =====
-  const [proformaInvoiceSettings, setProformaInvoiceSettings] = useState(() => {
-    try {
-      const saved = localStorage.getItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+  // ===== Quotations module: Proforma Invoice Settings =====
+// Professional default copy used whenever "Default" mode is selected for the top/bottom
+// message (also the fallback text for brand-new settings before the user has customized).
+const PROFORMA_INVOICE_DEFAULT_TOP_MESSAGE = 'Thank you for your interest. Please find the proforma invoice below';
+const PROFORMA_INVOICE_DEFAULT_BOTTOM_MESSAGE = 'We look forward to your confirmation.';
+// The true, hardcoded factory defaults for Proforma Invoice Settings - used (a) as the very
+// first-run values before anything has ever been saved, and (b) by the Reset button, which
+// must always land on these exact values regardless of whatever was previously saved/modified
+// (i.e. Reset does NOT just reload the last-saved localStorage copy).
+const getDefaultProformaInvoiceSettings = () => ({
+  numberPrefix: 'PI-',
+  serialNumber: '1',
+  discountType: 'No Discount',
+  taxType: 'Yes',
+  showProductHSN: 'No',
+  showShippingAddress: 'No',
+  topMessageMode: 'Default',
+  topMessage: PROFORMA_INVOICE_DEFAULT_TOP_MESSAGE,
+  bottomMessageMode: 'Default',
+  bottomMessage: PROFORMA_INVOICE_DEFAULT_BOTTOM_MESSAGE,
+  showBankInfo: 'No',
+  showUpiInfo: 'No',
+  showSignature: 'Yes',
+  messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+});
+// Reads Proforma Invoice Settings from local storage (normalizing legacy fields), or falls
+// back to getDefaultProformaInvoiceSettings() below. Used only as the initial state on load -
+// the Reset button below intentionally does NOT use this (see getDefaultProformaInvoiceSettings).
+const loadProformaInvoiceSettings = () => {
+  try {
+    const saved = localStorage.getItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Normalize any legacy/invalid GST Display value (e.g. old "No Tax") to the
+      // supported Yes/No options, defaulting to "Yes". Settings saved under an older
+      // schema version (before this migration existed, or by a build that used to
+      // pre-fill "Customize" with preset text) can't be trusted to reflect a real user
+      // choice - migrate them straight back to "Default" mode/text. Settings already on
+      // the current version are honored as-is, including a genuine Customize selection.
+      const isCurrentSchema = parsed.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+      const topMode = isCurrentSchema ? (parsed.topMessageMode || 'Default') : 'Default';
+      const bottomMode = isCurrentSchema ? (parsed.bottomMessageMode || 'Default') : 'Default';
+      return {
+        ...parsed,
+        taxType: parsed.taxType === 'No' ? 'No' : 'Yes',
+        messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+        topMessageMode: topMode,
+        topMessage: topMode === 'Default' ? PROFORMA_INVOICE_DEFAULT_TOP_MESSAGE : parsed.topMessage,
+        bottomMessageMode: bottomMode,
+        bottomMessage: bottomMode === 'Default' ? PROFORMA_INVOICE_DEFAULT_BOTTOM_MESSAGE : parsed.bottomMessage,
+      };
     }
+  } catch {
+    // Corrupted/unreadable localStorage entry - fall back to defaults below.
+  }
+  return getDefaultProformaInvoiceSettings();
+};
+const [proformaInvoiceSettings, setProformaInvoiceSettings] = useState(loadProformaInvoiceSettings);
+// Reset always reverts to the original factory defaults - regardless of any previously
+// saved or modified settings - and persists that reset immediately (to local storage and,
+// if signed in, to the server) so it takes effect for the next Proforma Invoice created, the
+// same way Update does. Any already-created Proforma Invoice documents keep their own frozen
+// docSnapshot and are unaffected until the user opens and re-saves them.
+const handleResetProformaInvoiceSettings = () => {
+  showConfirm('Reset Proforma Invoice Settings to the default values? This will discard any saved or unsaved changes.', async () => {
+    const defaults = getDefaultProformaInvoiceSettings();
+    setProformaInvoiceSettings(defaults);
+    try { localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(defaults)); } catch { /* ignore */ }
+    if (loggedInUser?.userId) {
+      try {
+        await settingsService.updateProformaInvoiceSettings(loggedInUser.userId, defaults);
+      } catch (error) {
+        console.error('Error resetting proforma invoice settings on server:', error);
+      }
+    }
+    showSuccess('Proforma invoice settings reset to default.');
+  }, { confirmLabel: 'Reset', tone: 'warning' });
+};
+  const updateProformaInvoiceSettingField = (key, value) => setProformaInvoiceSettings(prev => ({ ...prev, [key]: value }));
+
+// Applies a Top/Bottom Message mode change (Customize / Default / Hide) for Proforma Invoice
+// Settings: switching to Customize seeds the field with the professional preset text as
+// a starting point if it's currently empty (otherwise leaves any existing custom text
+// as-is, instead of being wiped), switching to Default fills it with the professional
+// preset text (read-only), and Hide simply stops the message from showing on the
+// document (the underlying text is preserved so it's still there if the user switches back).
+const applyProformaInvoiceMessageMode = (kind, mode) => {
+  const messageField = kind === 'top' ? 'topMessage' : 'bottomMessage';
+  const modeField = kind === 'top' ? 'topMessageMode' : 'bottomMessageMode';
+  const defaultMsg = kind === 'top' ? PROFORMA_INVOICE_DEFAULT_TOP_MESSAGE : PROFORMA_INVOICE_DEFAULT_BOTTOM_MESSAGE;
+  setProformaInvoiceSettings(prev => {
+    const hasRealCustomText = prev[modeField] === 'Customize' && prev[messageField] && prev[messageField] !== defaultMsg;
     return {
-      numberPrefix: 'PI-',
-      serialNumber: '1',
-      discountType: 'No Discount',
-      taxType: 'No Tax',
-      showProductHSN: 'No',
-      topMessage: 'Dear Sir/Mam,\nWe are pleased to submit the proforma invoice as below.',
-      bottomMessage: 'Your prompt attention to this order is greatly appreciated, and we look forward to a successful transaction.',
-      showBankInfo: 'No',
-      showUpiInfo: 'No',
-      showSignature: 'Yes',
+      ...prev,
+      [modeField]: mode,
+      [messageField]: mode === 'Customize' ? (hasRealCustomText ? prev[messageField] : '') : mode === 'Default' ? defaultMsg : prev[messageField],
     };
   });
-  const updateProformaInvoiceSettingField = (key, value) => setProformaInvoiceSettings(prev => ({ ...prev, [key]: value }));
-  const handleUpdateProformaInvoiceSettings = () => {
-    try {
-      localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(proformaInvoiceSettings));
-      showSuccess('Proforma invoice settings updated.');
-    } catch {
-      showAlert('Could not save proforma invoice settings on this device.');
-    }
-  };
+};
+  const handleUpdateProformaInvoiceSettings = async () => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save settings.');
+    return;
+  }
+  try {
+    await settingsService.updateProformaInvoiceSettings(loggedInUser.userId, proformaInvoiceSettings);
+    try { localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(proformaInvoiceSettings)); } catch { /* ignore */ }
+    showSuccess('Proforma invoice settings updated.');
+    setQuotationSubView('settingsMenu');
+  } catch (error) {
+    console.error('Error updating proforma invoice settings:', error);
+    showAlert('Could not save settings. Please try again.');
+  }
+};
 
   // ===== Quotations module: Delivery Note Settings =====
-  const [deliveryNoteSettings, setDeliveryNoteSettings] = useState(() => {
-    try {
-      const saved = localStorage.getItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // Corrupted/unreadable localStorage entry - fall back to defaults below.
+  // ===== Quotations module: Delivery Note Settings =====
+// Professional default copy used whenever "Default" mode is selected for the top/bottom
+// message (also the fallback text for brand-new settings before the user has customized).
+const DELIVERY_NOTE_DEFAULT_TOP_MESSAGE = 'Please find the delivery details below';
+const DELIVERY_NOTE_DEFAULT_BOTTOM_MESSAGE = 'Kindly acknowledge receipt of the goods.';
+// The true, hardcoded factory defaults for Delivery Note Settings - used (a) as the very
+// first-run values before anything has ever been saved, and (b) by the Reset button, which
+// must always land on these exact values regardless of whatever was previously saved/modified
+// (i.e. Reset does NOT just reload the last-saved localStorage copy).
+const getDefaultDeliveryNoteSettings = () => ({
+  numberPrefix: 'DN-',
+  serialNumber: '1',
+  showProductHSN: 'No',
+  showShippingAddress: 'No',
+  topMessageMode: 'Default',
+  topMessage: DELIVERY_NOTE_DEFAULT_TOP_MESSAGE,
+  bottomMessageMode: 'Default',
+  bottomMessage: DELIVERY_NOTE_DEFAULT_BOTTOM_MESSAGE,
+  showSignature: 'Yes',
+  messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+});
+// Reads Delivery Note Settings from local storage (backfilling legacy fields), or falls
+// back to getDefaultDeliveryNoteSettings() below. Used only as the initial state on load -
+// the Reset button below intentionally does NOT use this (see getDefaultDeliveryNoteSettings).
+const loadDeliveryNoteSettings = () => {
+  try {
+    const saved = localStorage.getItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // Settings saved under an older schema version (before this migration existed, or
+      // by a build that used to pre-fill "Customize" with preset text) can't be trusted
+      // to reflect a real user choice - migrate them straight back to "Default" mode/text.
+      // Settings already on the current version are honored as-is, including a genuine
+      // Customize selection.
+      const isCurrentSchema = parsed.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+      const topMode = isCurrentSchema ? (parsed.topMessageMode || 'Default') : 'Default';
+      const bottomMode = isCurrentSchema ? (parsed.bottomMessageMode || 'Default') : 'Default';
+      return {
+        ...parsed,
+        messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+        topMessageMode: topMode,
+        topMessage: topMode === 'Default' ? DELIVERY_NOTE_DEFAULT_TOP_MESSAGE : parsed.topMessage,
+        bottomMessageMode: bottomMode,
+        bottomMessage: bottomMode === 'Default' ? DELIVERY_NOTE_DEFAULT_BOTTOM_MESSAGE : parsed.bottomMessage,
+      };
     }
+  } catch {
+    // Corrupted/unreadable localStorage entry - fall back to defaults below.
+  }
+  return getDefaultDeliveryNoteSettings();
+};
+const [deliveryNoteSettings, setDeliveryNoteSettings] = useState(loadDeliveryNoteSettings);
+// Reset always reverts to the original factory defaults - regardless of any previously
+// saved or modified settings - and persists that reset immediately (to local storage and,
+// if signed in, to the server) so it takes effect for the next Delivery Note created, the
+// same way Update does. Any already-created Delivery Note documents keep their own frozen
+// docSnapshot and are unaffected until the user opens and re-saves them.
+const handleResetDeliveryNoteSettings = () => {
+  showConfirm('Reset Delivery Note Settings to the default values? This will discard any saved or unsaved changes.', async () => {
+    const defaults = getDefaultDeliveryNoteSettings();
+    setDeliveryNoteSettings(defaults);
+    try { localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(defaults)); } catch { /* ignore */ }
+    if (loggedInUser?.userId) {
+      try {
+        await settingsService.updateDeliveryNoteSettings(loggedInUser.userId, defaults);
+      } catch (error) {
+        console.error('Error resetting delivery note settings on server:', error);
+      }
+    }
+    showSuccess('Delivery note settings reset to default.');
+  }, { confirmLabel: 'Reset', tone: 'warning' });
+};
+  const updateDeliveryNoteSettingField = (key, value) => setDeliveryNoteSettings(prev => ({ ...prev, [key]: value }));
+
+// Applies a Top/Bottom Message mode change (Customize / Default / Hide) for Delivery Note
+// Settings: switching to Customize seeds the field with the professional preset text as
+// a starting point if it's currently empty (otherwise leaves any existing custom text
+// as-is, instead of being wiped), switching to Default fills it with the professional
+// preset text (read-only), and Hide simply stops the message from showing on the
+// document (the underlying text is preserved so it's still there if the user switches back).
+const applyDeliveryNoteMessageMode = (kind, mode) => {
+  const messageField = kind === 'top' ? 'topMessage' : 'bottomMessage';
+  const modeField = kind === 'top' ? 'topMessageMode' : 'bottomMessageMode';
+  const defaultMsg = kind === 'top' ? DELIVERY_NOTE_DEFAULT_TOP_MESSAGE : DELIVERY_NOTE_DEFAULT_BOTTOM_MESSAGE;
+  setDeliveryNoteSettings(prev => {
+    const hasRealCustomText = prev[modeField] === 'Customize' && prev[messageField] && prev[messageField] !== defaultMsg;
     return {
-      numberPrefix: 'DN-',
-      serialNumber: '1',
-      showProductHSN: 'No',
-      topMessage: '',
-      bottomMessage: '',
-      showSignature: 'Yes',
+      ...prev,
+      [modeField]: mode,
+      [messageField]: mode === 'Customize' ? (hasRealCustomText ? prev[messageField] : '') : mode === 'Default' ? defaultMsg : prev[messageField],
     };
   });
-  const updateDeliveryNoteSettingField = (key, value) => setDeliveryNoteSettings(prev => ({ ...prev, [key]: value }));
-  const handleUpdateDeliveryNoteSettings = () => {
-    try {
-      localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(deliveryNoteSettings));
-      showSuccess('Delivery note settings updated.');
-    } catch {
-      showAlert('Could not save delivery note settings on this device.');
-    }
-  };
-
+};
+  const handleUpdateDeliveryNoteSettings = async () => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save settings.');
+    return;
+  }
+  try {
+    await settingsService.updateDeliveryNoteSettings(loggedInUser.userId, deliveryNoteSettings);
+    try { localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(deliveryNoteSettings)); } catch { /* ignore */ }
+    showSuccess('Delivery note settings updated.');
+    setQuotationSubView('settingsMenu');
+  } catch (error) {
+    console.error('Error updating delivery note settings:', error);
+    showAlert('Could not save settings. Please try again.');
+  }
+};
   // ===== Quotations module: Receipt Settings =====
-  const [receiptSettings, setReceiptSettings] = useState(() => {
+  // Receipt Settings only has one field (Signature Display), so there is no Reset button
+  // here - just Update. Reads from local storage, or falls back to the factory default
+  // below (Signature: Yes), used only as the initial state on load.
+  const loadReceiptSettings = () => {
     try {
       const saved = localStorage.getItem(RECEIPT_SETTINGS_STORAGE_KEY);
       if (saved) return JSON.parse(saved);
@@ -1784,22 +2301,32 @@ const paymentService = {
     return {
       numberPrefix: 'RECEIPT-',
       serialNumber: '1',
-      receiptType: 'Simple',
       showSignature: 'Yes',
     };
-  });
-  const updateReceiptSettingField = (key, value) => setReceiptSettings(prev => ({ ...prev, [key]: value }));
-  const handleUpdateReceiptSettings = () => {
-    try {
-      localStorage.setItem(RECEIPT_SETTINGS_STORAGE_KEY, JSON.stringify(receiptSettings));
-      showSuccess('Receipt settings updated.');
-    } catch {
-      showAlert('Could not save receipt settings on this device.');
-    }
   };
+  const [receiptSettings, setReceiptSettings] = useState(loadReceiptSettings);
+  const updateReceiptSettingField = (key, value) => setReceiptSettings(prev => ({ ...prev, [key]: value }));
+  const handleUpdateReceiptSettings = async () => {
+  if (!loggedInUser?.userId) {
+    showAlert('You need to be signed in to save settings.');
+    return;
+  }
+  try {
+    await settingsService.updateReceiptSettings(loggedInUser.userId, receiptSettings);
+    try { localStorage.setItem(RECEIPT_SETTINGS_STORAGE_KEY, JSON.stringify(receiptSettings)); } catch { /* ignore */ }
+    showSuccess('Receipt settings updated.');
+    setQuotationSubView('settingsMenu');
+  } catch (error) {
+    console.error('Error updating receipt settings:', error);
+    showAlert('Could not save settings. Please try again.');
+  }
+};
 
   // ===== Quotations module: Column Heading Settings =====
-  const [columnHeadingSettings, setColumnHeadingSettings] = useState(() => {
+  // Reads Column Heading Settings from local storage, or falls back to the defaults below.
+  // Used both as the initial state and by the Settings screen's Reset button (which re-runs
+  // this to discard any unsaved in-memory edits).
+  const loadColumnHeadingSettings = () => {
     try {
       const saved = localStorage.getItem(COLUMN_HEADING_SETTINGS_STORAGE_KEY);
       if (saved) return JSON.parse(saved);
@@ -1812,7 +2339,14 @@ const paymentService = {
       otherChargesLabel: 'Other Charges',
       showQty2Column: false,
     };
-  });
+  };
+  const [columnHeadingSettings, setColumnHeadingSettings] = useState(loadColumnHeadingSettings);
+  const handleResetColumnHeadingSettings = () => {
+    showConfirm('Discard all unsaved changes to Column Heading Settings?', () => {
+      setColumnHeadingSettings(loadColumnHeadingSettings());
+      showSuccess('Column heading settings reset.');
+    }, { confirmLabel: 'Reset', tone: 'warning' });
+  };
   const updateColumnHeadingSettingField = (key, value) => setColumnHeadingSettings(prev => ({ ...prev, [key]: value }));
   const handleUpdateColumnHeadingSettings = () => {
     try {
@@ -2612,7 +3146,7 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedQuotationCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...quotationForm, ...customerSnapshot };
+  const payload = { ...quotationForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(quotationSettings) };
 
   try {
     if (editingQuotationId) {
@@ -2836,7 +3370,7 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedPurchaseOrderCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...purchaseOrderForm, ...customerSnapshot };
+  const payload = { ...purchaseOrderForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(purchaseOrderSettings) };
 
   try {
     if (editingPurchaseOrderId) {
@@ -3106,7 +3640,7 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedProformaInvoiceCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...proformaInvoiceForm, ...customerSnapshot };
+  const payload = { ...proformaInvoiceForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(proformaInvoiceSettings) };
 
   try {
     if (editingProformaInvoiceId) {
@@ -3306,7 +3840,7 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedDeliveryNoteCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...deliveryNoteForm, ...customerSnapshot };
+  const payload = { ...deliveryNoteForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings) };
 
   try {
     if (editingDeliveryNoteId) {
@@ -3578,7 +4112,7 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedInvoiceCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...invoiceForm, ...customerSnapshot };
+  const payload = { ...invoiceForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(invoiceSettings) };
 
   try {
     if (editingInvoiceId) {
@@ -3588,7 +4122,8 @@ const handleAddTerm = async () => {
       setEditingInvoiceId(null);
       setQuotationSubView('invoiceDetail');
     } else {
-      const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
+      // New invoices default to 'Unpaid' until the user marks them Paid / Partially Paid / Cancelled.
+      const created = await invoicesService.createInvoice(loggedInUser.userId, { ...payload, status: 'Unpaid' });
       persistInvoices([...invoices, created]);
       showSuccess('Invoice generated successfully.');
       setQuotationSubView('invoiceList');
@@ -3711,7 +4246,7 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedReceiptCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...receiptForm, ...customerSnapshot };
+  const payload = { ...receiptForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(receiptSettings) };
 
   try {
     if (editingReceiptId) {
@@ -3742,21 +4277,33 @@ const handleAddTerm = async () => {
 
   const [showQuotationStatusSheet, setShowQuotationStatusSheet] = useState(false);
   const [showPurchaseOrderMoreSheet, setShowPurchaseOrderMoreSheet] = useState(false);
-  const [showPurchaseOrderStatusSheet, setShowPurchaseOrderStatusSheet] = useState(false);
   const [showProformaInvoiceMoreSheet, setShowProformaInvoiceMoreSheet] = useState(false);
   const [showProformaInvoiceStatusSheet, setShowProformaInvoiceStatusSheet] = useState(false);
+  const [showProformaInvoiceConvertSheet, setShowProformaInvoiceConvertSheet] = useState(false);
   const [showDeliveryNoteMoreSheet, setShowDeliveryNoteMoreSheet] = useState(false);
-  const [showDeliveryNoteStatusSheet, setShowDeliveryNoteStatusSheet] = useState(false);
   const [showInvoiceMoreSheet, setShowInvoiceMoreSheet] = useState(false);
   const [showInvoiceStatusSheet, setShowInvoiceStatusSheet] = useState(false);
+  const [showInvoiceConvertSheet, setShowInvoiceConvertSheet] = useState(false);
   const [showReceiptMoreSheet, setShowReceiptMoreSheet] = useState(false);
-  const [showReceiptStatusSheet, setShowReceiptStatusSheet] = useState(false);
-
   const DOCUMENT_STATUS_OPTIONS = ['In-Progress', 'Approved', 'Rejected'];
+  // Invoice Status uses its own set of options (Paid / Unpaid / Partially Paid / Cancelled)
+  // instead of the generic In-Progress / Approved / Rejected set used by the other document modules.
+  const INVOICE_STATUS_OPTIONS = ['Paid', 'Unpaid', 'Partially Paid', 'Cancelled'];
+  // Older invoices (and any newly created/converted invoice that doesn't carry a status
+  // yet) may still have a leftover generic status like 'In-Progress' / 'Approved' / 'Rejected',
+  // or no status at all. Since the Invoice screen now only understands the Paid / Unpaid /
+  // Partially Paid / Cancelled set, treat anything outside that set as 'Unpaid' by default.
+  const normalizeInvoiceStatus = (status) => (
+    INVOICE_STATUS_OPTIONS.includes(status) ? status : 'Unpaid'
+  );
   const documentStatusColors = {
     'In-Progress': { bg: '#D97706', text: '#ffffff' },
     'Approved': { bg: '#16A34A', text: '#ffffff' },
     'Rejected': { bg: '#DC2626', text: '#ffffff' },
+    'Paid': { bg: '#16A34A', text: '#ffffff' },
+    'Unpaid': { bg: '#DC2626', text: '#ffffff' },
+    'Partially Paid': { bg: '#D97706', text: '#ffffff' },
+    'Cancelled': { bg: '#64748B', text: '#ffffff' },
   };
   const DocumentStatusBadge = ({ status }) => {
     if (!status) return null;
@@ -3768,18 +4315,21 @@ const handleAddTerm = async () => {
     );
   };
   // Reusable "Quotation Status"-style bottom sheet used by every document module's More > Status action.
-  const DocumentStatusSheet = ({ open, title, onSelect, onClose }) => {
+  // `options` lets individual document modules (e.g. Invoice) show their own status list instead of
+  // the default DOCUMENT_STATUS_OPTIONS.
+  const DocumentStatusSheet = ({ open, title, onSelect, onClose, options }) => {
     if (!open) return null;
+    const statusOptions = options || DOCUMENT_STATUS_OPTIONS;
     return (
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.6)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999 }} onClick={onClose}>
         <div style={{ background: '#ffffff', width: '100%', maxWidth: '500px', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', padding: '12px 20px 30px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#E2E8F0', margin: '4px auto 20px' }} />
           <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>{title}</h3>
-          {DOCUMENT_STATUS_OPTIONS.map((status, idx) => (
+          {statusOptions.map((status, idx) => (
             <button
               key={status}
               onClick={() => onSelect(status)}
-              style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: idx < DOCUMENT_STATUS_OPTIONS.length - 1 ? '1px solid #F1F5F9' : 'none', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+              style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: idx < statusOptions.length - 1 ? '1px solid #F1F5F9' : 'none', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
             >
               {status}
             </button>
@@ -3832,7 +4382,9 @@ const handleAddTerm = async () => {
       fontFamily: DOC_FONT, WebkitTextSizeAdjust: '100%', textSizeAdjust: '100%',
     },
     headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0', gap: '12px' },
-    businessName: { fontSize: '15.5px', fontWeight: '700', color: '#0F172A', margin: 0, lineHeight: 1.3, letterSpacing: '0.1px' },
+    // Matches toName (the customer name, e.g. under "To,") so the business name and
+    // customer name render in the same font/size/weight across every document type.
+    businessName: { fontSize: '12.5px', fontWeight: '700', color: '#0F172A', margin: 0, lineHeight: 1.4 },
     contactLine: { fontSize: '10px', color: '#64748B', margin: '2px 0 0', lineHeight: 1.4 },
     docTypeLabel: { fontSize: '13px', fontWeight: '700', color: '#0F172A', margin: 0, textTransform: 'uppercase', letterSpacing: '0.6px' },
     docMetaLine: { fontSize: '10.5px', fontWeight: '500', color: '#64748B', margin: '3px 0 0', lineHeight: 1.4 },
@@ -3904,7 +4456,39 @@ const handleAddTerm = async () => {
       entity.customerEmail ? `Email: ${entity.customerEmail}` : null,
     ].filter(Boolean);
   };
+  // Captures every Business Info + Settings-driven field a document's preview/PDF depends
+  // on (business name/contact/logo/signature, bank & UPI/QR details, HSN column label, and
+  // that document type's Top/Bottom Message + display-toggle settings), at the exact moment
+  // a document is generated or edited-and-updated. Stored as `docSnapshot` on the document
+  // itself so later changes to Business Info, that document type's Settings, or Column
+  // Heading Settings never alter an already-created document - it only picks up new values
+  // the next time the user opens that specific document in Edit and taps Update/Generate.
+  const buildDocSettingsSnapshot = (settings = {}) => ({
+    topMessageMode: settings.topMessageMode,
+    topMessage: settings.topMessage,
+    bottomMessageMode: settings.bottomMessageMode,
+    bottomMessage: settings.bottomMessage,
+    showBankInfo: settings.showBankInfo,
+    showUpiInfo: settings.showUpiInfo,
+    showSignature: settings.showSignature,
+    showProductHSN: settings.showProductHSN,
+    showShippingAddress: settings.showShippingAddress,
+    taxType: settings.taxType,
+    hsnLabel: columnHeadingSettings.hsnLabel || 'HSN',
+    businessName: businessInfo?.businessName || '',
+    businessPhone: businessInfo?.phone || '',
+    businessEmail: businessInfo?.email || '',
+    logoImg: businessInfo?.logoImg || null,
+    signatureImg: businessInfo?.signatureImg || null,
+    bankAccountName: businessInfo?.bankAccountName || '',
+    bankAccountNumber: businessInfo?.bankAccountNumber || '',
+    bankName: businessInfo?.bankName || '',
+    ifscCode: businessInfo?.ifscCode || '',
+    upiId: businessInfo?.upiId || '',
+    qrCodeImg: businessInfo?.qrCodeImg || null,
+  });
   const buildQuotationDocModel = (q) => {
+    const snap = q.docSnapshot || buildDocSettingsSnapshot(quotationSettings);
     const rows = (q.products || []).map((p, idx) => {
       const taxableAmt = (p.price || 0) * (p.qty || 0);
       const gstAmt = taxableAmt * (p.gst || 0) / 100;
@@ -3920,10 +4504,13 @@ const handleAddTerm = async () => {
     const termsLines = quotationTerms.filter((t) => (q.termsIds || []).includes(t.id)).map((t) => t.text);
     return {
       quotationTitle: 'Quotation',
-      businessName: businessInfo?.businessName || 'Manufacturer',
-      businessPhone: businessInfo?.phone || '',
-      businessEmail: businessInfo?.email || '',
-      hsnLabel: columnHeadingSettings.hsnLabel || 'HSN',
+      docTitle: 'Quotation',
+      toLabel: 'To,',
+      pricing: true,
+      businessName: snap.businessName || 'Manufacturer',
+      businessPhone: snap.businessPhone || '',
+      businessEmail: snap.businessEmail || '',
+      hsnLabel: snap.hsnLabel || 'HSN',
       date: q.date,
       customerLines,
       shippingAddress: q.customerShippingAddress || '',
@@ -3933,11 +4520,24 @@ const handleAddTerm = async () => {
       otherChargesTotal: extraChargesTotal,
       grandTotal: q.grandTotal || 0,
       termsLines,
-      greetingLines: splitTopMessageLines(quotationSettings.topMessage),
-      closingText: quotationSettings.bottomMessage || '',
-      signatureName: businessInfo?.businessName || 'Manufacturer',
-      logoImg: businessInfo?.logoImg || null,
-      signatureImg: businessInfo?.signatureImg || null,
+      greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+      closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+      signatureName: snap.businessName || 'Manufacturer',
+      logoImg: snap.logoImg || null,
+      signatureImg: snap.signatureImg || null,
+      // Quotation Settings toggles: only shown on the Quotation PDF/preview when set to "Yes".
+      showGst: snap.taxType !== 'No',
+      showHsn: snap.showProductHSN === 'Yes',
+      showShippingAddress: snap.showShippingAddress === 'Yes',
+      showBankInfo: snap.showBankInfo === 'Yes',
+      showUpi: snap.showUpiInfo === 'Yes',
+      showSignature: snap.showSignature !== 'No',
+      bankAccountName: snap.bankAccountName || '',
+      bankAccountNumber: snap.bankAccountNumber || '',
+      bankName: snap.bankName || '',
+      ifscCode: snap.ifscCode || '',
+      upiId: snap.upiId || '',
+      qrCodeImg: snap.qrCodeImg || null,
     };
   };
 
@@ -3948,7 +4548,11 @@ const handleAddTerm = async () => {
   // Quotation Detail already has — only the type-specific text/labels/fields passed in via
   // `opts` differ (doc title prefix, greeting/closing copy, which totals rows apply, etc).
   const buildDocModel = (doc, opts) => {
-    const { docTypeLabel, docNo, terms, toLabel, greetingLines, closingText, pricing = true, hasPayment = false } = opts;
+    const {
+      docTypeLabel, docNo, terms, toLabel, greetingLines, closingText, pricing = true, hasPayment = false,
+      showBankInfo = false, showUpi = false, showSignature = true, showHsn = true, showGst = true, showShippingAddress = false,
+      snapshot = {},
+    } = opts;
     const rows = (doc.products || []).map((p, idx) => {
       const taxableAmt = (p.price || 0) * (p.qty || 0);
       const gstAmt = taxableAmt * (p.gst || 0) / 100;
@@ -3964,13 +4568,14 @@ const handleAddTerm = async () => {
     const termsLines = (terms || []).filter((t) => (doc.termsIds || []).includes(t.id)).map((t) => t.text);
     return {
       docTitle: docTypeLabel,
-      businessName: businessInfo?.businessName || 'Manufacturer',
-      businessPhone: businessInfo?.phone || '',
-      businessEmail: businessInfo?.email || '',
-      hsnLabel: columnHeadingSettings.hsnLabel || 'HSN',
+      businessName: snapshot.businessName || 'Manufacturer',
+      businessPhone: snapshot.businessPhone || '',
+      businessEmail: snapshot.businessEmail || '',
+      hsnLabel: snapshot.hsnLabel || 'HSN',
       date: doc.date,
       toLabel: toLabel || 'To,',
       customerLines,
+      shippingAddress: doc.customerShippingAddress || '',
       greetingLines: greetingLines || [],
       closingText: closingText || '',
       rows,
@@ -3983,11 +4588,25 @@ const handleAddTerm = async () => {
       balanceDue: doc.balanceDue ?? doc.grandTotal ?? 0,
       paidInfo: doc.paidInfo || [],
       termsLines,
-      signatureName: businessInfo?.businessName || 'Manufacturer',
-      logoImg: businessInfo?.logoImg || null,
-      signatureImg: businessInfo?.signatureImg || null,
+      signatureName: snapshot.businessName || 'Manufacturer',
+      logoImg: snapshot.logoImg || null,
+      signatureImg: snapshot.signatureImg || null,
       pricing,
       otherInfo: doc.otherInfo || '',
+      // Settings toggles: only shown on this doc type's PDF/preview when the caller opts in
+      // (driven by that document type's own Settings screen, e.g. Purchase Order Settings).
+      showBankInfo,
+      showUpi,
+      showSignature,
+      showHsn,
+      showGst,
+      showShippingAddress,
+      bankAccountName: snapshot.bankAccountName || '',
+      bankAccountNumber: snapshot.bankAccountNumber || '',
+      bankName: snapshot.bankName || '',
+      ifscCode: snapshot.ifscCode || '',
+      upiId: snapshot.upiId || '',
+      qrCodeImg: snapshot.qrCodeImg || null,
     };
   };
 
@@ -3995,53 +4614,118 @@ const handleAddTerm = async () => {
   // number field, terms catalog, and greeting/closing copy appropriate to that document,
   // while the shape (header + logo, To/Date, table, totals, terms, signature + signature
   // image) stays identical to Quotation Detail's design across every document type.
-  const buildPurchaseOrderDocModel = (o) => buildDocModel(o, {
-    docTypeLabel: 'Purchase Order',
-    docNo: o.purchaseOrderNo,
-    terms: purchaseOrderTerms,
-    toLabel: 'To,',
-    greetingLines: splitTopMessageLines(purchaseOrderSettings.topMessage),
-    closingText: purchaseOrderSettings.bottomMessage || '',
-    pricing: true,
-    hasPayment: false,
-  });
-  const buildProformaInvoiceDocModel = (inv) => buildDocModel(inv, {
-    docTypeLabel: 'Proforma Invoice',
-    docNo: inv.proformaInvoiceNo,
-    terms: proformaInvoiceTerms,
-    toLabel: 'Bill To,',
-    greetingLines: splitTopMessageLines(proformaInvoiceSettings.topMessage),
-    closingText: proformaInvoiceSettings.bottomMessage || '',
-    pricing: true,
-    hasPayment: true,
-  });
-  const buildInvoiceDocModel = (inv) => buildDocModel(inv, {
-    docTypeLabel: 'Invoice',
-    docNo: inv.invoiceNo,
-    terms: invoiceTerms,
-    toLabel: 'Bill To,',
-    greetingLines: splitTopMessageLines(invoiceSettings.topMessage),
-    closingText: invoiceSettings.bottomMessage || '',
-    pricing: true,
-    hasPayment: true,
-  });
-  const buildDeliveryNoteDocModel = (dn) => buildDocModel(dn, {
-    docTypeLabel: 'Delivery Note',
-    docNo: dn.deliveryNoteNo,
-    terms: deliveryNoteTerms,
-    toLabel: 'To,',
-    greetingLines: splitTopMessageLines(deliveryNoteSettings.topMessage),
-    closingText: deliveryNoteSettings.bottomMessage || '',
-    pricing: false,
-    hasPayment: false,
-  });
+  const buildPurchaseOrderDocModel = (o) => {
+    const snap = o.docSnapshot || buildDocSettingsSnapshot(purchaseOrderSettings);
+    return buildDocModel(o, {
+      docTypeLabel: 'Purchase Order',
+      docNo: o.purchaseOrderNo,
+      terms: purchaseOrderTerms,
+      toLabel: 'To,',
+      greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+      closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+      pricing: true,
+      hasPayment: false,
+      // Purchase Order Settings toggles: HSN and GST were previously always shown regardless
+      // of the "Product HSN Display" / "GST Display" toggles below — wired up here so the
+      // Purchase Order PDF/preview matches its own Settings screen, same as every other doc type.
+      showHsn: snap.showProductHSN === 'Yes',
+      showGst: snap.taxType !== 'No',
+      showShippingAddress: snap.showShippingAddress === 'Yes',
+      showBankInfo: snap.showBankInfo === 'Yes',
+      showUpi: snap.showUpiInfo === 'Yes',
+      showSignature: snap.showSignature !== 'No',
+      snapshot: snap,
+    });
+  };
+  const buildProformaInvoiceDocModel = (inv) => {
+  const snap = inv.docSnapshot || buildDocSettingsSnapshot(proformaInvoiceSettings);
+  return buildDocModel(inv, {
+  docTypeLabel: 'Proforma Invoice',
+  docNo: inv.proformaInvoiceNo,
+  terms: proformaInvoiceTerms,
+  toLabel: 'Bill To,',
+  greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+  closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+  pricing: true,
+  hasPayment: true,
+  // Proforma Invoice Settings toggles: only shown on the Proforma Invoice PDF/preview
+  // when set to "Yes", matching how Quotation/Invoice Settings drive their own detail screens.
+  showHsn: snap.showProductHSN === 'Yes',
+  showGst: snap.taxType !== 'No',
+  showShippingAddress: snap.showShippingAddress === 'Yes',
+  showBankInfo: snap.showBankInfo === 'Yes',
+  showUpi: snap.showUpiInfo === 'Yes',
+  showSignature: snap.showSignature !== 'No',
+  snapshot: snap,
+});
+};
+  const buildInvoiceDocModel = (inv) => {
+    const snap = inv.docSnapshot || buildDocSettingsSnapshot(invoiceSettings);
+    return buildDocModel(inv, {
+      docTypeLabel: 'Invoice',
+      docNo: inv.invoiceNo,
+      terms: invoiceTerms,
+      toLabel: 'Bill To,',
+      greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+      closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+      pricing: true,
+      hasPayment: true,
+      // Invoice Settings toggles: only shown on the Invoice PDF/preview when set to "Yes",
+      // matching how Quotation Settings drives Quotation Detail.
+      showHsn: snap.showProductHSN === 'Yes',
+      showGst: snap.taxType !== 'No',
+      showShippingAddress: snap.showShippingAddress === 'Yes',
+      showBankInfo: snap.showBankInfo === 'Yes',
+      showUpi: snap.showUpiInfo === 'Yes',
+      showSignature: snap.showSignature !== 'No',
+      snapshot: snap,
+    });
+  };
+  const buildDeliveryNoteDocModel = (dn) => {
+  const snap = dn.docSnapshot || buildDocSettingsSnapshot(deliveryNoteSettings);
+  return buildDocModel(dn, {
+  docTypeLabel: 'Delivery Note',
+  docNo: dn.deliveryNoteNo,
+  terms: deliveryNoteTerms,
+  toLabel: 'To,',
+  greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+  closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+  pricing: false,
+  hasPayment: false,
+  // Delivery Note Settings toggles: HSN and Signature were previously always shown
+  // regardless of the "Product HSN Display" / "Signature Display" toggles below — wired
+  // up here so the Delivery Note PDF/preview matches its own Settings screen.
+  showHsn: snap.showProductHSN === 'Yes',
+  showSignature: snap.showSignature !== 'No',
+  showShippingAddress: snap.showShippingAddress === 'Yes',
+  // Delivery Note only: a "Received By" acknowledgement block (Name / Date / Signature)
+  // is shown on the left, at the very bottom of the document - below Terms & Conditions
+  // and any other trailing sections, alongside the business's own Authorized Signature
+  // on the right. See showReceivedBy handling in GeneratedDocumentPreview and
+  // shareStandardDocumentPdf.
+  showReceivedBy: true,
+  snapshot: snap,
+});
+};
 
   // Renders the full document body (header/logo, To+Date, greeting, item table, totals,
   // other info, closing text, terms, signature + signature image, brand footer) from a
   // model built by buildDocModel/buildQuotationDocModel — the exact same visual structure
   // Quotation Detail uses, reused by every other document type's in-app preview.
   const GeneratedDocumentPreview = ({ model }) => {
-    const footerColSpan = model.pricing ? 6 : 3;
+    // These settings-driven flags default to "on" (undefined !== false) for document types
+    // that don't define them (Invoice/Purchase Order/Proforma Invoice/Delivery Note), so
+    // their preview keeps behaving exactly as before. Only Quotation sets them explicitly,
+    // driven by Quotation Settings.
+    const showHsn = model.showHsn !== false;
+    const showGst = model.showGst !== false;
+    const showSignature = model.showSignature !== false;
+    const showShippingAddress = !!model.showShippingAddress && !!model.shippingAddress;
+    const showBankInfo = !!model.showBankInfo && (model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode);
+    const showUpi = !!model.showUpi && (model.upiId || model.qrCodeImg);
+    const showReceivedBy = !!model.showReceivedBy;
+    const totalCols = 2 + (showHsn ? 1 : 0) + 1 + (model.pricing ? (1 + (showGst ? 1 : 0) + 1) : 0);
+    const footerColSpan = totalCols - 1;
     return (
       <>
         {/* Header: Doc title (top, centered), then Business info + logo below */}
@@ -4060,7 +4744,7 @@ const handleAddTerm = async () => {
         </div>
 
         {/* To, (left) | Date (right) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: showShippingAddress ? '10px' : '16px' }}>
           <div style={{ flex: 1 }}>
             <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>{model.toLabel}</p>
             {model.customerLines.map((line, idx) => (
@@ -4071,6 +4755,14 @@ const handleAddTerm = async () => {
             <p style={docStyles.docMetaLine}>Date: {model.date}</p>
           </div>
         </div>
+
+        {/* Shipping Address (Quotation only, when enabled in Quotation Settings) */}
+        {showShippingAddress && (
+          <div style={{ marginBottom: '16px' }}>
+            <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>Shipping Address</p>
+            <p style={docStyles.contactLine}>{model.shippingAddress}</p>
+          </div>
+        )}
 
         {model.greetingLines.length > 0 && (
           <p style={docStyles.bodyText}>
@@ -4090,10 +4782,10 @@ const handleAddTerm = async () => {
               <tr>
                 <th style={{ ...docStyles.th, width: model.pricing ? '6%' : '10%' }}>#</th>
                 <th style={{ ...docStyles.th, width: model.pricing ? '22%' : '42%', wordBreak: 'break-word' }}>Item</th>
-                <th style={{ ...docStyles.th, width: model.pricing ? '11%' : '23%', wordBreak: 'break-word' }}>{model.hsnLabel}</th>
+                {showHsn && <th style={{ ...docStyles.th, width: model.pricing ? '11%' : '23%', wordBreak: 'break-word' }}>{model.hsnLabel}</th>}
                 <th style={{ ...docStyles.th, textAlign: 'center', width: model.pricing ? '11%' : '25%' }}>Qty</th>
                 {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '17%' }}>Price</th>}
-                {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '15%' }}>GST</th>}
+                {model.pricing && showGst && <th style={{ ...docStyles.th, textAlign: 'right', width: '15%' }}>GST</th>}
                 {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '18%' }}>Total</th>}
               </tr>
             </thead>
@@ -4104,12 +4796,12 @@ const handleAddTerm = async () => {
                   <td style={docStyles.td}>
                     <div style={docStyles.tdBold}>{r.name}</div>
                   </td>
-                  <td style={docStyles.td}>{r.hsn}</td>
+                  {showHsn && <td style={docStyles.td}>{r.hsn}</td>}
                   <td style={{ ...docStyles.td, textAlign: 'center' }}>
                     {r.qty}{r.unit ? <span style={{ fontSize: '9px', color: '#94A3B8' }}> {r.unit}</span> : null}
                   </td>
                   {model.pricing && <td style={{ ...docStyles.td, textAlign: 'right' }}>₹{Number(r.price).toFixed(2)}</td>}
-                  {model.pricing && (
+                  {model.pricing && showGst && (
                     <td style={{ ...docStyles.td, textAlign: 'right' }}>
                       {r.gstPct}%
                       <div style={{ fontSize: '9px', color: '#94A3B8' }}>₹{r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
@@ -4152,13 +4844,51 @@ const handleAddTerm = async () => {
           </table>
         </div>
 
-        {model.otherInfo && (
-          <p style={{ ...docStyles.bodyText, margin: '0 0 16px' }}>{model.otherInfo}</p>
-        )}
+        {/* Left column (closing text, QR, Payment Instructions) runs alongside the Signature on the right, both starting right after Grand Total */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', margin: '4px 0 18px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {model.otherInfo && (
+              <p style={{ ...docStyles.bodyText, margin: '0 0 16px' }}>{model.otherInfo}</p>
+            )}
 
-        {model.closingText && (
-          <p style={docStyles.closingText}>{model.closingText}</p>
-        )}
+            {model.closingText && (
+              <p style={{ ...docStyles.closingText, margin: '0 0 18px' }}>{model.closingText}</p>
+            )}
+
+            {/* UPI / QR Code (Quotation only, when enabled) */}
+            {showUpi && (
+              <div style={{ textAlign: 'left', marginBottom: '18px' }}>
+                {model.qrCodeImg && (
+                  <img src={model.qrCodeImg} alt="UPI QR Code" style={{ width: '120px', height: '120px', objectFit: 'contain', background: '#ffffff', padding: '4px', borderRadius: '8px', border: '1px solid #E2E8F0', display: 'block', marginRight: 'auto', imageRendering: 'pixelated' }} />
+                )}
+                {model.upiId && <p style={{ ...docStyles.addressLine, margin: '4px 0 0' }}>{model.upiId}</p>}
+              </div>
+            )}
+
+            {/* Payment Instructions (bank info) */}
+            {showBankInfo && (
+              <div>
+                <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 6px' }}>Payment Instructions</p>
+                {model.bankAccountName && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Account Holder Name: {model.bankAccountName}</p>}
+                {model.bankAccountNumber && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Account Number: {model.bankAccountNumber}</p>}
+                {model.bankName && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Bank Name: {model.bankName}</p>}
+                {model.ifscCode && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>IFSC Code: {model.ifscCode}</p>}
+              </div>
+            )}
+          </div>
+
+          {showSignature && !showReceivedBy && (
+            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+              <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
+              {model.signatureImg ? (
+                <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
+              ) : (
+                <div style={{ height: '34px' }}></div>
+              )}
+              <p style={docStyles.signatureCaption}>Authorized Signature</p>
+            </div>
+          )}
+        </div>
 
         {/* Terms & Conditions */}
         {model.termsLines.length > 0 && (
@@ -4183,16 +4913,39 @@ const handleAddTerm = async () => {
           </div>
         )}
 
-        {/* Signature */}
-        <div style={{ textAlign: 'right', marginTop: '20px' }}>
-          <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
-          {model.signatureImg ? (
-            <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
-          ) : (
-            <div style={{ height: '34px' }}></div>
-          )}
-          <p style={docStyles.signatureCaption}>Authorized Signature</p>
-        </div>
+        {/* Received By (Delivery Note only) - Name/Date/Signature acknowledgement on the
+            left, business's own Authorized Signature on the right, both at the very
+            bottom, below Terms & Conditions / Payment Instructions / QR above. */}
+        {showReceivedBy && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginTop: '6px', marginBottom: '18px' }}>
+            <div style={{ flex: 1, maxWidth: '260px' }}>
+              <p style={{ ...docStyles.sectionLabel, textTransform: 'none', margin: '0 0 14px' }}>Received By:</p>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '20px' }}>
+                <span style={docStyles.addressLine}>Name:</span>
+                <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '20px' }}>
+                <span style={docStyles.addressLine}>Date:</span>
+                <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                <span style={docStyles.addressLine}>Signature:</span>
+                <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
+              </div>
+            </div>
+            {showSignature && (
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
+                {model.signatureImg ? (
+                  <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
+                ) : (
+                  <div style={{ height: '34px' }}></div>
+                )}
+                <p style={docStyles.signatureCaption}>Authorized Signature</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Generated with SmartManage - brand footer */}
         <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -4367,6 +5120,25 @@ const handleAddTerm = async () => {
     }
   };
 
+  // Bank Info: shares the business's saved bank/payment details as a .pdf through the
+  // OS share sheet, using the exact same generic PDF renderer + share pattern as every
+  // other document in the app (shareGeneratedDocumentPdf).
+  const handleShareBankInfo = () => {
+    const lines = [
+      `Account Holder Name: ${businessInfo?.bankAccountName || '-'}`,
+      `Account Number: ${businessInfo?.bankAccountNumber || '-'}`,
+      `Bank Name: ${businessInfo?.bankName || '-'}`,
+      `IFSC Code: ${businessInfo?.ifscCode || '-'}`,
+    ];
+    if (businessInfo?.upiId) lines.push(`UPI ID: ${businessInfo.upiId}`);
+    shareGeneratedDocumentPdf({
+      fileNameBase: `${businessInfo?.businessName || 'Bank'}_Bank_Info`,
+      title: 'Bank Info',
+      date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+      lines,
+    });
+  };
+
   // Dedicated Quotation PDF renderer - draws the SAME header/To-Date/table/totals/
   // terms/signature layout as the in-app "Quotation Detail" preview, built from the
   // exact same buildQuotationDocModel() data, so Share always matches what's on screen.
@@ -4413,8 +5185,10 @@ const handleAddTerm = async () => {
         try { doc.addImage(model.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
       }
 
+      // Business name uses the same size/weight as the customer name below (10.5pt bold)
+      // so the two read as visually uniform, matching the in-app document preview.
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12.5);
+      doc.setFontSize(10.5);
       doc.setTextColor('#0F172A');
       doc.text(model.businessName, marginX, y);
       doc.setFont('helvetica', 'normal');
@@ -4450,6 +5224,22 @@ const handleAddTerm = async () => {
       });
       y += 10;
 
+      // ---- Shipping Address (only when enabled in Quotation Settings)
+      if (model.showShippingAddress && model.shippingAddress) {
+        ensureSpace(24);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor('#64748B');
+        doc.text('Shipping Address', marginX, y);
+        y += 12;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor('#64748B');
+        const shipLines = doc.splitTextToSize(model.shippingAddress, contentWidth);
+        doc.text(shipLines, marginX, y);
+        y += shipLines.length * 11 + 8;
+      }
+
       // ---- Greeting / intro line (skipped when empty)
       if (model.greetingLines.length > 0) {
         doc.setFont('helvetica', 'normal');
@@ -4463,11 +5253,28 @@ const handleAddTerm = async () => {
       }
 
       // ---- Item table
-      const colWidths = [0.06, 0.22, 0.11, 0.11, 0.17, 0.15, 0.18].map((pct) => pct * contentWidth);
+      // Columns are built dynamically so the HSN and GST columns can be omitted entirely
+      // (rather than just left blank) when Quotation Settings has them turned off, with the
+      // remaining columns proportionally widened to fill the page.
+      const showHsn = model.showHsn !== false;
+      const showGst = model.showGst !== false;
+      const colDefs = [
+        { key: 'idx', label: '#', pct: 0.06, align: 'left' },
+        { key: 'item', label: 'Item', pct: 0.15, align: 'left' },
+        ...(showHsn ? [{ key: 'hsn', label: model.hsnLabel, pct: 0.11, align: 'left' }] : []),
+        { key: 'qty', label: 'Qty', pct: 0.13, align: 'center' },
+        { key: 'price', label: 'Price', pct: 0.18, align: 'right' },
+        ...(showGst ? [{ key: 'gst', label: 'GST', pct: 0.16, align: 'right' }] : []),
+        { key: 'total', label: 'Total', pct: 0.21, align: 'right' },
+      ];
+      const pctSum = colDefs.reduce((s, c) => s + c.pct, 0);
+      const colWidths = colDefs.map((c) => (c.pct / pctSum) * contentWidth);
       const colX = [marginX];
       for (let i = 0; i < colWidths.length - 1; i++) colX.push(colX[i] + colWidths[i]);
-      const headers = ['#', 'Item', model.hsnLabel, 'Qty', 'Price', 'GST', 'Total'];
-      const aligns = ['left', 'left', 'left', 'center', 'right', 'right', 'right'];
+      const headers = colDefs.map((c) => c.label);
+      const aligns = colDefs.map((c) => c.align);
+      const colIndex = {};
+      colDefs.forEach((c, i) => { colIndex[c.key] = i; });
 
       ensureSpace(24);
       doc.setDrawColor('#0F172A');
@@ -4486,29 +5293,36 @@ const handleAddTerm = async () => {
       y += 13;
 
       model.rows.forEach((r) => {
-        const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[1] - 4);
-        const rowH = Math.max(13, nameLines.length * 10 + 3);
+        const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[colIndex.item] - 4);
+        // When the GST column is shown, each row draws a small sub-line (the GST amount,
+        // e.g. "Rs.33,600") 9pt below the main row baseline. rowH must account for that
+        // sub-line's full height, or the divider line below gets drawn too early and
+        // overlaps/"cuts" into the row's own text instead of sitting cleanly beneath it.
+        const mainRowH = Math.max(13, nameLines.length * 10 + 3);
+        const rowH = showGst ? Math.max(mainRowH, 9 + 10) : mainRowH;
         ensureSpace(rowH + 6);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         doc.setTextColor('#334155');
-        doc.text(String(r.index), colX[0], y);
+        doc.text(String(r.index), colX[colIndex.idx], y);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor('#0F172A');
-        doc.text(nameLines, colX[1], y);
+        doc.text(nameLines, colX[colIndex.item], y);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor('#334155');
-        doc.text(String(r.hsn), colX[2], y);
-        doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[3] + colWidths[3] / 2, y, { align: 'center' });
-        doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[4] + colWidths[4], y, { align: 'right' });
-        doc.text(`${r.gstPct}%`, colX[5] + colWidths[5], y, { align: 'right' });
-        doc.setFontSize(7.5);
-        doc.setTextColor('#94A3B8');
-        doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[5] + colWidths[5], y + 9, { align: 'right' });
-        doc.setFontSize(9);
+        if (showHsn) doc.text(String(r.hsn), colX[colIndex.hsn], y);
+        doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[colIndex.qty] + colWidths[colIndex.qty] / 2, y, { align: 'center' });
+        doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[colIndex.price] + colWidths[colIndex.price], y, { align: 'right' });
+        if (showGst) {
+          doc.text(`${r.gstPct}%`, colX[colIndex.gst] + colWidths[colIndex.gst], y, { align: 'right' });
+          doc.setFontSize(7.5);
+          doc.setTextColor('#94A3B8');
+          doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[colIndex.gst] + colWidths[colIndex.gst], y + 9, { align: 'right' });
+          doc.setFontSize(9);
+        }
         doc.setFont('helvetica', 'bold');
         doc.setTextColor('#0F172A');
-        doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[6] + colWidths[6], y, { align: 'right' });
+        doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[colIndex.total] + colWidths[colIndex.total], y, { align: 'right' });
         y += rowH + 6;
         doc.setDrawColor('#EEF1F5');
         doc.setLineWidth(0.5);
@@ -4550,17 +5364,86 @@ const handleAddTerm = async () => {
       doc.text(`Rs.${model.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
       y += 26;
 
-      // ---- Closing text (skipped when empty)
+      // ---- Left column (closing text, QR, Payment Instructions) runs alongside the Signature
+      // column on the right - both start at the same Y, right after Grand Total.
+      const rowStartY = y;
+      let leftY = rowStartY;
+
       if (model.closingText) {
         ensureSpace(15);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor('#64748B');
-        doc.text(model.closingText, marginX, y, { maxWidth: contentWidth });
-        y += 22;
+        doc.text(model.closingText, marginX, leftY, { maxWidth: contentWidth * 0.55 });
+        leftY += 22;
       }
 
-      // ---- Terms & Conditions (Quotation-specific only)
+      const hasBankFields = model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode;
+      const hasUpiFields = model.upiId || model.qrCodeImg;
+      if (model.showUpi && hasUpiFields) {
+        ensureSpace(120);
+        const qrSize = 96; // enlarged so the code stays sharp and easy to scan
+        if (model.qrCodeImg) {
+          try {
+            doc.addImage(model.qrCodeImg, marginX, leftY, qrSize, qrSize);
+          } catch (e) { /* ignore */ }
+        }
+        let upiBottomY = leftY + qrSize;
+        if (model.upiId) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor('#475569');
+          doc.text(model.upiId, marginX, upiBottomY + 10);
+          upiBottomY += 14;
+        }
+        leftY = upiBottomY + 12;
+      }
+
+      if (model.showBankInfo && hasBankFields) {
+        ensureSpace(60);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#0F172A');
+        doc.text('PAYMENT INSTRUCTIONS', marginX, leftY);
+        leftY += 13;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor('#475569');
+        const bankLines = [
+          model.bankAccountName && `Account Holder Name: ${model.bankAccountName}`,
+          model.bankAccountNumber && `Account Number: ${model.bankAccountNumber}`,
+          model.bankName && `Bank Name: ${model.bankName}`,
+          model.ifscCode && `IFSC Code: ${model.ifscCode}`,
+        ].filter(Boolean);
+        bankLines.forEach((line) => { doc.text(line, marginX, leftY); leftY += 11; });
+        leftY += 10;
+      }
+
+      // ---- Signature block (right column, only when enabled in Quotation Settings)
+      let sigY = rowStartY;
+      if (model.showSignature) {
+        ensureSpace(46);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor('#0F172A');
+        doc.text(`For, ${model.signatureName}`, pageWidth - marginX, sigY, { align: 'right' });
+        if (model.signatureImg) {
+          try {
+            const sigW = 90, sigH = 30;
+            doc.addImage(model.signatureImg, pageWidth - marginX - sigW, sigY + 4, sigW, sigH);
+          } catch (e) { /* ignore */ }
+        }
+        sigY += 34;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#94A3B8');
+        doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, sigY, { align: 'right' });
+        sigY += 8;
+      }
+
+      y = Math.max(leftY, sigY) + 8;
+
+      // ---- Terms & Conditions (Quotation-specific only) - full width, below the row above
       if (model.termsLines.length > 0) {
         ensureSpace(16);
         doc.setFont('helvetica', 'bold');
@@ -4579,24 +5462,6 @@ const handleAddTerm = async () => {
         });
         y += 10;
       }
-
-      // ---- Signature block
-      ensureSpace(46);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor('#0F172A');
-      doc.text(`For, ${model.signatureName}`, pageWidth - marginX, y, { align: 'right' });
-      if (model.signatureImg) {
-        try {
-          const sigW = 90, sigH = 30;
-          doc.addImage(model.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
-        } catch (e) { /* ignore */ }
-      }
-      y += 34;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor('#94A3B8');
-      doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, y, { align: 'right' });
 
       drawBrandFooter();
 
@@ -4690,8 +5555,10 @@ const handleAddTerm = async () => {
         try { doc.addImage(model.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
       }
 
+      // Business name uses the same size/weight as the customer name below (10.5pt bold)
+      // so the two read as visually uniform, matching the in-app document preview.
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12.5);
+      doc.setFontSize(10.5);
       doc.setTextColor('#0F172A');
       doc.text(model.businessName, marginX, y);
       doc.setFont('helvetica', 'normal');
@@ -4739,13 +5606,26 @@ const handleAddTerm = async () => {
         y += 7;
       }
 
-      // ---- Item table (pricing columns only when this doc type carries pricing)
-      const colPcts = model.pricing ? [0.06, 0.22, 0.11, 0.11, 0.17, 0.15, 0.18] : [0.10, 0.42, 0.23, 0.25];
-      const colWidths = colPcts.map((pct) => pct * contentWidth);
+      // ---- Item table (pricing/HSN/GST columns only when this doc type/its Settings enable them).
+      // Column set is built dynamically so hidden columns (e.g. HSN or GST when a document's
+      // Settings screen has them off) free up their space rather than leaving a gap.
+      const showHsnCol = model.showHsn !== false;
+      const showGstCol = model.pricing && model.showGst !== false;
+      const cols = [
+        { key: 'index', label: '#', pct: model.pricing ? 0.06 : 0.10, align: 'left' },
+        { key: 'item', label: 'Item', pct: model.pricing ? 0.15 : 0.30, align: 'left' },
+        ...(showHsnCol ? [{ key: 'hsn', label: model.hsnLabel, pct: model.pricing ? 0.11 : 0.23, align: 'left' }] : []),
+        { key: 'qty', label: 'Qty', pct: model.pricing ? 0.13 : 0.25, align: 'center' },
+        ...(model.pricing ? [{ key: 'price', label: 'Price', pct: 0.18, align: 'right' }] : []),
+        ...(showGstCol ? [{ key: 'gst', label: 'GST', pct: 0.16, align: 'right' }] : []),
+        ...(model.pricing ? [{ key: 'total', label: 'Total', pct: 0.21, align: 'right' }] : []),
+      ];
+      const pctSum = cols.reduce((sum, c) => sum + c.pct, 0) || 1;
+      const colWidths = cols.map((c) => (c.pct / pctSum) * contentWidth);
       const colX = [marginX];
       for (let i = 0; i < colWidths.length - 1; i++) colX.push(colX[i] + colWidths[i]);
-      const headers = model.pricing ? ['#', 'Item', model.hsnLabel, 'Qty', 'Price', 'GST', 'Total'] : ['#', 'Item', model.hsnLabel, 'Qty'];
-      const aligns = model.pricing ? ['left', 'left', 'left', 'center', 'right', 'right', 'right'] : ['left', 'left', 'left', 'center'];
+      const colIndex = (key) => cols.findIndex((c) => c.key === key);
+      const itemColIdx = colIndex('item');
 
       ensureSpace(24);
       doc.setDrawColor('#0F172A');
@@ -4754,40 +5634,50 @@ const handleAddTerm = async () => {
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8);
       doc.setTextColor('#475569');
-      headers.forEach((h, i) => {
-        const align = aligns[i];
-        const tx = align === 'right' ? colX[i] + colWidths[i] : align === 'center' ? colX[i] + colWidths[i] / 2 : colX[i];
-        doc.text(h.toUpperCase(), tx, y, { align });
+      cols.forEach((c, i) => {
+        const tx = c.align === 'right' ? colX[i] + colWidths[i] : c.align === 'center' ? colX[i] + colWidths[i] / 2 : colX[i];
+        doc.text(String(c.label).toUpperCase(), tx, y, { align: c.align });
       });
       y += 4;
       doc.line(marginX, y, pageWidth - marginX, y);
       y += 13;
 
       model.rows.forEach((r) => {
-        const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[1] - 4);
-        const rowH = Math.max(13, nameLines.length * 10 + 3);
+        const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[itemColIdx] - 4);
+        // When the GST column is shown, each row draws a small sub-line (the GST amount,
+        // e.g. "Rs.33,600") 9pt below the main row baseline. rowH must account for that
+        // sub-line's full height, or the divider line below gets drawn too early and
+        // overlaps/"cuts" into the row's own text instead of sitting cleanly beneath it.
+        const mainRowH = Math.max(13, nameLines.length * 10 + 3);
+        const rowH = showGstCol ? Math.max(mainRowH, 9 + 10) : mainRowH;
         ensureSpace(rowH + 6);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         doc.setTextColor('#334155');
-        doc.text(String(r.index), colX[0], y);
+        doc.text(String(r.index), colX[colIndex('index')], y);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor('#0F172A');
-        doc.text(nameLines, colX[1], y);
+        doc.text(nameLines, colX[itemColIdx], y);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor('#334155');
-        doc.text(String(r.hsn), colX[2], y);
-        doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[3] + colWidths[3] / 2, y, { align: 'center' });
+        if (showHsnCol) doc.text(String(r.hsn), colX[colIndex('hsn')], y);
+        const qtyIdx = colIndex('qty');
+        doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[qtyIdx] + colWidths[qtyIdx] / 2, y, { align: 'center' });
         if (model.pricing) {
-          doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[4] + colWidths[4], y, { align: 'right' });
-          doc.text(`${r.gstPct}%`, colX[5] + colWidths[5], y, { align: 'right' });
-          doc.setFontSize(7.5);
-          doc.setTextColor('#94A3B8');
-          doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[5] + colWidths[5], y + 9, { align: 'right' });
-          doc.setFontSize(9);
+          const priceIdx = colIndex('price');
+          doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[priceIdx] + colWidths[priceIdx], y, { align: 'right' });
+          if (showGstCol) {
+            const gstIdx = colIndex('gst');
+            doc.text(`${r.gstPct}%`, colX[gstIdx] + colWidths[gstIdx], y, { align: 'right' });
+            doc.setFontSize(7.5);
+            doc.setTextColor('#94A3B8');
+            doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[gstIdx] + colWidths[gstIdx], y + 9, { align: 'right' });
+            doc.setFontSize(9);
+          }
           doc.setFont('helvetica', 'bold');
           doc.setTextColor('#0F172A');
-          doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[6] + colWidths[6], y, { align: 'right' });
+          const totalIdx = colIndex('total');
+          doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[totalIdx] + colWidths[totalIdx], y, { align: 'right' });
         }
         y += rowH + 6;
         doc.setDrawColor('#EEF1F5');
@@ -4847,28 +5737,100 @@ const handleAddTerm = async () => {
         }
       }
 
-      // ---- Other Info (type-agnostic free-text note, when present)
+      // ---- Left column (Other Info, Closing Text) runs alongside the Signature column on the
+      // right - both start at the same Y, right after Grand Total.
+      const rowStartY = y;
+      let leftY = rowStartY;
+
       if (model.otherInfo) {
         ensureSpace(15);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor('#64748B');
-        const lines = doc.splitTextToSize(model.otherInfo, contentWidth);
-        doc.text(lines, marginX, y);
-        y += lines.length * 13 + 8;
+        const lines = doc.splitTextToSize(model.otherInfo, contentWidth * 0.55);
+        doc.text(lines, marginX, leftY);
+        leftY += lines.length * 13 + 8;
       }
 
-      // ---- Closing text (skipped when empty)
       if (model.closingText) {
         ensureSpace(15);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor('#64748B');
-        doc.text(model.closingText, marginX, y, { maxWidth: contentWidth });
-        y += 22;
+        doc.text(model.closingText, marginX, leftY, { maxWidth: contentWidth * 0.55 });
+        leftY += 22;
       }
 
-      // ---- Terms & Conditions
+      // ---- UPI / QR Code (only shown when enabled in this document type's Settings)
+      const hasBankFields = model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode;
+      const hasUpiFields = model.upiId || model.qrCodeImg;
+      if (model.showUpi && hasUpiFields) {
+        ensureSpace(120);
+        const qrSize = 96; // enlarged so the code stays sharp and easy to scan
+        if (model.qrCodeImg) {
+          try {
+            doc.addImage(model.qrCodeImg, marginX, leftY, qrSize, qrSize);
+          } catch (e) { /* ignore */ }
+        }
+        let upiBottomY = leftY + qrSize;
+        if (model.upiId) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor('#475569');
+          doc.text(model.upiId, marginX, upiBottomY + 10);
+          upiBottomY += 14;
+        }
+        leftY = upiBottomY + 12;
+      }
+
+      // ---- Payment Instructions (bank info, only shown when enabled in this document type's Settings)
+      if (model.showBankInfo && hasBankFields) {
+        ensureSpace(60);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#0F172A');
+        doc.text('PAYMENT INSTRUCTIONS', marginX, leftY);
+        leftY += 13;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor('#475569');
+        const bankLines = [
+          model.bankAccountName && `Account Holder Name: ${model.bankAccountName}`,
+          model.bankAccountNumber && `Account Number: ${model.bankAccountNumber}`,
+          model.bankName && `Bank Name: ${model.bankName}`,
+          model.ifscCode && `IFSC Code: ${model.ifscCode}`,
+        ].filter(Boolean);
+        bankLines.forEach((line) => { doc.text(line, marginX, leftY); leftY += 11; });
+        leftY += 10;
+      }
+
+      // ---- Signature block (right column, only when enabled in this document type's Settings).
+      // Skipped here for Delivery Note (showReceivedBy) - drawn instead alongside the
+      // "Received By" acknowledgement block after Terms & Conditions, below.
+      let sigY = rowStartY;
+      if (model.showSignature && !model.showReceivedBy) {
+        ensureSpace(46);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor('#0F172A');
+        doc.text(`For, ${model.signatureName}`, pageWidth - marginX, sigY, { align: 'right' });
+        if (model.signatureImg) {
+          try {
+            const sigW = 90, sigH = 30;
+            doc.addImage(model.signatureImg, pageWidth - marginX - sigW, sigY + 4, sigW, sigH);
+          } catch (e) { /* ignore */ }
+        }
+        sigY += 34;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#94A3B8');
+        doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, sigY, { align: 'right' });
+        sigY += 8;
+      }
+
+      y = Math.max(leftY, sigY) + 8;
+
+      // ---- Terms & Conditions - full width, below the row above
       if (model.termsLines.length > 0) {
         ensureSpace(16);
         doc.setFont('helvetica', 'bold');
@@ -4888,7 +5850,7 @@ const handleAddTerm = async () => {
         y += 10;
       }
 
-      // ---- Payment History
+      // ---- Payment History - full width, below the row above
       if (model.hasPayment && model.paidInfo.length > 0) {
         ensureSpace(16);
         doc.setFont('helvetica', 'bold');
@@ -4910,23 +5872,56 @@ const handleAddTerm = async () => {
         y += 8;
       }
 
-      // ---- Signature block
-      ensureSpace(46);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor('#0F172A');
-      doc.text(`For, ${model.signatureName}`, pageWidth - marginX, y, { align: 'right' });
-      if (model.signatureImg) {
-        try {
-          const sigW = 90, sigH = 30;
-          doc.addImage(model.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
-        } catch (e) { /* ignore */ }
+      // ---- Received By (Delivery Note only) - Name/Date/Signature acknowledgement on the
+      // left, business's own Authorized Signature on the right, both at the very bottom,
+      // below Terms & Conditions / Payment Instructions / QR above.
+      if (model.showReceivedBy) {
+        ensureSpace(90);
+        const rbStartY = y;
+        let rbY = rbStartY;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#0F172A');
+        doc.text('Received By:', marginX, rbY);
+        rbY += 22;
+        const rbFieldWidth = contentWidth * 0.55;
+        const rbLabelGap = 10;
+        const drawBlankField = (label) => {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          doc.setTextColor('#475569');
+          doc.text(label, marginX, rbY);
+          const labelWidth = doc.getTextWidth(label);
+          doc.setDrawColor('#94A3B8');
+          doc.setLineWidth(0.6);
+          doc.line(marginX + labelWidth + rbLabelGap, rbY, marginX + rbFieldWidth, rbY);
+          rbY += 26;
+        };
+        drawBlankField('Name:');
+        drawBlankField('Date:');
+        drawBlankField('Signature:');
+
+        let rbSigY = rbStartY;
+        if (model.showSignature) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.setTextColor('#0F172A');
+          doc.text(`For, ${model.signatureName}`, pageWidth - marginX, rbSigY, { align: 'right' });
+          if (model.signatureImg) {
+            try {
+              const sigW = 90, sigH = 30;
+              doc.addImage(model.signatureImg, pageWidth - marginX - sigW, rbSigY + 4, sigW, sigH);
+            } catch (e) { /* ignore */ }
+          }
+          rbSigY += 34;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7.5);
+          doc.setTextColor('#94A3B8');
+          doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, rbSigY, { align: 'right' });
+          rbSigY += 8;
+        }
+        y = Math.max(rbY, rbSigY) + 8;
       }
-      y += 34;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor('#94A3B8');
-      doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, y, { align: 'right' });
 
       drawBrandFooter();
 
@@ -4990,7 +5985,10 @@ const handleAddTerm = async () => {
       return;
     }
     const { id, createdAt, updatedAt, status, ...rest } = q;
-    const payload = { ...rest, quotationNo: getNextQuotationNumber(), date: formatQuotationDate(new Date()) };
+    // A duplicate is a brand-new document created right now, so it picks up current
+    // Business Info / Quotation Settings at the moment of duplication (like any other new
+    // document) rather than inheriting the original's frozen docSnapshot.
+    const payload = { ...rest, quotationNo: getNextQuotationNumber(), date: formatQuotationDate(new Date()), docSnapshot: buildDocSettingsSnapshot(quotationSettings) };
     try {
       const created = await documentService.createQuotation(loggedInUser.userId, payload);
       persistQuotations([...quotations, created]);
@@ -5038,10 +6036,13 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = o;
+  // A duplicate is a brand-new document created right now, so it picks up current
+  // Business Info / Purchase Order Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     purchaseOrderNo: getNextPurchaseOrderNumber(), 
-    date: formatQuotationDate(new Date()) 
+    date: formatQuotationDate(new Date()),
+    docSnapshot: buildDocSettingsSnapshot(purchaseOrderSettings),
   };
   try {
     const created = await purchaseOrdersService.createPurchaseOrder(loggedInUser.userId, payload);
@@ -5051,19 +6052,6 @@ const handleAddTerm = async () => {
   } catch (error) {
     console.error('Error duplicating purchase order:', error);
     showAlert('Could not duplicate the purchase order. Please try again.');
-  }
-};
-  const handleSetPurchaseOrderStatus = async (status) => {
-  const previous = purchaseOrders;
-  persistPurchaseOrders(purchaseOrders.map((o) => (o.id === selectedPurchaseOrderId ? { ...o, status } : o)));
-  setShowPurchaseOrderStatusSheet(false);
-  setShowPurchaseOrderMoreSheet(false);
-  try {
-    await purchaseOrdersService.updatePurchaseOrderStatus(selectedPurchaseOrderId, status);
-  } catch (error) {
-    console.error('Error updating purchase order status:', error);
-    persistPurchaseOrders(previous);
-    showAlert('Could not update the purchase order status. Please try again.');
   }
 };
   const handleSharePurchaseOrder = (o) => {
@@ -5093,10 +6081,13 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = inv;
+  // A duplicate is a brand-new document created right now, so it picks up current
+  // Business Info / Proforma Invoice Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     proformaInvoiceNo: getNextProformaInvoiceNumber(), 
-    date: formatQuotationDate(new Date()) 
+    date: formatQuotationDate(new Date()),
+    docSnapshot: buildDocSettingsSnapshot(proformaInvoiceSettings),
   };
   try {
     const created = await proformaInvoicesService.createProformaInvoice(loggedInUser.userId, payload);
@@ -5145,10 +6136,13 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = dn;
+  // A duplicate is a brand-new document created right now, so it picks up current
+  // Business Info / Delivery Note Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     deliveryNoteNo: getNextDeliveryNoteNumber(), 
-    date: formatQuotationDate(new Date()) 
+    date: formatQuotationDate(new Date()),
+    docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings),
   };
   try {
     const created = await deliveryNotesService.createDeliveryNote(loggedInUser.userId, payload);
@@ -5158,19 +6152,6 @@ const handleAddTerm = async () => {
   } catch (error) {
     console.error('Error duplicating delivery note:', error);
     showAlert('Could not duplicate the delivery note. Please try again.');
-  }
-};
-  const handleSetDeliveryNoteStatus = async (status) => {
-  const previous = deliveryNotes;
-  persistDeliveryNotes(deliveryNotes.map((dn) => (dn.id === selectedDeliveryNoteId ? { ...dn, status } : dn)));
-  setShowDeliveryNoteStatusSheet(false);
-  setShowDeliveryNoteMoreSheet(false);
-  try {
-    await deliveryNotesService.updateDeliveryNoteStatus(selectedDeliveryNoteId, status);
-  } catch (error) {
-    console.error('Error updating delivery note status:', error);
-    persistDeliveryNotes(previous);
-    showAlert('Could not update the delivery note status. Please try again.');
   }
 };
   const handleShareDeliveryNote = (dn) => {
@@ -5192,10 +6173,14 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = inv;
+  // A duplicate is a brand-new document created right now, so it picks up current
+  // Business Info / Invoice Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     invoiceNo: getNextInvoiceNumber(), 
-    date: formatQuotationDate(new Date()) 
+    date: formatQuotationDate(new Date()),
+    status: 'Unpaid', // Duplicated invoices start fresh as Unpaid, regardless of the original's status.
+    docSnapshot: buildDocSettingsSnapshot(invoiceSettings),
   };
   try {
     const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
@@ -5244,10 +6229,13 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = r;
+  // A duplicate is a brand-new document created right now, so it picks up current
+  // Business Info / Receipt Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     receiptNo: getNextReceiptNumber(), 
-    date: formatQuotationDate(new Date()) 
+    date: formatQuotationDate(new Date()),
+    docSnapshot: buildDocSettingsSnapshot(receiptSettings),
   };
   try {
     const created = await receiptsService.createReceipt(loggedInUser.userId, payload);
@@ -5259,11 +6247,6 @@ const handleAddTerm = async () => {
     showAlert('Could not duplicate the receipt. Please try again.');
   }
 };
-  const handleSetReceiptStatus = (status) => {
-    persistReceipts(receipts.map((r) => (r.id === selectedReceiptId ? { ...r, status } : r)));
-    setShowReceiptStatusSheet(false);
-    setShowReceiptMoreSheet(false);
-  };
   // Receipt PDF — draws the exact same header/logo, To-Date, and signature layout as
   // shareStandardDocumentPdf (Quotation/Invoice/etc.) so the Receipt PDF matches every
   // other document type instead of using its own one-off layout. The item table is
@@ -5271,6 +6254,10 @@ const handleAddTerm = async () => {
   // (not the customer), matching the in-app Receipt Detail preview.
   const shareReceiptPdf = async (r) => {
     const sanitizedFileName = `${(`Receipt_${r.receiptNo || ''}`).toString().trim().replace(/\s+/g, '_')}.pdf`;
+    // Frozen Business Info / Receipt Settings from when this receipt was created or
+    // last edited-and-updated; falls back to live values only for receipts saved
+    // before this snapshot existed.
+    const snap = r.docSnapshot || buildDocSettingsSnapshot(receiptSettings);
     try {
       if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -5307,22 +6294,22 @@ const handleAddTerm = async () => {
       doc.text('Receipt', pageWidth / 2, y, { align: 'center' });
       y += 22;
 
-      if (businessInfo?.logoImg) {
-        try { doc.addImage(businessInfo.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
+      if (snap.logoImg) {
+        try { doc.addImage(snap.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
       }
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(12.5);
       doc.setTextColor('#0F172A');
-      doc.text(businessInfo?.businessName || 'Manufacturer', marginX, y);
+      doc.text(snap.businessName || 'Manufacturer', marginX, y);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor('#64748B');
       let by = y + 14;
-      if (businessInfo?.phone) { doc.text(businessInfo.phone, marginX, by); by += 11; }
-      if (businessInfo?.email) { doc.text(businessInfo.email, marginX, by); by += 11; }
+      if (snap.businessPhone) { doc.text(snap.businessPhone, marginX, by); by += 11; }
+      if (snap.businessEmail) { doc.text(snap.businessEmail, marginX, by); by += 11; }
 
-      y = Math.max(by + 10, businessInfo?.logoImg ? y + 34 : 0);
+      y = Math.max(by + 10, snap.logoImg ? y + 34 : 0);
       doc.setDrawColor('#E2E8F0');
       doc.setLineWidth(0.75);
       doc.line(marginX, y, pageWidth - marginX, y);
@@ -5398,23 +6385,25 @@ const handleAddTerm = async () => {
       doc.text(`Rs.${Number(r.paidAmount || 0).toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
       y += 34;
 
-      // ---- Signature block (always the business, matches in-app preview)
-      ensureSpace(46);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor('#0F172A');
-      doc.text(`For, ${businessInfo?.businessName || 'Manufacturer'}`, pageWidth - marginX, y, { align: 'right' });
-      if (businessInfo?.signatureImg) {
-        try {
-          const sigW = 90, sigH = 30;
-          doc.addImage(businessInfo.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
-        } catch (e) { /* ignore */ }
+      // ---- Signature block (only when Receipt Settings has "Signature Display" set to Yes)
+      if (snap.showSignature !== 'No') {
+        ensureSpace(46);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor('#0F172A');
+        doc.text(`For, ${snap.businessName || 'Manufacturer'}`, pageWidth - marginX, y, { align: 'right' });
+        if (snap.signatureImg) {
+          try {
+            const sigW = 90, sigH = 30;
+            doc.addImage(snap.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
+          } catch (e) { /* ignore */ }
+        }
+        y += 34;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#94A3B8');
+        doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, y, { align: 'right' });
       }
-      y += 34;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor('#94A3B8');
-      doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, y, { align: 'right' });
 
       drawBrandFooter();
 
@@ -7951,7 +8940,7 @@ useEffect(() => {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
-                    aria-label="Watch Mark Attendance video"
+                    aria-label="Watch Manage Employee video"
                     style={moduleHomeStyles.tilePlayBadge}
                   >
                     <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
@@ -7959,7 +8948,7 @@ useEffect(() => {
                   <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #2554EB, #0B3C9B)' }}>
                     <HiOutlineUserGroup size={20} color="#ffffff" />
                   </span>
-                  <span style={moduleHomeStyles.tileTitleAdjustable}>Mark Attendance</span>
+                  <span style={moduleHomeStyles.tileTitleAdjustable}>Manage Employee<br />Track Attendance<br />Handle Payments</span>
                 </div>
                 <div
                   role="button"
@@ -7971,7 +8960,7 @@ useEffect(() => {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
-                    aria-label="Watch Make Quotation video"
+                    aria-label="Watch Create Quotation, Invoice & Business Docs video"
                     style={moduleHomeStyles.tilePlayBadge}
                   >
                     <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
@@ -7979,7 +8968,7 @@ useEffect(() => {
                   <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #14B8A6, #0F766E)' }}>
                     <FiFileText size={19} color="#ffffff" />
                   </span>
-                  <span style={moduleHomeStyles.tileTitleAdjustable}>Make Quotation</span>
+                  <span style={moduleHomeStyles.tileTitleAdjustable}>Quotation, Invoice<br />&amp; Business Docs</span>
                 </div>
               </div>
             </div>
@@ -8207,9 +9196,7 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Update Business Info</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
+              <span style={businessInfoStyles.headerIconBtn} />
             </div>
 
             <div style={businessInfoStyles.body}>
@@ -8241,6 +9228,8 @@ useEffect(() => {
               <input ref={logoPhotoInputRef} type="file" accept="image/*" hidden onChange={(e) => { handleBusinessImagePick('logoImg', e.target.files?.[0]); e.target.value = ''; }} />
               <input ref={signatureCameraInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { handleBusinessImagePick('signatureImg', e.target.files?.[0]); e.target.value = ''; }} />
               <input ref={signaturePhotoInputRef} type="file" accept="image/*" hidden onChange={(e) => { handleBusinessImagePick('signatureImg', e.target.files?.[0]); e.target.value = ''; }} />
+              <input ref={qrCodeCameraInputRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { handleBusinessImagePick('qrCodeImg', e.target.files?.[0]); e.target.value = ''; }} />
+              <input ref={qrCodePhotoInputRef} type="file" accept="image/*" hidden onChange={(e) => { handleBusinessImagePick('qrCodeImg', e.target.files?.[0]); e.target.value = ''; }} />
 
               <FieldInput label="Business Name" value={businessInfo.businessName} onChange={(v) => updateBusinessField('businessName', v)} />
               <FieldInput label="Contact Name" value={businessInfo.contactName} onChange={(v) => updateBusinessField('contactName', v)} />
@@ -8288,16 +9277,43 @@ useEffect(() => {
               <FieldInput label="GSTIN/PAN/VAT/Business Number" value={businessInfo.taxNumber} onChange={(v) => updateBusinessField('taxNumber', v)} error={businessInfoErrors.taxNumber} />
 
               <div style={businessInfoStyles.sectionBar}>Payment Instructions - Bank Details</div>
-              <button type="button" onClick={() => setIsBankDetailsModalOpen(true)} style={businessInfoStyles.bankCard}>
-                <span style={businessInfoStyles.fieldLabel}>Bank Info</span>
-                <span style={businessInfoStyles.bankLine}>Account Name : {maskIfSet(businessInfo.bankAccountName)}</span>
-                <span style={businessInfoStyles.bankLine}>Account Number : {maskIfSet(businessInfo.bankAccountNumber)}</span>
-                <span style={businessInfoStyles.bankLine}>Bank Name : {maskIfSet(businessInfo.bankName)}</span>
-                <span style={businessInfoStyles.bankLine}>IFSC Code : {maskIfSet(businessInfo.ifscCode)}</span>
-              </button>
+              <div style={businessInfoStyles.bankCard}>
+                <div style={businessInfoStyles.bankCardHeaderRow}>
+                  <button type="button" onClick={() => setIsBankDetailsModalOpen(true)} style={businessInfoStyles.bankCardLabelBtn}>
+                    <span style={businessInfoStyles.fieldLabel}>Bank Info</span>
+                  </button>
+                  <button type="button" onClick={handleShareBankInfo} aria-label="Share bank info" style={businessInfoStyles.bankShareIconBtn}>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0F766E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                  </button>
+                </div>
+                <button type="button" onClick={() => setIsBankDetailsModalOpen(true)} style={businessInfoStyles.bankCardBodyBtn}>
+                  <span style={businessInfoStyles.bankLine}>Account Holder Name : {maskIfSet(businessInfo.bankAccountName)}</span>
+                  <span style={businessInfoStyles.bankLine}>Account Number : {maskIfSet(businessInfo.bankAccountNumber)}</span>
+                  <span style={businessInfoStyles.bankLine}>Bank Name : {maskIfSet(businessInfo.bankName)}</span>
+                  <span style={businessInfoStyles.bankLine}>IFSC Code : {maskIfSet(businessInfo.ifscCode)}</span>
+                </button>
+              </div>
 
-              <FieldInput label="UPI ID" value={businessInfo.upiId} onChange={(v) => updateBusinessField('upiId', v)} error={businessInfoErrors.upiId} />
-              <p style={businessInfoStyles.helperText}>This UPI ID will be used to generate Dynamic QR codes on the Quotations and invoices.</p>
+              <div style={businessInfoStyles.fieldBox}>
+                <span style={businessInfoStyles.fieldLabel}>QR Code</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px' }}>
+                  {businessInfo.qrCodeImg && (
+                    <img src={businessInfo.qrCodeImg} alt="QR Code" style={{ width: '44px', height: '44px', borderRadius: '10px', objectFit: 'cover', border: '1px solid #E2E8F0', flexShrink: 0 }} />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openImageActionSheet('qrCode')}
+                    style={{
+                      flex: businessInfo.qrCodeImg ? '0 0 auto' : '1 1 auto',
+                      padding: businessInfo.qrCodeImg ? '9px 18px' : '11px 18px',
+                      borderRadius: '12px', border: '1.5px solid #0F766E', background: businessInfo.qrCodeImg ? '#ffffff' : '#F0FDFA',
+                      color: '#0F766E', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    {businessInfo.qrCodeImg ? 'Change' : 'Upload'}
+                  </button>
+                </div>
+              </div>
 
               <button type="button" onClick={handleUpdateBusinessInfo} style={businessInfoStyles.updateBtn}>Update</button>
             </div>
@@ -8309,7 +9325,7 @@ useEffect(() => {
                     <h3 style={businessInfoStyles.modalTitle}>Bank Details</h3>
                     <button type="button" onClick={handleCloseBankDetailsModal} style={businessInfoStyles.modalCloseBtn} aria-label="Close">&times;</button>
                   </div>
-                  <FieldInput label="Account Name" value={businessInfo.bankAccountName} onChange={(v) => updateBusinessField('bankAccountName', v)} />
+                  <FieldInput label="Account Holder Name" value={businessInfo.bankAccountName} onChange={(v) => updateBusinessField('bankAccountName', v)} />
                   <FieldInput label="Account Number" value={businessInfo.bankAccountNumber} onChange={(v) => updateBusinessField('bankAccountNumber', v)} type="tel" />
                   <FieldInput label="Bank Name" value={businessInfo.bankName} onChange={(v) => updateBusinessField('bankName', v)} />
                   <FieldInput
@@ -8329,11 +9345,13 @@ useEffect(() => {
                   <div style={customerModuleStyles.sheetHandle} />
                   {(() => {
                     const isLogo = imageActionSheet === 'logo';
-                    const hasImage = isLogo ? !!businessInfo.logoImg : !!businessInfo.signatureImg;
-                    const cameraRef = isLogo ? logoCameraInputRef : signatureCameraInputRef;
-                    const photoRef = isLogo ? logoPhotoInputRef : signaturePhotoInputRef;
-                    const imgSrc = isLogo ? businessInfo.logoImg : businessInfo.signatureImg;
-                    const removeKey = isLogo ? 'logoImg' : 'signatureImg';
+                    const isQrCode = imageActionSheet === 'qrCode';
+                    const isSignature = !isLogo && !isQrCode;
+                    const hasImage = isLogo ? !!businessInfo.logoImg : (isQrCode ? !!businessInfo.qrCodeImg : !!businessInfo.signatureImg);
+                    const cameraRef = isLogo ? logoCameraInputRef : (isQrCode ? qrCodeCameraInputRef : signatureCameraInputRef);
+                    const photoRef = isLogo ? logoPhotoInputRef : (isQrCode ? qrCodePhotoInputRef : signaturePhotoInputRef);
+                    const imgSrc = isLogo ? businessInfo.logoImg : (isQrCode ? businessInfo.qrCodeImg : businessInfo.signatureImg);
+                    const removeKey = isLogo ? 'logoImg' : (isQrCode ? 'qrCodeImg' : 'signatureImg');
                     return (
                       <>
                         <button type="button" onClick={() => { cameraRef.current?.click(); closeImageActionSheet(); }} style={businessInfoStyles.sheetActionRow}>
@@ -8344,7 +9362,7 @@ useEffect(() => {
                           <FiImage size={19} color="#334155" />
                           <span>Photos</span>
                         </button>
-                        {!isLogo && (
+                        {isSignature && (
                           <button type="button" onClick={openSignaturePad} style={businessInfoStyles.sheetActionRow}>
                             <FiEdit3 size={19} color="#334155" />
                             <span>Signature Pad</span>
@@ -8359,7 +9377,7 @@ useEffect(() => {
                         {hasImage && (
                           <button type="button" onClick={() => handleRemoveBusinessImage(removeKey)} style={{ ...businessInfoStyles.sheetActionRow, borderBottom: 'none', color: '#DC2626' }}>
                             <FiTrash2 size={19} color="#DC2626" />
-                            <span>{isLogo ? 'Remove current photo' : 'Remove current image'}</span>
+                            <span>{isSignature ? 'Remove current image' : 'Remove current photo'}</span>
                           </button>
                         )}
                       </>
@@ -8465,7 +9483,6 @@ useEffect(() => {
           { key: 'proformaInvoiceSettings', label: 'Proforma Invoice Settings' },
           { key: 'deliveryNoteSettings', label: 'Delivery Note Settings' },
           { key: 'receiptSettings', label: 'Receipt Settings' },
-          { key: 'columnHeadingSettings', label: 'Column Heading (GST, HSN, Other Charges)' },
         ];
         return (
           <div style={customerModuleStyles.screen}>
@@ -8524,31 +9541,6 @@ useEffect(() => {
 
       // ----- Quotation Settings detail sub-screen -----
       if (quotationSubView === 'quotationSettingsDetail') {
-        const selectSheetConfig = {
-          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
-          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
-          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
-          shipping: { title: 'Display Shipping Address', field: 'showShippingAddress', options: ['Yes', 'No'] },
-          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
-          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
-          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
-        };
-        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
-
-        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
-          <button
-            type="button"
-            onClick={() => setActiveSettingsSheet(sheetKey)}
-            style={quotationSettingsStyles.row}
-          >
-            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
-            <span style={quotationSettingsStyles.rowBody}>
-              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
-              <span style={quotationSettingsStyles.rowValue}>{value}</span>
-            </span>
-          </button>
-        );
-
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
@@ -8556,98 +9548,76 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Quotation Settings</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
+              <span style={businessInfoStyles.headerIconBtn}></span>
             </div>
 
             <div style={businessInfoStyles.body}>
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
-                  <input
-                    type="text"
-                    value={quotationSettings.numberPrefix}
-                    onChange={(e) => updateQuotationSettingField('numberPrefix', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
 
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
-                  <input
-                    type="number"
-                    value={quotationSettings.serialNumber}
-                    onChange={(e) => updateQuotationSettingField('serialNumber', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
+              <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={quotationSettings.taxType} onChange={(v) => updateQuotationSettingField('taxType', v)} />
+              <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={quotationSettings.showProductHSN} onChange={(v) => updateQuotationSettingField('showProductHSN', v)} />
+              <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={quotationSettings.showShippingAddress} onChange={(v) => updateQuotationSettingField('showShippingAddress', v)} />
 
-              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={quotationSettings.discountType} />
-              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={quotationSettings.taxType} />
-              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={quotationSettings.showProductHSN} />
-              <SettingsSelectRow sheetKey="shipping" icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={quotationSettings.showShippingAddress} />
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Quotation Top Message</span>
-                  <textarea
-                    rows={3}
-                    value={quotationSettings.topMessage}
-                    onChange={(e) => updateQuotationSettingField('topMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Quotation Bottom Message</span>
-                  <textarea
-                    rows={2}
-                    value={quotationSettings.bottomMessage}
-                    onChange={(e) => updateQuotationSettingField('bottomMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={quotationSettings.showBankInfo} />
-              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={quotationSettings.showUpiInfo} />
-              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={quotationSettings.showSignature} />
-
-              <button type="button" onClick={handleUpdateQuotationSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
-            </div>
-
-            {activeSheet && (
-              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
-                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
-                  <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
-                  {activeSheet.options.map((opt, idx) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => { updateQuotationSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+              <SegmentedModeRow
+                icon={<FiCreditCard size={18} color="#1E293B" />}
+                label="Quotation Top Message"
+                value={quotationSettings.topMessageMode || 'Default'}
+                options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+                onChange={(opt) => applyQuotationMessageMode('top', opt)}
+              />
+              {quotationSettings.topMessageMode !== 'Hide' && (
+                <div style={quotationSettingsStyles.row}>
+                  <span style={quotationSettingsStyles.rowIcon} />
+                  <span style={quotationSettingsStyles.rowBody}>
+                    <textarea
+                      rows={3}
+                      value={quotationSettings.topMessage}
+                      onChange={(e) => updateQuotationSettingField('topMessage', e.target.value)}
+                      readOnly={quotationSettings.topMessageMode === 'Default'}
+                      placeholder="Enter your custom top message"
                       style={{
-                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
-                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                        ...quotationSettingsStyles.textareaEl,
+                        ...(quotationSettings.topMessageMode === 'Default' ? { color: '#64748B' } : {}),
                       }}
-                    >
-                      {opt}
-                    </button>
-                  ))}
+                    />
+                  </span>
                 </div>
+              )}
+
+              <SegmentedModeRow
+                icon={<FiCreditCard size={18} color="#1E293B" />}
+                label="Quotation Bottom Message"
+                value={quotationSettings.bottomMessageMode || 'Default'}
+                options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+                onChange={(opt) => applyQuotationMessageMode('bottom', opt)}
+              />
+              {quotationSettings.bottomMessageMode !== 'Hide' && (
+                <div style={quotationSettingsStyles.row}>
+                  <span style={quotationSettingsStyles.rowIcon} />
+                  <span style={quotationSettingsStyles.rowBody}>
+                    <textarea
+                      rows={2}
+                      value={quotationSettings.bottomMessage}
+                      onChange={(e) => updateQuotationSettingField('bottomMessage', e.target.value)}
+                      readOnly={quotationSettings.bottomMessageMode === 'Default'}
+                      placeholder="Enter your custom bottom message"
+                      style={{
+                        ...quotationSettingsStyles.textareaEl,
+                        ...(quotationSettings.bottomMessageMode === 'Default' ? { color: '#64748B' } : {}),
+                      }}
+                    />
+                  </span>
+                </div>
+              )}
+
+              <ToggleSwitchRow icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment- Bank Info" value={quotationSettings.showBankInfo} onChange={(v) => updateQuotationSettingField('showBankInfo', v)} />
+              <ToggleSwitchRow icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="QR Code Display" value={quotationSettings.showUpiInfo} onChange={(v) => updateQuotationSettingField('showUpiInfo', v)} />
+              <ToggleSwitchRow icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={quotationSettings.showSignature} onChange={(v) => updateQuotationSettingField('showSignature', v)} />
+
+              <div style={businessInfoStyles.settingsFooterRow}>
+                <button type="button" onClick={handleResetQuotationSettings} style={businessInfoStyles.resetBtn}>Reset</button>
+                <button type="button" onClick={handleUpdateQuotationSettings} style={businessInfoStyles.updateBtnHalf}>Update</button>
               </div>
-            )}
+            </div>
 
             <AppPopup
               open={!!appPopup?.open}
@@ -8666,30 +9636,6 @@ useEffect(() => {
 
       // ----- Invoice Settings detail sub-screen -----
       if (quotationSubView === 'invoiceSettingsDetail') {
-        const selectSheetConfig = {
-          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
-          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
-          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
-          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
-          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
-          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
-        };
-        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
-
-        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
-          <button
-            type="button"
-            onClick={() => setActiveSettingsSheet(sheetKey)}
-            style={quotationSettingsStyles.row}
-          >
-            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
-            <span style={quotationSettingsStyles.rowBody}>
-              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
-              <span style={quotationSettingsStyles.rowValue}>{value}</span>
-            </span>
-          </button>
-        );
-
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
@@ -8697,99 +9643,76 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Invoice Settings</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
+              <span style={businessInfoStyles.headerIconBtn}></span>
             </div>
 
             <div style={businessInfoStyles.body}>
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
-                  <input
-                    type="text"
-                    value={invoiceSettings.numberPrefix}
-                    onChange={(e) => updateInvoiceSettingField('numberPrefix', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
 
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
-                  <input
-                    type="number"
-                    value={invoiceSettings.serialNumber}
-                    onChange={(e) => updateInvoiceSettingField('serialNumber', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
+              <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={invoiceSettings.taxType} onChange={(v) => updateInvoiceSettingField('taxType', v)} />
+              <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={invoiceSettings.showProductHSN} onChange={(v) => updateInvoiceSettingField('showProductHSN', v)} />
+              <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={invoiceSettings.showShippingAddress} onChange={(v) => updateInvoiceSettingField('showShippingAddress', v)} />
 
-              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={invoiceSettings.discountType} />
-              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={invoiceSettings.taxType} />
-              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={invoiceSettings.showProductHSN} />
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Invoice Top Message</span>
-                  <textarea
-                    rows={3}
-                    placeholder="Enter invoice top message"
-                    value={invoiceSettings.topMessage}
-                    onChange={(e) => updateInvoiceSettingField('topMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Invoice Bottom Message</span>
-                  <textarea
-                    rows={2}
-                    placeholder="Enter invoice bottom message"
-                    value={invoiceSettings.bottomMessage}
-                    onChange={(e) => updateInvoiceSettingField('bottomMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={invoiceSettings.showBankInfo} />
-              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={invoiceSettings.showUpiInfo} />
-              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={invoiceSettings.showSignature} />
-
-              <button type="button" onClick={handleUpdateInvoiceSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
-            </div>
-
-            {activeSheet && (
-              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
-                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
-                  <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
-                  {activeSheet.options.map((opt, idx) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => { updateInvoiceSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+              <SegmentedModeRow
+                icon={<FiCreditCard size={18} color="#1E293B" />}
+                label="Invoice Top Message"
+                value={invoiceSettings.topMessageMode || 'Default'}
+                options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+                onChange={(opt) => applyInvoiceMessageMode('top', opt)}
+              />
+              {invoiceSettings.topMessageMode !== 'Hide' && (
+                <div style={quotationSettingsStyles.row}>
+                  <span style={quotationSettingsStyles.rowIcon} />
+                  <span style={quotationSettingsStyles.rowBody}>
+                    <textarea
+                      rows={3}
+                      value={invoiceSettings.topMessage}
+                      onChange={(e) => updateInvoiceSettingField('topMessage', e.target.value)}
+                      readOnly={invoiceSettings.topMessageMode === 'Default'}
+                      placeholder="Enter your custom top message"
                       style={{
-                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
-                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                        ...quotationSettingsStyles.textareaEl,
+                        ...(invoiceSettings.topMessageMode === 'Default' ? { color: '#64748B' } : {}),
                       }}
-                    >
-                      {opt}
-                    </button>
-                  ))}
+                    />
+                  </span>
                 </div>
+              )}
+
+              <SegmentedModeRow
+                icon={<FiCreditCard size={18} color="#1E293B" />}
+                label="Invoice Bottom Message"
+                value={invoiceSettings.bottomMessageMode || 'Default'}
+                options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+                onChange={(opt) => applyInvoiceMessageMode('bottom', opt)}
+              />
+              {invoiceSettings.bottomMessageMode !== 'Hide' && (
+                <div style={quotationSettingsStyles.row}>
+                  <span style={quotationSettingsStyles.rowIcon} />
+                  <span style={quotationSettingsStyles.rowBody}>
+                    <textarea
+                      rows={2}
+                      value={invoiceSettings.bottomMessage}
+                      onChange={(e) => updateInvoiceSettingField('bottomMessage', e.target.value)}
+                      readOnly={invoiceSettings.bottomMessageMode === 'Default'}
+                      placeholder="Enter your custom bottom message"
+                      style={{
+                        ...quotationSettingsStyles.textareaEl,
+                        ...(invoiceSettings.bottomMessageMode === 'Default' ? { color: '#64748B' } : {}),
+                      }}
+                    />
+                  </span>
+                </div>
+              )}
+
+              <ToggleSwitchRow icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment- Bank Info" value={invoiceSettings.showBankInfo} onChange={(v) => updateInvoiceSettingField('showBankInfo', v)} />
+              <ToggleSwitchRow icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="QR Code Display" value={invoiceSettings.showUpiInfo} onChange={(v) => updateInvoiceSettingField('showUpiInfo', v)} />
+              <ToggleSwitchRow icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={invoiceSettings.showSignature} onChange={(v) => updateInvoiceSettingField('showSignature', v)} />
+
+              <div style={businessInfoStyles.settingsFooterRow}>
+                <button type="button" onClick={handleResetInvoiceSettings} style={businessInfoStyles.resetBtn}>Reset</button>
+                <button type="button" onClick={handleUpdateInvoiceSettings} style={businessInfoStyles.updateBtnHalf}>Update</button>
               </div>
-            )}
+            </div>
 
             <AppPopup
               open={!!appPopup?.open}
@@ -8808,30 +9731,6 @@ useEffect(() => {
 
       // ----- Purchase Order Settings detail sub-screen -----
       if (quotationSubView === 'purchaseOrderSettingsDetail') {
-        const selectSheetConfig = {
-          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
-          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
-          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
-          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
-          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
-          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
-        };
-        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
-
-        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
-          <button
-            type="button"
-            onClick={() => setActiveSettingsSheet(sheetKey)}
-            style={quotationSettingsStyles.row}
-          >
-            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
-            <span style={quotationSettingsStyles.rowBody}>
-              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
-              <span style={quotationSettingsStyles.rowValue}>{value}</span>
-            </span>
-          </button>
-        );
-
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
@@ -8839,99 +9738,76 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Purchase Order Settings</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
+              <span style={businessInfoStyles.headerIconBtn}></span>
             </div>
 
             <div style={businessInfoStyles.body}>
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
-                  <input
-                    type="text"
-                    value={purchaseOrderSettings.numberPrefix}
-                    onChange={(e) => updatePurchaseOrderSettingField('numberPrefix', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
 
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
-                  <input
-                    type="number"
-                    value={purchaseOrderSettings.serialNumber}
-                    onChange={(e) => updatePurchaseOrderSettingField('serialNumber', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
+              <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={purchaseOrderSettings.taxType} onChange={(v) => updatePurchaseOrderSettingField('taxType', v)} />
+              <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={purchaseOrderSettings.showProductHSN} onChange={(v) => updatePurchaseOrderSettingField('showProductHSN', v)} />
+              <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={purchaseOrderSettings.showShippingAddress} onChange={(v) => updatePurchaseOrderSettingField('showShippingAddress', v)} />
 
-              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={purchaseOrderSettings.discountType} />
-              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={purchaseOrderSettings.taxType} />
-              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={purchaseOrderSettings.showProductHSN} />
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Purchase Order Top Message</span>
-                  <textarea
-                    rows={3}
-                    placeholder="Enter purchase order top message"
-                    value={purchaseOrderSettings.topMessage}
-                    onChange={(e) => updatePurchaseOrderSettingField('topMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Purchase Order Bottom Message</span>
-                  <textarea
-                    rows={2}
-                    placeholder="Enter purchase order bottom message"
-                    value={purchaseOrderSettings.bottomMessage}
-                    onChange={(e) => updatePurchaseOrderSettingField('bottomMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={purchaseOrderSettings.showBankInfo} />
-              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={purchaseOrderSettings.showUpiInfo} />
-              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={purchaseOrderSettings.showSignature} />
-
-              <button type="button" onClick={handleUpdatePurchaseOrderSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
-            </div>
-
-            {activeSheet && (
-              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
-                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
-                  <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
-                  {activeSheet.options.map((opt, idx) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => { updatePurchaseOrderSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
+              <SegmentedModeRow
+                icon={<FiCreditCard size={18} color="#1E293B" />}
+                label="Purchase Order Top Message"
+                value={purchaseOrderSettings.topMessageMode || 'Default'}
+                options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+                onChange={(opt) => applyPurchaseOrderMessageMode('top', opt)}
+              />
+              {purchaseOrderSettings.topMessageMode !== 'Hide' && (
+                <div style={quotationSettingsStyles.row}>
+                  <span style={quotationSettingsStyles.rowIcon} />
+                  <span style={quotationSettingsStyles.rowBody}>
+                    <textarea
+                      rows={3}
+                      value={purchaseOrderSettings.topMessage}
+                      onChange={(e) => updatePurchaseOrderSettingField('topMessage', e.target.value)}
+                      readOnly={purchaseOrderSettings.topMessageMode === 'Default'}
+                      placeholder="Enter your custom top message"
                       style={{
-                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
-                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
+                        ...quotationSettingsStyles.textareaEl,
+                        ...(purchaseOrderSettings.topMessageMode === 'Default' ? { color: '#64748B' } : {}),
                       }}
-                    >
-                      {opt}
-                    </button>
-                  ))}
+                    />
+                  </span>
                 </div>
+              )}
+
+              <SegmentedModeRow
+                icon={<FiCreditCard size={18} color="#1E293B" />}
+                label="Purchase Order Bottom Message"
+                value={purchaseOrderSettings.bottomMessageMode || 'Default'}
+                options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+                onChange={(opt) => applyPurchaseOrderMessageMode('bottom', opt)}
+              />
+              {purchaseOrderSettings.bottomMessageMode !== 'Hide' && (
+                <div style={quotationSettingsStyles.row}>
+                  <span style={quotationSettingsStyles.rowIcon} />
+                  <span style={quotationSettingsStyles.rowBody}>
+                    <textarea
+                      rows={2}
+                      value={purchaseOrderSettings.bottomMessage}
+                      onChange={(e) => updatePurchaseOrderSettingField('bottomMessage', e.target.value)}
+                      readOnly={purchaseOrderSettings.bottomMessageMode === 'Default'}
+                      placeholder="Enter your custom bottom message"
+                      style={{
+                        ...quotationSettingsStyles.textareaEl,
+                        ...(purchaseOrderSettings.bottomMessageMode === 'Default' ? { color: '#64748B' } : {}),
+                      }}
+                    />
+                  </span>
+                </div>
+              )}
+
+              <ToggleSwitchRow icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment- Bank Info" value={purchaseOrderSettings.showBankInfo} onChange={(v) => updatePurchaseOrderSettingField('showBankInfo', v)} />
+              <ToggleSwitchRow icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="QR Code Display" value={purchaseOrderSettings.showUpiInfo} onChange={(v) => updatePurchaseOrderSettingField('showUpiInfo', v)} />
+              <ToggleSwitchRow icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={purchaseOrderSettings.showSignature} onChange={(v) => updatePurchaseOrderSettingField('showSignature', v)} />
+
+              <div style={businessInfoStyles.settingsFooterRow}>
+                <button type="button" onClick={handleResetPurchaseOrderSettings} style={businessInfoStyles.resetBtn}>Reset</button>
+                <button type="button" onClick={handleUpdatePurchaseOrderSettings} style={businessInfoStyles.updateBtnHalf}>Update</button>
               </div>
-            )}
+            </div>
 
             <AppPopup
               open={!!appPopup?.open}
@@ -8949,303 +9825,195 @@ useEffect(() => {
       }
 
       // ----- Proforma Invoice Settings detail sub-screen -----
-      if (quotationSubView === 'proformaInvoiceSettingsDetail') {
-        const selectSheetConfig = {
-          discountType: { title: 'Select Discount Type', field: 'discountType', options: ['No Discount', 'Per Item', 'On Total'] },
-          taxType: { title: 'Select Tax Type', field: 'taxType', options: ['No Tax', 'Per Item', 'On Total'] },
-          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
-          bank: { title: 'Display Bank Information', field: 'showBankInfo', options: ['Yes', 'No'] },
-          upi: { title: 'Display UPI Details', field: 'showUpiInfo', options: ['Yes', 'No'] },
-          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
-        };
-        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+      // ----- Proforma Invoice Settings detail sub-screen -----
+if (quotationSubView === 'proformaInvoiceSettingsDetail') {
+  return (
+    <div style={businessInfoStyles.screen}>
+      <div style={businessInfoStyles.header}>
+        <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+          <FiArrowLeft size={19} color="#ffffff" />
+        </button>
+        <h1 style={businessInfoStyles.headerTitle}>Proforma Invoice Settings</h1>
+        <span style={businessInfoStyles.headerIconBtn}></span>
+      </div>
 
-        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
-          <button
-            type="button"
-            onClick={() => setActiveSettingsSheet(sheetKey)}
-            style={quotationSettingsStyles.row}
-          >
-            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+      <div style={businessInfoStyles.body}>
+
+        <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={proformaInvoiceSettings.taxType} onChange={(v) => updateProformaInvoiceSettingField('taxType', v)} />
+        <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={proformaInvoiceSettings.showProductHSN} onChange={(v) => updateProformaInvoiceSettingField('showProductHSN', v)} />
+        <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={proformaInvoiceSettings.showShippingAddress} onChange={(v) => updateProformaInvoiceSettingField('showShippingAddress', v)} />
+
+        <SegmentedModeRow
+          icon={<FiCreditCard size={18} color="#1E293B" />}
+          label="Proforma Invoice Top Message"
+          value={proformaInvoiceSettings.topMessageMode || 'Default'}
+          options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+          onChange={(opt) => applyProformaInvoiceMessageMode('top', opt)}
+        />
+        {proformaInvoiceSettings.topMessageMode !== 'Hide' && (
+          <div style={quotationSettingsStyles.row}>
+            <span style={quotationSettingsStyles.rowIcon} />
             <span style={quotationSettingsStyles.rowBody}>
-              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
-              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+              <textarea
+                rows={3}
+                value={proformaInvoiceSettings.topMessage}
+                onChange={(e) => updateProformaInvoiceSettingField('topMessage', e.target.value)}
+                readOnly={proformaInvoiceSettings.topMessageMode === 'Default'}
+                placeholder="Enter your custom top message"
+                style={{
+                  ...quotationSettingsStyles.textareaEl,
+                  ...(proformaInvoiceSettings.topMessageMode === 'Default' ? { color: '#64748B' } : {}),
+                }}
+              />
             </span>
-          </button>
-        );
-
-        return (
-          <div style={businessInfoStyles.screen}>
-            <div style={businessInfoStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
-                <FiArrowLeft size={19} color="#ffffff" />
-              </button>
-              <h1 style={businessInfoStyles.headerTitle}>Proforma Invoice Settings</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
-            </div>
-
-            <div style={businessInfoStyles.body}>
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
-                  <input
-                    type="text"
-                    value={proformaInvoiceSettings.numberPrefix}
-                    onChange={(e) => updateProformaInvoiceSettingField('numberPrefix', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
-                  <input
-                    type="number"
-                    value={proformaInvoiceSettings.serialNumber}
-                    onChange={(e) => updateProformaInvoiceSettingField('serialNumber', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="discountType" icon={<FiTag size={18} color="#1E293B" />} label="Discount Display" value={proformaInvoiceSettings.discountType} />
-              <SettingsSelectRow sheetKey="taxType" icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={proformaInvoiceSettings.taxType} />
-              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={proformaInvoiceSettings.showProductHSN} />
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Proforma Invoice Top Message</span>
-                  <textarea
-                    rows={3}
-                    placeholder="Enter proforma invoice top message"
-                    value={proformaInvoiceSettings.topMessage}
-                    onChange={(e) => updateProformaInvoiceSettingField('topMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Proforma Invoice Bottom Message</span>
-                  <textarea
-                    rows={2}
-                    placeholder="Enter proforma invoice bottom message"
-                    value={proformaInvoiceSettings.bottomMessage}
-                    onChange={(e) => updateProformaInvoiceSettingField('bottomMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="bank" icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment Instruction - Bank Information Display" value={proformaInvoiceSettings.showBankInfo} />
-              <SettingsSelectRow sheetKey="upi" icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="Payment Instruction - UPI Info Display" value={proformaInvoiceSettings.showUpiInfo} />
-              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={proformaInvoiceSettings.showSignature} />
-
-              <button type="button" onClick={handleUpdateProformaInvoiceSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
-            </div>
-
-            {activeSheet && (
-              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
-                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
-                  <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
-                  {activeSheet.options.map((opt, idx) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => { updateProformaInvoiceSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
-                      style={{
-                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
-                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
-                      }}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <AppPopup
-              open={!!appPopup?.open}
-              tone={appPopup?.tone}
-              title={appPopup?.title}
-              message={appPopup?.message}
-              confirmLabel={appPopup?.confirmLabel}
-              cancelLabel={appPopup?.cancelLabel}
-              onConfirm={appPopup?.onConfirm || closeAppPopup}
-              onCancel={closeAppPopup}
-              onClose={closeAppPopup}
-            />
           </div>
-        );
-      }
+        )}
+
+        <SegmentedModeRow
+          icon={<FiCreditCard size={18} color="#1E293B" />}
+          label="Proforma Invoice Bottom Message"
+          value={proformaInvoiceSettings.bottomMessageMode || 'Default'}
+          options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+          onChange={(opt) => applyProformaInvoiceMessageMode('bottom', opt)}
+        />
+        {proformaInvoiceSettings.bottomMessageMode !== 'Hide' && (
+          <div style={quotationSettingsStyles.row}>
+            <span style={quotationSettingsStyles.rowIcon} />
+            <span style={quotationSettingsStyles.rowBody}>
+              <textarea
+                rows={2}
+                value={proformaInvoiceSettings.bottomMessage}
+                onChange={(e) => updateProformaInvoiceSettingField('bottomMessage', e.target.value)}
+                readOnly={proformaInvoiceSettings.bottomMessageMode === 'Default'}
+                placeholder="Enter your custom bottom message"
+                style={{
+                  ...quotationSettingsStyles.textareaEl,
+                  ...(proformaInvoiceSettings.bottomMessageMode === 'Default' ? { color: '#64748B' } : {}),
+                }}
+              />
+            </span>
+          </div>
+        )}
+
+        <ToggleSwitchRow icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment- Bank Info" value={proformaInvoiceSettings.showBankInfo} onChange={(v) => updateProformaInvoiceSettingField('showBankInfo', v)} />
+        <ToggleSwitchRow icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="QR Code Display" value={proformaInvoiceSettings.showUpiInfo} onChange={(v) => updateProformaInvoiceSettingField('showUpiInfo', v)} />
+        <ToggleSwitchRow icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={proformaInvoiceSettings.showSignature} onChange={(v) => updateProformaInvoiceSettingField('showSignature', v)} />
+
+        <div style={businessInfoStyles.settingsFooterRow}>
+          <button type="button" onClick={handleResetProformaInvoiceSettings} style={businessInfoStyles.resetBtn}>Reset</button>
+          <button type="button" onClick={handleUpdateProformaInvoiceSettings} style={businessInfoStyles.updateBtnHalf}>Update</button>
+        </div>
+      </div>
+
+      <AppPopup
+        open={!!appPopup?.open}
+        tone={appPopup?.tone}
+        title={appPopup?.title}
+        message={appPopup?.message}
+        confirmLabel={appPopup?.confirmLabel}
+        cancelLabel={appPopup?.cancelLabel}
+        onConfirm={appPopup?.onConfirm || closeAppPopup}
+        onCancel={closeAppPopup}
+        onClose={closeAppPopup}
+      />
+    </div>
+  );
+}
 
       // ----- Delivery Note Settings detail sub-screen -----
-      if (quotationSubView === 'deliveryNoteSettingsDetail') {
-        const selectSheetConfig = {
-          hsn: { title: 'Display Product HSN', field: 'showProductHSN', options: ['Yes', 'No'] },
-          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
-        };
-        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
+      // ----- Delivery Note Settings detail sub-screen -----
+if (quotationSubView === 'deliveryNoteSettingsDetail') {
+  return (
+    <div style={businessInfoStyles.screen}>
+      <div style={businessInfoStyles.header}>
+        <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+          <FiArrowLeft size={19} color="#ffffff" />
+        </button>
+        <h1 style={businessInfoStyles.headerTitle}>Delivery Note Settings</h1>
+        <span style={businessInfoStyles.headerIconBtn}></span>
+      </div>
 
-        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
-          <button
-            type="button"
-            onClick={() => setActiveSettingsSheet(sheetKey)}
-            style={quotationSettingsStyles.row}
-          >
-            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
+      <div style={businessInfoStyles.body}>
+
+        <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={deliveryNoteSettings.showProductHSN} onChange={(v) => updateDeliveryNoteSettingField('showProductHSN', v)} />
+        <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={deliveryNoteSettings.showShippingAddress} onChange={(v) => updateDeliveryNoteSettingField('showShippingAddress', v)} />
+
+        <SegmentedModeRow
+          icon={<FiCreditCard size={18} color="#1E293B" />}
+          label="Delivery Note Top Message"
+          value={deliveryNoteSettings.topMessageMode || 'Default'}
+          options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+          onChange={(opt) => applyDeliveryNoteMessageMode('top', opt)}
+        />
+        {deliveryNoteSettings.topMessageMode !== 'Hide' && (
+          <div style={quotationSettingsStyles.row}>
+            <span style={quotationSettingsStyles.rowIcon} />
             <span style={quotationSettingsStyles.rowBody}>
-              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
-              <span style={quotationSettingsStyles.rowValue}>{value}</span>
+              <textarea
+                rows={3}
+                value={deliveryNoteSettings.topMessage}
+                onChange={(e) => updateDeliveryNoteSettingField('topMessage', e.target.value)}
+                readOnly={deliveryNoteSettings.topMessageMode === 'Default'}
+                placeholder="Enter your custom top message"
+                style={{
+                  ...quotationSettingsStyles.textareaEl,
+                  ...(deliveryNoteSettings.topMessageMode === 'Default' ? { color: '#64748B' } : {}),
+                }}
+              />
             </span>
-          </button>
-        );
-
-        return (
-          <div style={businessInfoStyles.screen}>
-            <div style={businessInfoStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
-                <FiArrowLeft size={19} color="#ffffff" />
-              </button>
-              <h1 style={businessInfoStyles.headerTitle}>Delivery Note Settings</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
-            </div>
-
-            <div style={businessInfoStyles.body}>
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
-                  <input
-                    type="text"
-                    value={deliveryNoteSettings.numberPrefix}
-                    onChange={(e) => updateDeliveryNoteSettingField('numberPrefix', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
-                  <input
-                    type="number"
-                    value={deliveryNoteSettings.serialNumber}
-                    onChange={(e) => updateDeliveryNoteSettingField('serialNumber', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="hsn" icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={deliveryNoteSettings.showProductHSN} />
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Delivery Note Top Message</span>
-                  <textarea
-                    rows={3}
-                    placeholder="Enter the delivery note top message"
-                    value={deliveryNoteSettings.topMessage}
-                    onChange={(e) => updateDeliveryNoteSettingField('topMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiCreditCard size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Delivery Note Bottom Message</span>
-                  <textarea
-                    rows={2}
-                    placeholder="Enter the delivery note bottom message"
-                    value={deliveryNoteSettings.bottomMessage}
-                    onChange={(e) => updateDeliveryNoteSettingField('bottomMessage', e.target.value)}
-                    style={quotationSettingsStyles.textareaEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={deliveryNoteSettings.showSignature} />
-
-              <button type="button" onClick={handleUpdateDeliveryNoteSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
-            </div>
-
-            {activeSheet && (
-              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
-                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
-                  <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
-                  {activeSheet.options.map((opt, idx) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => { updateDeliveryNoteSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
-                      style={{
-                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
-                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
-                      }}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <AppPopup
-              open={!!appPopup?.open}
-              tone={appPopup?.tone}
-              title={appPopup?.title}
-              message={appPopup?.message}
-              confirmLabel={appPopup?.confirmLabel}
-              cancelLabel={appPopup?.cancelLabel}
-              onConfirm={appPopup?.onConfirm || closeAppPopup}
-              onCancel={closeAppPopup}
-              onClose={closeAppPopup}
-            />
           </div>
-        );
-      }
+        )}
 
+        <SegmentedModeRow
+          icon={<FiCreditCard size={18} color="#1E293B" />}
+          label="Delivery Note Bottom Message"
+          value={deliveryNoteSettings.bottomMessageMode || 'Default'}
+          options={[{ value: 'Default', label: 'Default' }, { value: 'Customize', label: 'Custom' }, { value: 'Hide', label: 'Hide' }]}
+          onChange={(opt) => applyDeliveryNoteMessageMode('bottom', opt)}
+        />
+        {deliveryNoteSettings.bottomMessageMode !== 'Hide' && (
+          <div style={quotationSettingsStyles.row}>
+            <span style={quotationSettingsStyles.rowIcon} />
+            <span style={quotationSettingsStyles.rowBody}>
+              <textarea
+                rows={2}
+                value={deliveryNoteSettings.bottomMessage}
+                onChange={(e) => updateDeliveryNoteSettingField('bottomMessage', e.target.value)}
+                readOnly={deliveryNoteSettings.bottomMessageMode === 'Default'}
+                placeholder="Enter your custom bottom message"
+                style={{
+                  ...quotationSettingsStyles.textareaEl,
+                  ...(deliveryNoteSettings.bottomMessageMode === 'Default' ? { color: '#64748B' } : {}),
+                }}
+              />
+            </span>
+          </div>
+        )}
+
+        <ToggleSwitchRow icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={deliveryNoteSettings.showSignature} onChange={(v) => updateDeliveryNoteSettingField('showSignature', v)} />
+
+        <div style={businessInfoStyles.settingsFooterRow}>
+          <button type="button" onClick={handleResetDeliveryNoteSettings} style={businessInfoStyles.resetBtn}>Reset</button>
+          <button type="button" onClick={handleUpdateDeliveryNoteSettings} style={businessInfoStyles.updateBtnHalf}>Update</button>
+        </div>
+      </div>
+
+      <AppPopup
+        open={!!appPopup?.open}
+        tone={appPopup?.tone}
+        title={appPopup?.title}
+        message={appPopup?.message}
+        confirmLabel={appPopup?.confirmLabel}
+        cancelLabel={appPopup?.cancelLabel}
+        onConfirm={appPopup?.onConfirm || closeAppPopup}
+        onCancel={closeAppPopup}
+        onClose={closeAppPopup}
+      />
+    </div>
+  );
+}
       // ----- Receipt Settings detail sub-screen -----
       if (quotationSubView === 'receiptSettingsDetail') {
-        const selectSheetConfig = {
-          receiptType: { title: 'Select Receipt Type', field: 'receiptType', options: ['Simple', 'Detailed'] },
-          signature: { title: 'Signature Block Display', field: 'showSignature', options: ['Yes', 'No'] },
-        };
-        const activeSheet = activeSettingsSheet ? selectSheetConfig[activeSettingsSheet] : null;
-
-        const SettingsSelectRow = ({ sheetKey, icon, label, value }) => (
-          <button
-            type="button"
-            onClick={() => setActiveSettingsSheet(sheetKey)}
-            style={quotationSettingsStyles.row}
-          >
-            <span style={quotationSettingsStyles.rowIcon}>{icon}</span>
-            <span style={quotationSettingsStyles.rowBody}>
-              <span style={quotationSettingsStyles.rowLabel}>{label}</span>
-              <span style={quotationSettingsStyles.rowValue}>{value}</span>
-            </span>
-          </button>
-        );
-
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
@@ -9253,66 +10021,17 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Receipt Settings</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
+              <span style={businessInfoStyles.headerIconBtn}></span>
             </div>
 
             <div style={businessInfoStyles.body}>
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiHash size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Number Prefix</span>
-                  <input
-                    type="text"
-                    value={receiptSettings.numberPrefix}
-                    onChange={(e) => updateReceiptSettingField('numberPrefix', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
+
+              <ToggleSwitchRow icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={receiptSettings.showSignature} onChange={(v) => updateReceiptSettingField('showSignature', v)} />
+
+              <div style={{ marginTop: '4px' }}>
+                <button type="button" onClick={handleUpdateReceiptSettings} style={businessInfoStyles.updateBtn}>Update</button>
               </div>
-
-              <div style={quotationSettingsStyles.row}>
-                <span style={quotationSettingsStyles.rowIcon}><FiList size={18} color="#1E293B" /></span>
-                <span style={quotationSettingsStyles.rowBody}>
-                  <span style={quotationSettingsStyles.rowLabel}>Serial Number</span>
-                  <input
-                    type="number"
-                    value={receiptSettings.serialNumber}
-                    onChange={(e) => updateReceiptSettingField('serialNumber', e.target.value)}
-                    style={quotationSettingsStyles.inputEl}
-                  />
-                </span>
-              </div>
-
-              <SettingsSelectRow sheetKey="receiptType" icon={<FiTag size={18} color="#1E293B" />} label="Receipt Type" value={receiptSettings.receiptType} />
-              <SettingsSelectRow sheetKey="signature" icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={receiptSettings.showSignature} />
-
-              <button type="button" onClick={handleUpdateReceiptSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
             </div>
-
-            {activeSheet && (
-              <div style={customerModuleStyles.modalOverlay} onClick={() => setActiveSettingsSheet(null)}>
-                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
-                  <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>{activeSheet.title}</h3>
-                  {activeSheet.options.map((opt, idx) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => { updateReceiptSettingField(activeSheet.field, opt); setActiveSettingsSheet(null); }}
-                      style={{
-                        width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer',
-                        fontFamily: 'inherit', padding: '14px 2px', fontSize: '15.5px', fontWeight: '600', color: '#0F172A',
-                        borderBottom: idx < activeSheet.options.length - 1 ? '1px solid #E2E8F0' : 'none',
-                      }}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <AppPopup
               open={!!appPopup?.open}
@@ -9338,9 +10057,7 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Column Heading</h1>
-              <span style={businessInfoStyles.headerIconBtn}>
-                <HiOutlineLightBulb size={21} color="#ffffff" />
-              </span>
+              <span style={businessInfoStyles.headerIconBtn}></span>
             </div>
 
             <div style={businessInfoStyles.body}>
@@ -9413,7 +10130,10 @@ useEffect(() => {
                 </button>
               </div>
 
-              <button type="button" onClick={handleUpdateColumnHeadingSettings} style={{ ...businessInfoStyles.updateBtn, marginTop: '4px' }}>Update</button>
+              <div style={businessInfoStyles.settingsFooterRow}>
+                <button type="button" onClick={handleResetColumnHeadingSettings} style={businessInfoStyles.resetBtn}>Reset</button>
+                <button type="button" onClick={handleUpdateColumnHeadingSettings} style={businessInfoStyles.updateBtnHalf}>Update</button>
+              </div>
             </div>
 
             <AppPopup
@@ -9516,11 +10236,21 @@ useEffect(() => {
                 type="text"
                 value={customerForm.name}
                 onChange={(e) => updateCustomerField('name', e.target.value)}
-                boxStyle={{ paddingRight: '54px' }}
                 rightElement={
-                  <span style={{ ...customerModuleStyles.nameFieldIcon, position: 'static', flexShrink: 0 }}>
-                    <FaAddressBook size={16} color="#ffffff" />
-                  </span>
+                  <ContactPickButton
+                    ariaLabel="Pick customer from contacts"
+                    onPick={({ name, phone, email }) => {
+                      if (name) updateCustomerField('name', name);
+                      if (phone) {
+                        updateCustomerField('mobile', phone);
+                        if (customerMobileError) setCustomerMobileError(false);
+                      }
+                      if (email) {
+                        updateCustomerField('email', email);
+                        if (customerEmailError) setCustomerEmailError(false);
+                      }
+                    }}
+                  />
                 }
               />
 
@@ -9602,7 +10332,7 @@ useEffect(() => {
 
               <div style={customerModuleStyles.sectionBar}>Shipping Details</div>
               <div style={customerModuleStyles.taxableRow}>
-                <span style={customerModuleStyles.sheetSmallLabelInline}>Same as Billing Address</span>
+                <span style={customerModuleStyles.sheetSmallLabelInline}>Same as Above</span>
                 <input
                   type="checkbox"
                   checked={customerForm.shippingSameAsBilling}
@@ -9617,7 +10347,16 @@ useEffect(() => {
                         shippingCity: prev.addressLine3,
                         shippingState: prev.state,
                         shippingPincode: prev.pincode,
-                      } : null),
+                      } : {
+                        // Unchecking should give the user a blank slate to type their own
+                        // shipping address into, not leave it pre-filled with whatever was
+                        // just copied over from the billing address.
+                        shippingAddressLine1: '',
+                        shippingAddressLine2: '',
+                        shippingCity: '',
+                        shippingState: '',
+                        shippingPincode: '',
+                      }),
                     }));
                     if (checked) setCustomerShippingPincodeError(false);
                   }}
@@ -9798,7 +10537,7 @@ useEffect(() => {
               )}
             </div>
 
-            <button type="button" onClick={openAddProduct} style={customerModuleStyles.fab}>
+            <button type="button" onClick={() => openAddProduct()} style={customerModuleStyles.fab}>
               <FiPlus size={14} color="#ffffff" />
               <span>ADD<br />PRODUCT</span>
             </button>
@@ -10128,13 +10867,6 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
-              <span style={customerModuleStyles.headerIconBtn}>
-                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </span>
               <button type="button" onClick={openAddTermsModal} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
                 <FiPlus size={18} color="#0F766E" />
               </button>
@@ -10526,135 +11258,7 @@ useEffect(() => {
               <DocumentStatusBadge status={currentQuotation.status} />
               <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
                 <div style={docStyles.page}>
-                {(() => {
-                  const model = buildQuotationDocModel(currentQuotation);
-                  const footerColSpan = 6;
-                  return (
-                    <>
-                {/* Header: Quotation N (top, centered), then Manufacturer info below */}
-                <div style={{ marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0' }}>
-                  <p style={{ ...docStyles.docTypeLabel, textTransform: 'none', textAlign: 'center', margin: '0 0 12px' }}>{model.quotationTitle}</p>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <h2 style={docStyles.businessName}>{model.businessName}</h2>
-                      {model.businessPhone && <p style={docStyles.contactLine}>{model.businessPhone}</p>}
-                      {model.businessEmail && <p style={docStyles.contactLine}>{model.businessEmail}</p>}
-                    </div>
-                    {model.logoImg && (
-                      <img src={model.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
-                    )}
-                  </div>
-                </div>
-
-                {/* To, (left) | Date (right) */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '16px' }}>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>To,</p>
-                    {model.customerLines.map((line, idx) => (
-                      <p key={idx} style={idx === 0 ? docStyles.toName : docStyles.contactLine}>{line}</p>
-                    ))}
-                  </div>
-                  <div style={{ flexShrink: 0, textAlign: 'right' }}>
-                    <p style={docStyles.docMetaLine}>Date: {model.date}</p>
-                  </div>
-                </div>
-
-                {model.greetingLines.length > 0 && (
-                  <p style={docStyles.bodyText}>
-                    {model.greetingLines.map((line, idx) => (
-                      <Fragment key={idx}>
-                        {line}
-                        {idx < model.greetingLines.length - 1 ? <br /> : null}
-                      </Fragment>
-                    ))}
-                  </p>
-                )}
-
-                {/* Table */}
-                <div style={docStyles.tableWrap}>
-                <table style={docStyles.table}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...docStyles.th, width: '6%' }}>#</th>
-                      <th style={{ ...docStyles.th, width: '22%', wordBreak: 'break-word' }}>Item</th>
-                      <th style={{ ...docStyles.th, width: '11%', wordBreak: 'break-word' }}>{model.hsnLabel}</th>
-                      <th style={{ ...docStyles.th, textAlign: 'center', width: '11%' }}>Qty</th>
-                      <th style={{ ...docStyles.th, textAlign: 'right', width: '17%' }}>Price</th>
-                      <th style={{ ...docStyles.th, textAlign: 'right', width: '15%' }}>GST</th>
-                      <th style={{ ...docStyles.th, textAlign: 'right', width: '18%' }}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {model.rows.map((r) => (
-                      <tr key={r.index}>
-                        <td style={docStyles.td}>{r.index}</td>
-                        <td style={docStyles.td}>
-                          <div style={docStyles.tdBold}>{r.name}</div>
-                        </td>
-                        <td style={docStyles.td}>{r.hsn}</td>
-                        <td style={{ ...docStyles.td, textAlign: 'center' }}>
-                          {r.qty}{r.unit ? <span style={{ fontSize: '9px', color: '#94A3B8' }}> {r.unit}</span> : null}
-                        </td>
-                        <td style={{ ...docStyles.td, textAlign: 'right' }}>₹{Number(r.price).toFixed(2)}</td>
-                        <td style={{ ...docStyles.td, textAlign: 'right' }}>
-                          {r.gstPct}%
-                          <div style={{ fontSize: '9px', color: '#94A3B8' }}>₹{r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                        </td>
-                        <td style={{ ...docStyles.td, ...docStyles.tdBold, textAlign: 'right' }}>₹{r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Sub Total</td>
-                      <td style={docStyles.totalsValue}>₹{model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
-                    </tr>
-                    {model.otherChargesTotal > 0 && (
-                      <tr>
-                        <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Other Charges</td>
-                        <td style={docStyles.totalsValue}>₹{model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
-                      </tr>
-                    )}
-                    <tr style={{ borderTop: '1.5px solid #0F172A' }}>
-                      <td colSpan={footerColSpan} style={docStyles.grandTotalLabel}>Grand Total</td>
-                      <td style={docStyles.grandTotalValue}>₹{model.grandTotal.toLocaleString('en-IN')}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-                </div>
-
-                {model.closingText && (
-                  <p style={docStyles.closingText}>{model.closingText}</p>
-                )}
-
-                {/* Terms & Conditions - Quotation-specific only */}
-                {model.termsLines.length > 0 && (
-                  <div style={{ marginBottom: '18px' }}>
-                    <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 6px' }}>Terms & Conditions:</p>
-                    {model.termsLines.map((term, idx) => (
-                      <p key={idx} style={{ ...docStyles.addressLine, margin: '0 0 4px' }}>{'\u2022'} {term}</p>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ textAlign: 'right', marginTop: '20px' }}>
-                  <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
-                  {model.signatureImg ? (
-                    <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
-                  ) : (
-                    <div style={{ height: '34px' }}></div>
-                  )}
-                  <p style={docStyles.signatureCaption}>Authorized Signature</p>
-                </div>
-
-                {/* Generated with SmartManage - brand footer */}
-                <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <img src={smartpayLogo} alt="SmartManage" style={{ width: '20px', height: '20px', borderRadius: '5px', objectFit: 'cover', display: 'block' }} />
-                  <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', letterSpacing: '0.2px' }}>Generated with SmartManage</span>
-                </div>
-                    </>
-                  );
-                })()}
+                  <GeneratedDocumentPreview model={buildQuotationDocModel(currentQuotation)} />
                 </div>
               </div>
             </div>
@@ -10675,7 +11279,7 @@ useEffect(() => {
               </button>
               <button onClick={() => setShowConvertSheet(true)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📑</span></span>
-                <span style={docActionBarStyles.label}>Invoice</span>
+                <span style={docActionBarStyles.label}>Convert</span>
               </button>
               <button onClick={() => setShowQuotationStatusSheet(true)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
@@ -10740,6 +11344,7 @@ useEffect(() => {
                         createdAt: new Date().toISOString(),
                         customerName: currentQuotation.customerName,
                         customerCompany: currentQuotation.customerCompany,
+                        docSnapshot: buildDocSettingsSnapshot(proformaInvoiceSettings),
                       };
                       persistProformaInvoices([...proformaInvoices, newProformaInvoice]);
                       showSuccess('Converted to Proforma Invoice successfully.');
@@ -10767,9 +11372,11 @@ useEffect(() => {
                         grandTotal: currentQuotation.grandTotal,
                         paidTotal: 0,
                         balanceDue: currentQuotation.grandTotal,
+                        status: 'Unpaid',
                         createdAt: new Date().toISOString(),
                         customerName: currentQuotation.customerName,
                         customerCompany: currentQuotation.customerCompany,
+                        docSnapshot: buildDocSettingsSnapshot(invoiceSettings),
                       };
                       persistInvoices([...invoices, newInvoice]);
                       showSuccess('Converted to Invoice successfully.');
@@ -11026,13 +11633,6 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
-              <span style={customerModuleStyles.headerIconBtn}>
-                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </span>
               <button type="button" onClick={() => openAddTermsModal('purchaseOrder')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
                 <FiPlus size={18} color="#0F766E" />
               </button>
@@ -11372,7 +11972,6 @@ useEffect(() => {
                     docNumber={q.purchaseOrderNo || 'PO-' + q.id.slice(0, 4)}
                     date={q.date}
                     amount={q.grandTotal}
-                    status={q.status}
                   />
                 ))
               )}
@@ -11421,7 +12020,6 @@ useEffect(() => {
 
             {/* DOCUMENT PREVIEW */}
             <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <DocumentStatusBadge status={currentPurchaseOrder.status} />
               <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
                 <div style={docStyles.page}>
                   <GeneratedDocumentPreview model={buildPurchaseOrderDocModel(currentPurchaseOrder)} />
@@ -11438,10 +12036,6 @@ useEffect(() => {
               <button onClick={() => openEditPurchaseOrder(currentPurchaseOrder)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
                 <span style={docActionBarStyles.label}>Edit</span>
-              </button>
-              <button onClick={() => setShowPurchaseOrderStatusSheet(true)} style={docActionBarStyles.btn}>
-                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
-                <span style={docActionBarStyles.label}>Status</span>
               </button>
               <button
                 onClick={() => {
@@ -11465,13 +12059,6 @@ useEffect(() => {
                 <span style={docActionBarStyles.label}>Delete</span>
               </button>
             </div>
-
-            <DocumentStatusSheet
-              open={showPurchaseOrderStatusSheet}
-              title="Purchase Order Status"
-              onSelect={handleSetPurchaseOrderStatus}
-              onClose={() => setShowPurchaseOrderStatusSheet(false)}
-            />
 
             <AppPopup
               open={!!appPopup?.open}
@@ -11712,13 +12299,6 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
-              <span style={customerModuleStyles.headerIconBtn}>
-                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </span>
               <button type="button" onClick={() => openAddTermsModal('proformaInvoice')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
                 <FiPlus size={18} color="#0F766E" />
               </button>
@@ -12271,7 +12851,6 @@ useEffect(() => {
                     docNumber={q.proformaInvoiceNo || 'PI-' + q.id.slice(0, 4)}
                     date={q.date}
                     amount={q.grandTotal}
-                    status={q.status}
                   />
                 ))
               )}
@@ -12320,7 +12899,6 @@ useEffect(() => {
 
             {/* DOCUMENT PREVIEW */}
             <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <DocumentStatusBadge status={currentProformaInvoice.status} />
               <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
                 <div style={docStyles.page}>
                   <GeneratedDocumentPreview model={buildProformaInvoiceDocModel(currentProformaInvoice)} />
@@ -12338,9 +12916,9 @@ useEffect(() => {
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
                 <span style={docActionBarStyles.label}>Edit</span>
               </button>
-              <button onClick={() => setShowProformaInvoiceStatusSheet(true)} style={docActionBarStyles.btn}>
-                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
-                <span style={docActionBarStyles.label}>Status</span>
+              <button onClick={() => setShowProformaInvoiceConvertSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📑</span></span>
+                <span style={docActionBarStyles.label}>Convert</span>
               </button>
               <button
                 onClick={() => {
@@ -12365,12 +12943,105 @@ useEffect(() => {
               </button>
             </div>
 
-            <DocumentStatusSheet
-              open={showProformaInvoiceStatusSheet}
-              title="Proforma Invoice Status"
-              onSelect={handleSetProformaInvoiceStatus}
-              onClose={() => setShowProformaInvoiceStatusSheet(false)}
-            />
+            {/* CONVERSION BOTTOM SHEET (Convert click) */}
+            {showProformaInvoiceConvertSheet && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.6)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999 }} onClick={() => setShowProformaInvoiceConvertSheet(false)}>
+                <div style={{ background: '#ffffff', width: '100%', maxWidth: '500px', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', padding: '12px 20px 30px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#E2E8F0', margin: '4px auto 20px' }} />
+                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>Do you want to convert this Proforma Invoice to...</h3>
+
+                  <button
+                    onClick={() => {
+                      setShowProformaInvoiceConvertSheet(false);
+                      const newId = genId();
+                      const newInvoice = {
+                        id: newId,
+                        invoiceNo: getNextInvoiceNumber(),
+                        date: formatQuotationDate(new Date()),
+                        dueDate: currentProformaInvoice.dueDate || '', poNo: currentProformaInvoice.poNo || '', otherInfo: currentProformaInvoice.otherInfo || '',
+                        customerId: currentProformaInvoice.customerId,
+                        products: currentProformaInvoice.products || [],
+                        otherCharges: currentProformaInvoice.otherCharges || [],
+                        termsIds: currentProformaInvoice.termsIds || [],
+                        paidInfo: [],
+                        grandTotal: currentProformaInvoice.grandTotal,
+                        paidTotal: 0,
+                        balanceDue: currentProformaInvoice.grandTotal,
+                        status: 'Unpaid',
+                        createdAt: new Date().toISOString(),
+                        customerName: currentProformaInvoice.customerName,
+                        customerCompany: currentProformaInvoice.customerCompany,
+                        docSnapshot: buildDocSettingsSnapshot(invoiceSettings),
+                      };
+                      persistInvoices([...invoices, newInvoice]);
+                      showSuccess('Converted to Invoice successfully.');
+                      setSelectedInvoiceId(newId);
+                      setQuotationSubView('invoiceDetail');
+                    }}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+                  >
+                    Convert To Invoice
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowProformaInvoiceConvertSheet(false);
+                      const newId = genId();
+                      const newDeliveryNote = {
+                        id: newId,
+                        deliveryNoteNo: getNextDeliveryNoteNumber(),
+                        date: formatQuotationDate(new Date()),
+                        refNo: currentProformaInvoice.proformaInvoiceNo || '',
+                        otherInfo: currentProformaInvoice.otherInfo || '',
+                        customerId: currentProformaInvoice.customerId,
+                        products: currentProformaInvoice.products || [],
+                        termsIds: [],
+                        createdAt: new Date().toISOString(),
+                        customerName: currentProformaInvoice.customerName,
+                        customerCompany: currentProformaInvoice.customerCompany,
+                        docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings),
+                      };
+                      persistDeliveryNotes([...deliveryNotes, newDeliveryNote]);
+                      showSuccess('Converted to Delivery Note successfully.');
+                      setSelectedDeliveryNoteId(newId);
+                      setQuotationSubView('deliveryNoteDetail');
+                    }}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+                  >
+                    Convert To Delivery Note
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowProformaInvoiceConvertSheet(false);
+                      const newId = genId();
+                      const newReceipt = {
+                        id: newId,
+                        receiptNo: getNextReceiptNumber(),
+                        date: formatQuotationDate(new Date()),
+                        customerId: currentProformaInvoice.customerId,
+                        paymentMode: '',
+                        referenceNo: currentProformaInvoice.proformaInvoiceNo || '',
+                        paidAmount: currentProformaInvoice.grandTotal,
+                        paymentFor: `Proforma Invoice ${currentProformaInvoice.proformaInvoiceNo || ''}`.trim(),
+                        createdAt: new Date().toISOString(),
+                        customerName: currentProformaInvoice.customerName,
+                        customerCompany: currentProformaInvoice.customerCompany,
+                        docSnapshot: buildDocSettingsSnapshot(receiptSettings),
+                      };
+                      persistReceipts([...receipts, newReceipt]);
+                      showSuccess('Converted to Receipt successfully.');
+                      setSelectedReceiptId(newId);
+                      setQuotationSubView('receiptDetail');
+                    }}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+                  >
+                    Convert To Receipt
+                  </button>
+                  <button onClick={() => setShowProformaInvoiceConvertSheet(false)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '16px 0 0', fontSize: '17px', color: '#64748B', cursor: 'pointer', marginTop: '8px' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             <AppPopup
               open={!!appPopup?.open}
@@ -12612,13 +13283,6 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
-              <span style={customerModuleStyles.headerIconBtn}>
-                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </span>
               <button type="button" onClick={() => openAddTermsModal('deliveryNote')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
                 <FiPlus size={18} color="#0F766E" />
               </button>
@@ -12890,7 +13554,6 @@ useEffect(() => {
                     docNumber={q.deliveryNoteNo || 'DN-' + q.id.slice(0, 4)}
                     date={q.date}
                     amountText={`${q.products.length} item${q.products.length === 1 ? '' : 's'}`}
-                    status={q.status}
                   />
                 ))
               )}
@@ -12939,7 +13602,6 @@ useEffect(() => {
 
             {/* DOCUMENT PREVIEW */}
             <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <DocumentStatusBadge status={currentDeliveryNote.status} />
               <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
                 <div style={docStyles.page}>
                   <GeneratedDocumentPreview model={buildDeliveryNoteDocModel(currentDeliveryNote)} />
@@ -12956,10 +13618,6 @@ useEffect(() => {
               <button onClick={() => openEditDeliveryNote(currentDeliveryNote)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
                 <span style={docActionBarStyles.label}>Edit</span>
-              </button>
-              <button onClick={() => setShowDeliveryNoteStatusSheet(true)} style={docActionBarStyles.btn}>
-                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
-                <span style={docActionBarStyles.label}>Status</span>
               </button>
               <button
                 onClick={() => {
@@ -12983,13 +13641,6 @@ useEffect(() => {
                 <span style={docActionBarStyles.label}>Delete</span>
               </button>
             </div>
-
-            <DocumentStatusSheet
-              open={showDeliveryNoteStatusSheet}
-              title="Delivery Note Status"
-              onSelect={handleSetDeliveryNoteStatus}
-              onClose={() => setShowDeliveryNoteStatusSheet(false)}
-            />
 
             <AppPopup
               open={!!appPopup?.open}
@@ -13231,13 +13882,6 @@ useEffect(() => {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
-              <span style={customerModuleStyles.headerIconBtn}>
-                <svg width="19" height="19" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <line x1="1" y1="4" x2="19" y2="4" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="10" x2="14" y2="10" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                  <line x1="1" y1="16" x2="9" y2="16" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </span>
               <button type="button" onClick={() => openAddTermsModal('invoice')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
                 <FiPlus size={18} color="#0F766E" />
               </button>
@@ -13791,7 +14435,7 @@ useEffect(() => {
                     docNumber={inv.invoiceNo || 'INV-' + inv.id.slice(0, 4)}
                     date={inv.date}
                     amount={inv.grandTotal}
-                    status={inv.status}
+                    status={normalizeInvoiceStatus(inv.status)}
                   />
                 ))
               )}
@@ -13840,7 +14484,7 @@ useEffect(() => {
 
             {/* DOCUMENT PREVIEW */}
             <div style={{ display: 'flex', justifyContent: 'center', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <DocumentStatusBadge status={currentInvoice.status} />
+              <DocumentStatusBadge status={normalizeInvoiceStatus(currentInvoice.status)} />
               <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', boxSizing: 'border-box' }}>
                 <div style={docStyles.page}>
                   <GeneratedDocumentPreview model={buildInvoiceDocModel(currentInvoice)} />
@@ -13857,6 +14501,10 @@ useEffect(() => {
               <button onClick={() => openEditInvoice(currentInvoice)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
                 <span style={docActionBarStyles.label}>Edit</span>
+              </button>
+              <button onClick={() => setShowInvoiceConvertSheet(true)} style={docActionBarStyles.btn}>
+                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📑</span></span>
+                <span style={docActionBarStyles.label}>Convert</span>
               </button>
               <button onClick={() => setShowInvoiceStatusSheet(true)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
@@ -13888,9 +14536,78 @@ useEffect(() => {
             <DocumentStatusSheet
               open={showInvoiceStatusSheet}
               title="Invoice Status"
+              options={INVOICE_STATUS_OPTIONS}
               onSelect={handleSetInvoiceStatus}
               onClose={() => setShowInvoiceStatusSheet(false)}
             />
+
+            {/* CONVERSION BOTTOM SHEET (Convert click) */}
+            {showInvoiceConvertSheet && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.6)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 9999 }} onClick={() => setShowInvoiceConvertSheet(false)}>
+                <div style={{ background: '#ffffff', width: '100%', maxWidth: '500px', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', padding: '12px 20px 30px', boxSizing: 'border-box' }} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#E2E8F0', margin: '4px auto 20px' }} />
+                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>Do you want to convert this Invoice to...</h3>
+
+                  <button
+                    onClick={() => {
+                      setShowInvoiceConvertSheet(false);
+                      const newId = genId();
+                      const newDeliveryNote = {
+                        id: newId,
+                        deliveryNoteNo: getNextDeliveryNoteNumber(),
+                        date: formatQuotationDate(new Date()),
+                        refNo: currentInvoice.invoiceNo || '',
+                        otherInfo: currentInvoice.otherInfo || '',
+                        customerId: currentInvoice.customerId,
+                        products: currentInvoice.products || [],
+                        termsIds: [],
+                        createdAt: new Date().toISOString(),
+                        customerName: currentInvoice.customerName,
+                        customerCompany: currentInvoice.customerCompany,
+                        docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings),
+                      };
+                      persistDeliveryNotes([...deliveryNotes, newDeliveryNote]);
+                      showSuccess('Converted to Delivery Note successfully.');
+                      setSelectedDeliveryNoteId(newId);
+                      setQuotationSubView('deliveryNoteDetail');
+                    }}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+                  >
+                    Convert To Delivery Note
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowInvoiceConvertSheet(false);
+                      const newId = genId();
+                      const newReceipt = {
+                        id: newId,
+                        receiptNo: getNextReceiptNumber(),
+                        date: formatQuotationDate(new Date()),
+                        customerId: currentInvoice.customerId,
+                        paymentMode: '',
+                        referenceNo: currentInvoice.invoiceNo || '',
+                        paidAmount: currentInvoice.grandTotal,
+                        paymentFor: `Invoice ${currentInvoice.invoiceNo || ''}`.trim(),
+                        createdAt: new Date().toISOString(),
+                        customerName: currentInvoice.customerName,
+                        customerCompany: currentInvoice.customerCompany,
+                        docSnapshot: buildDocSettingsSnapshot(receiptSettings),
+                      };
+                      persistReceipts([...receipts, newReceipt]);
+                      showSuccess('Converted to Receipt successfully.');
+                      setSelectedReceiptId(newId);
+                      setQuotationSubView('receiptDetail');
+                    }}
+                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
+                  >
+                    Convert To Receipt
+                  </button>
+                  <button onClick={() => setShowInvoiceConvertSheet(false)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '16px 0 0', fontSize: '17px', color: '#64748B', cursor: 'pointer', marginTop: '8px' }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             <AppPopup
               open={!!appPopup?.open}
@@ -14191,7 +14908,6 @@ useEffect(() => {
                     docNumber={r.receiptNo || 'RECEIPT-' + r.id.slice(0, 4)}
                     date={r.date}
                     amount={r.paidAmount}
-                    status={r.status}
                   />
                 ))
               )}
@@ -14224,6 +14940,10 @@ useEffect(() => {
           setQuotationSubView('receiptList');
           return null;
         }
+        // Frozen Business Info / Receipt Settings from when this receipt was created or
+        // last edited-and-updated; falls back to live values only for receipts saved
+        // before this snapshot existed.
+        const receiptSnap = currentReceipt.docSnapshot || buildDocSettingsSnapshot(receiptSettings);
 
         return (
           <div style={{ width: '100%', height: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -14240,7 +14960,6 @@ useEffect(() => {
 
             {/* DOCUMENT PREVIEW */}
             <div style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box', position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <DocumentStatusBadge status={currentReceipt.status} />
               <div style={{ width: '100%', padding: '18px 14px 26px', maxWidth: '600px', margin: '0 auto', boxSizing: 'border-box', flex: 1, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ ...docStyles.page, flex: 1, display: 'flex', flexDirection: 'column' }}>
                 {/* Header: Receipt # (top, centered), then Business info + logo below - matches Quotation Detail */}
@@ -14250,12 +14969,12 @@ useEffect(() => {
                   </p>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <h2 style={docStyles.businessName}>{businessInfo?.businessName || 'Manufacturer'}</h2>
-                      {businessInfo?.phone && <p style={docStyles.contactLine}>{businessInfo.phone}</p>}
-                      {businessInfo?.email && <p style={docStyles.contactLine}>{businessInfo.email}</p>}
+                      <h2 style={docStyles.businessName}>{receiptSnap.businessName || 'Manufacturer'}</h2>
+                      {receiptSnap.businessPhone && <p style={docStyles.contactLine}>{receiptSnap.businessPhone}</p>}
+                      {receiptSnap.businessEmail && <p style={docStyles.contactLine}>{receiptSnap.businessEmail}</p>}
                     </div>
-                    {businessInfo?.logoImg && (
-                      <img src={businessInfo.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
+                    {receiptSnap.logoImg && (
+                      <img src={receiptSnap.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
                     )}
                   </div>
                 </div>
@@ -14304,15 +15023,17 @@ useEffect(() => {
                   <span style={docStyles.grandTotalValue}>₹{Number(currentReceipt.paidAmount || 0).toLocaleString('en-IN')}</span>
                 </div>
 
-                <div style={{ textAlign: 'right', marginTop: '30px' }}>
-                  <p style={docStyles.signatureLabel}>For, {businessInfo?.businessName || 'Manufacturer'}</p>
-                  {businessInfo?.signatureImg ? (
-                    <img src={businessInfo.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
-                  ) : (
-                    <div style={{ height: '34px' }}></div>
-                  )}
-                  <p style={docStyles.signatureCaption}>Authorized Signature</p>
-                </div>
+                {receiptSnap.showSignature !== 'No' && (
+                  <div style={{ textAlign: 'right', marginTop: '30px' }}>
+                    <p style={docStyles.signatureLabel}>For, {receiptSnap.businessName || 'Manufacturer'}</p>
+                    {receiptSnap.signatureImg ? (
+                      <img src={receiptSnap.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
+                    ) : (
+                      <div style={{ height: '34px' }}></div>
+                    )}
+                    <p style={docStyles.signatureCaption}>Authorized Signature</p>
+                  </div>
+                )}
 
                 {/* Generated with SmartManage - brand footer */}
                 <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -14323,7 +15044,7 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* BOTTOM ACTION BAR (Duplicate, Edit, Status, Delete) */}
+            {/* BOTTOM ACTION BAR (Duplicate, Edit, Delete) */}
             <div style={docActionBarStyles.bar}>
               <button onClick={() => handleDuplicateReceipt(currentReceipt)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>📄</span></span>
@@ -14332,10 +15053,6 @@ useEffect(() => {
               <button onClick={() => openEditReceipt(currentReceipt)} style={docActionBarStyles.btn}>
                 <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>✏️</span></span>
                 <span style={docActionBarStyles.label}>Edit</span>
-              </button>
-              <button onClick={() => setShowReceiptStatusSheet(true)} style={docActionBarStyles.btn}>
-                <span style={docActionBarStyles.iconWrap}><span style={{ fontSize: '22px', lineHeight: 1 }}>💬</span></span>
-                <span style={docActionBarStyles.label}>Status</span>
               </button>
               <button
                 onClick={() => {
@@ -14360,13 +15077,6 @@ useEffect(() => {
               </button>
             </div>
 
-            <DocumentStatusSheet
-              open={showReceiptStatusSheet}
-              title="Receipt Status"
-              onSelect={handleSetReceiptStatus}
-              onClose={() => setShowReceiptStatusSheet(false)}
-            />
-
             <AppPopup
               open={!!appPopup?.open}
               tone={appPopup?.tone}
@@ -14386,15 +15096,14 @@ useEffect(() => {
         { key: 'business', label: 'BUSINESS', icon: HiOutlineBuildingOffice2 },
         { key: 'customer', label: 'CUSTOMER', icon: FiUser },
         { key: 'product', label: 'PRODUCT', icon: FiBox },
-        { key: 'settings', label: 'SETTINGS', icon: HiOutlineCog6Tooth },
       ];
       const discoverTiles = [
         { key: 'quotationList', title: 'Quotation' },
-        { key: 'invoiceList', title: 'Invoice' },
         { key: 'purchaseOrder', title: 'Purchase Order' },
+        { key: 'invoiceList', title: 'Invoice' },
         { key: 'proformaInvoice', title: 'Proforma Invoice' },
-        { key: 'deliveryNote', title: 'Delivery Note' },
         { key: 'receipt', title: 'Receipt' },
+        { key: 'deliveryNote', title: 'Delivery Note' },
       ];
       // TODO: remaining tiles (terms as a Discover tile, quotationList, and the other 6 Discover tiles) still no-op —
       // wire these up once the destination screens are defined.
@@ -14402,7 +15111,6 @@ useEffect(() => {
         if (key === 'business') { setQuotationSubView('business'); return; }
         if (key === 'customer') { setCustomerSearchQuery(''); setQuotationSubView('customerList'); return; }
         if (key === 'product') { setProductSearchQuery(''); setQuotationSubView('productList'); return; }
-        if (key === 'settings') { setQuotationSubView('settingsMenu'); return; }
       };
       const handleDiscoverTap = (key) => {
         if (key === 'makeQuotation') { openMakeQuotation(); return; }
@@ -14417,8 +15125,8 @@ useEffect(() => {
 
       return (
         <div style={quotationModuleStyles.screen}>
-          <div style={{ ...themeStyles.authHeader, backgroundColor: '#0F766E' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ ...themeStyles.authHeader, backgroundColor: '#0F766E', padding: '14px 14px', height: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
               <button
                 type="button"
                 onClick={() => setActiveModule(null)}
@@ -14434,47 +15142,47 @@ useEffect(() => {
                   getInitials(loggedInUser?.fullName) || 'GS'
                 )}
               </div>
-              <span style={{ color: '#ffffff', fontWeight: '600', fontSize: '15px' }}>
+              <span style={{ color: '#ffffff', fontWeight: '700', fontSize: '17px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '180px' }}>
                 {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'}
               </span>
             </div>
+            <button
+              type="button"
+              onClick={() => setQuotationSubView('settingsMenu')}
+              aria-label="Open settings"
+              style={{ background: 'rgba(255,255,255,0.16)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0 }}
+            >
+              <HiOutlineCog6Tooth size={18} color="#ffffff" />
+            </button>
           </div>
 
           <div style={quotationModuleStyles.bodyRow}>
             <div style={quotationModuleStyles.bodyInner}>
-              <div style={quotationModuleStyles.manageColumn}>
+              <div style={quotationModuleStyles.manageSection}>
                 <h2 style={quotationModuleStyles.sectionLabel}>Manage</h2>
-                <div style={quotationModuleStyles.manageScrollArea}>
-                  <div style={quotationModuleStyles.managePanel}>
-                    <div style={quotationModuleStyles.manageListVertical}>
-                      {manageItems.map((item) => (
-                        <button type="button" key={item.key} onClick={() => handleManageTap(item.key)} style={quotationModuleStyles.manageItemVertical}>
-                          <span style={quotationModuleStyles.manageIconCircleSmall}>
-                            <item.icon size={17} color="#1E293B" />
-                          </span>
-                          <span style={quotationModuleStyles.manageLabelVertical}>{item.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                <div style={quotationModuleStyles.manageRow}>
+                  {manageItems.map((item) => (
+                    <button type="button" key={item.key} onClick={() => handleManageTap(item.key)} style={quotationModuleStyles.manageItemHorizontal}>
+                      <span style={quotationModuleStyles.manageIconCircle}>
+                        <item.icon size={20} color="#0F766E" />
+                      </span>
+                      <span style={quotationModuleStyles.manageLabelHorizontal}>{item.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div style={quotationModuleStyles.discoverColumn}>
+              <div style={quotationModuleStyles.discoverSection}>
                 <h2 style={quotationModuleStyles.sectionLabel}>Discover</h2>
-                <div style={quotationModuleStyles.discoverScrollArea}>
-                  <div style={quotationModuleStyles.discoverPanel}>
-                    <div style={quotationModuleStyles.discoverGrid}>
-                      {discoverTiles.map((tile) => (
-                        <button type="button" key={tile.key} onClick={() => handleDiscoverTap(tile.key)} style={quotationModuleStyles.discoverTile}>
-                          <span style={quotationModuleStyles.discoverBadge}>
-                            <FiFileText size={17} color="#ffffff" />
-                          </span>
-                          <span style={quotationModuleStyles.discoverTitle}>{tile.title.replace(' ', '\n')}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                <div style={quotationModuleStyles.discoverGrid}>
+                  {discoverTiles.map((tile) => (
+                    <button type="button" key={tile.key} onClick={() => handleDiscoverTap(tile.key)} style={quotationModuleStyles.discoverTile}>
+                      <span style={quotationModuleStyles.discoverBadge}>
+                        <FiFileText size={19} color="#ffffff" />
+                      </span>
+                      <span style={quotationModuleStyles.discoverTitle}>{tile.title}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -15415,7 +16123,17 @@ useEffect(() => {
                   <div style={{ flex: 1, padding: '16px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0, boxSizing: 'border-box' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                       <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', width: '104px', flexShrink: 0 }}>{t('fullName')}<span style={{ color: '#DC2626' }}>*</span></label>
-                      <input type="text" value={tempWorkerName} onChange={(e) => setTempWorkerName(e.target.value)} style={{ flex: 1, minWidth: 0, padding: '10px', borderRadius: '8px', border: isNameDuplicateUI ? '1px solid #DC2626' : '1px solid #CBD5E1', fontSize: '13px', color: '#1E293B', outline: 'none', boxSizing: 'border-box', backgroundColor: '#F8FAFC' }} />
+                      <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                        <input type="text" value={tempWorkerName} onChange={(e) => setTempWorkerName(e.target.value)} style={{ width: '100%', minWidth: 0, padding: '10px', paddingRight: '44px', borderRadius: '8px', border: isNameDuplicateUI ? '1px solid #DC2626' : '1px solid #CBD5E1', fontSize: '13px', color: '#1E293B', outline: 'none', boxSizing: 'border-box', backgroundColor: '#F8FAFC' }} />
+                        <ContactPickButton
+                          ariaLabel="Pick employee from contacts"
+                          style={{ position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)', width: '30px', height: '30px', borderRadius: '7px', background: 'linear-gradient(145deg, #2952B0, #0B3C9B)' }}
+                          onPick={({ name, phone }) => {
+                            if (name) setTempWorkerName(name);
+                            if (phone) setTempWorkerPhone(phone);
+                          }}
+                        />
+                      </div>
                     </div>
                     {isNameDuplicateUI && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
@@ -15993,7 +16711,17 @@ useEffect(() => {
                 <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '14px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0, boxSizing: 'border-box' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
                     <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', width: '104px', flexShrink: 0 }}>{t('fullName')} <span style={{ color: '#DC2626' }}>*</span></label>
-                    <input type="text" value={tempWorkerName} onChange={(e) => setTempWorkerName(e.target.value)} style={{ flex: 1, minWidth: 0, padding: '10px', borderRadius: '8px', border: isNameDuplicateUI ? '1px solid #DC2626' : '1px solid #CBD5E1', boxSizing: 'border-box', backgroundColor: '#ffffff', outline: 'none', fontSize: '13px' }} />
+                    <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                      <input type="text" value={tempWorkerName} onChange={(e) => setTempWorkerName(e.target.value)} style={{ width: '100%', minWidth: 0, padding: '10px', paddingRight: '44px', borderRadius: '8px', border: isNameDuplicateUI ? '1px solid #DC2626' : '1px solid #CBD5E1', boxSizing: 'border-box', backgroundColor: '#ffffff', outline: 'none', fontSize: '13px' }} />
+                      <ContactPickButton
+                        ariaLabel="Pick employee from contacts"
+                        style={{ position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)', width: '30px', height: '30px', borderRadius: '7px', background: 'linear-gradient(145deg, #2952B0, #0B3C9B)' }}
+                        onPick={({ name, phone }) => {
+                          if (name) setTempWorkerName(name);
+                          if (phone) setTempWorkerPhone(phone);
+                        }}
+                      />
+                    </div>
                   </div>
                   {isNameDuplicateUI && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
@@ -16765,6 +17493,7 @@ const moduleHomeStyles = {
   tileBadge: { width: '40px', height: '40px', borderRadius: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   tileTitle: { fontSize: '14.5px', fontWeight: '700', color: '#0F172A', lineHeight: '1.25' },
   // Font auto-shrinks to fit the tile width as the label text grows (e.g. longer module names).
+  // Shared by both home-page tiles so their typography (size/weight/line-height) stays identical.
   tileTitleAdjustable: {
     fontSize: 'clamp(11px, 3.4vw, 14.5px)', fontWeight: '700', color: '#0F172A',
     lineHeight: '1.25', overflowWrap: 'break-word', wordBreak: 'break-word', width: '100%',
@@ -16803,42 +17532,45 @@ const quotationModuleStyles = {
     display: 'flex', flexDirection: 'column', boxSizing: 'border-box', overflow: 'hidden',
   },
 
-  bodyRow: { flex: 1, minHeight: 0, width: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden' },
-  bodyInner: { width: '100%', maxWidth: '460px', height: '100%', display: 'flex', gap: '12px', padding: '16px 18px 0', boxSizing: 'border-box', overflow: 'hidden' },
+  bodyRow: { flex: 1, minHeight: 0, width: '100%', display: 'flex', justifyContent: 'center', overflowY: 'auto' },
+  bodyInner: { width: '100%', maxWidth: '460px', display: 'flex', flexDirection: 'column', gap: '22px', padding: '16px 18px 32px', boxSizing: 'border-box' },
 
   sectionLabel: { fontSize: '16px', fontWeight: '700', color: '#0F172A', margin: '0 0 14px 2px', flexShrink: 0 },
 
-  manageColumn: { width: '76px', flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  manageScrollArea: { flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: '24px' },
-  managePanel: { background: '#EEF7F5', borderRadius: '20px', padding: '10px', boxSizing: 'border-box' },
-  manageListVertical: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  manageItemVertical: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '7px',
-    background: '#ffffff', border: '1px solid #DCEEEA', borderRadius: '16px', cursor: 'pointer',
-    padding: '10px 6px', width: '100%', boxSizing: 'border-box', boxShadow: '0 1px 2px rgba(15, 118, 110, 0.05)',
+  // ===== Manage section: horizontal row of equal-width tiles (was a vertical column) =====
+  manageSection: { width: '100%', boxSizing: 'border-box' },
+  manageRow: { display: 'flex', flexDirection: 'row', gap: '12px', width: '100%' },
+  manageItemHorizontal: {
+    flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px',
+    background: '#ffffff', border: '1px solid #DCEEEA', borderRadius: '18px', cursor: 'pointer',
+    padding: '16px 8px', boxSizing: 'border-box', boxShadow: '0 1px 2px rgba(15, 118, 110, 0.05)',
   },
-  manageIconCircleSmall: {
-    width: '44px', height: '44px', borderRadius: '14px', background: '#ffffff',
-    border: '1px solid #D9EEEA', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    boxShadow: '0 6px 14px rgba(15, 118, 110, 0.10)', flexShrink: 0,
-  },
-  manageLabelVertical: { fontSize: '9px', fontWeight: '700', color: '#64748B', letterSpacing: '0.3px', textAlign: 'center' },
-
-  discoverColumn: { flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  discoverScrollArea: { flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: '24px' },
-  discoverPanel: { background: '#EEF7F5', borderRadius: '20px', padding: '14px', boxSizing: 'border-box' },
-  discoverGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
-  discoverTile: {
-    background: '#ffffff', border: '1px solid #DCEEEA', borderRadius: '16px',
-    padding: '12px 10px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column',
-    alignItems: 'flex-start', gap: '8px', cursor: 'pointer', textAlign: 'left',
-    fontFamily: 'inherit', minHeight: '74px', boxShadow: '0 1px 2px rgba(15, 118, 110, 0.05)',
-  },
-  discoverBadge: {
-    width: '30px', height: '30px', borderRadius: '10px', background: 'linear-gradient(145deg, #12786B, #0A3D38)',
+  manageIconCircle: {
+    width: '46px', height: '46px', borderRadius: '14px', background: '#E7F5F1',
     display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
-  discoverTitle: { fontSize: '12.5px', fontWeight: '700', color: '#0F172A', lineHeight: '1.25', whiteSpace: 'pre-line' },
+  manageLabelHorizontal: { fontSize: '12px', fontWeight: '700', color: '#0F172A', letterSpacing: '0.2px', textAlign: 'center' },
+
+  // ===== Discover section: full-width grid below Manage (was a side column) =====
+  discoverSection: { width: '100%', boxSizing: 'border-box' },
+  discoverGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' },
+  discoverTile: {
+    background: '#ffffff', border: '1px solid #DCEEEA', borderRadius: '16px',
+    padding: '14px 12px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column',
+    alignItems: 'flex-start', gap: '10px', cursor: 'pointer', textAlign: 'left',
+    fontFamily: 'inherit', minHeight: '80px', boxShadow: '0 1px 2px rgba(15, 118, 110, 0.05)',
+  },
+  discoverBadge: {
+    width: '36px', height: '36px', borderRadius: '12px', background: 'linear-gradient(145deg, #12786B, #0A3D38)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  // Single-line, auto-shrinking label so short titles (Quotation, Invoice, Receipt) and
+  // longer ones (Purchase Order, Proforma Invoice, Delivery Note) render consistently
+  // on one line without wrapping. Floor matches the Manage tile label size (12px).
+  discoverTitle: {
+    fontSize: 'clamp(12px, 3.4vw, 14px)', fontWeight: '700', color: '#0F172A', lineHeight: '1.25',
+    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', display: 'block',
+  },
   discoverSubtitle: { fontSize: '10px', fontWeight: '500', color: '#94A3B8', lineHeight: '1.35' },
 };
 
@@ -16869,6 +17601,10 @@ const quotationSettingsStyles = {
   rowBody: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' },
   rowLabel: { fontSize: '13.5px', color: '#64748B', fontWeight: '500' },
   rowValue: { fontSize: '17px', color: '#0F172A', fontWeight: '500', lineHeight: '1.3' },
+  // Chevron shown on every tappable settings row (e.g. GST Display, Quotation Top/Bottom
+  // Message) so users can see at a glance that the row opens a menu of other options,
+  // instead of looking like a plain read-only label that gives no hint it's interactive.
+  rowChevron: { flexShrink: 0, marginTop: '4px' },
   inputEl: {
     border: 'none', outline: 'none', background: 'transparent', fontSize: '17px', color: '#0F172A',
     fontWeight: '500', padding: 0, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
@@ -16878,7 +17614,114 @@ const quotationSettingsStyles = {
     fontWeight: '500', padding: 0, fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
     resize: 'vertical', lineHeight: '1.45',
   },
+
+  // ----- Inline Yes/No toggle-switch row (replaces the old tap-to-open-sheet row for
+  // binary Display fields like GST / HSN / Shipping Address / Bank / QR / Signature). -----
+  toggleRow: {
+    width: '100%', background: '#F1F3F6', border: 'none', borderRadius: '18px',
+    padding: '13px 16px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '12px',
+    boxSizing: 'border-box',
+  },
+  toggleRowIcon: { width: '22px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  toggleRowLabel: { flex: 1, minWidth: 0, fontSize: '14px', color: '#0F172A', fontWeight: '600', lineHeight: '1.3' },
+  toggleRowRight: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
+  toggleRowValueText: { fontSize: '13px', fontWeight: '700', minWidth: '24px', textAlign: 'left' },
+  // Switch itself is intentionally compact (42x24) so it never grows past the row it sits in.
+  switchTrack: {
+    width: '42px', height: '24px', borderRadius: '999px', border: 'none', cursor: 'pointer',
+    position: 'relative', padding: 0, flexShrink: 0, transition: 'background-color 0.15s ease',
+  },
+  switchTrackOn: { background: '#16A34A' },
+  switchTrackOff: { background: '#CBD5E1' },
+  switchThumb: {
+    position: 'absolute', top: '2px', left: '2px', width: '20px', height: '20px', borderRadius: '50%',
+    background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.25)', transition: 'transform 0.15s ease',
+  },
+
+  // ----- Inline 3-option segmented control (Default / Custom / Hide) -----
+  segmentedWrap: {
+    width: '100%', background: '#F1F3F6', borderRadius: '18px', padding: '13px 14px 14px',
+    marginBottom: '14px', boxSizing: 'border-box',
+  },
+  segmentedHeader: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '11px' },
+  segmentedControl: {
+    display: 'flex', alignItems: 'center', gap: '6px', background: '#E7EAEF', borderRadius: '12px', padding: '4px',
+  },
+  segmentedBtn: {
+    flex: 1, textAlign: 'center', background: 'transparent', border: 'none', borderRadius: '9px',
+    padding: '8px 6px', fontSize: '12.5px', fontWeight: '700', color: '#475569', cursor: 'pointer',
+    fontFamily: 'inherit', letterSpacing: '0.1px', whiteSpace: 'nowrap',
+  },
+  segmentedBtnActive: { background: '#16A34A', color: '#ffffff', boxShadow: '0 1px 4px rgba(15,23,42,0.15)' },
 };
+
+// Compact inline toggle switch used for every Yes/No "Display" setting row (GST, HSN,
+// Shipping Address, Bank info, QR Code, Signature). Tapping the switch flips the value
+// directly - no bottom sheet needed. Sized to sit comfortably inside the existing row
+// so it never looks oversized on small screens.
+function ToggleSwitchRow({ icon, label, value, onChange }) {
+  const isYes = value === 'Yes';
+  return (
+    <div style={quotationSettingsStyles.toggleRow}>
+      <span style={quotationSettingsStyles.toggleRowIcon}>{icon}</span>
+      <span style={quotationSettingsStyles.toggleRowLabel}>{label}</span>
+      <span style={quotationSettingsStyles.toggleRowRight}>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isYes}
+          aria-label={label}
+          onClick={() => onChange(isYes ? 'No' : 'Yes')}
+          style={{
+            ...quotationSettingsStyles.switchTrack,
+            ...(isYes ? quotationSettingsStyles.switchTrackOn : quotationSettingsStyles.switchTrackOff),
+          }}
+        >
+          <span
+            style={{
+              ...quotationSettingsStyles.switchThumb,
+              transform: isYes ? 'translateX(18px)' : 'translateX(0)',
+            }}
+          />
+        </button>
+        <span style={{ ...quotationSettingsStyles.toggleRowValueText, color: isYes ? '#16A34A' : '#64748B' }}>{isYes ? 'Yes' : 'No'}</span>
+      </span>
+    </div>
+  );
+}
+
+// Inline 3-option segmented control used for Top/Bottom Message mode rows
+// (Default / Custom / Hide). `options` is an array of { value, label } - value is what
+// gets passed to onChange / stored (e.g. "Customize"), label is what's shown on the
+// button (e.g. "Custom"), so existing business logic keyed on "Customize" keeps working.
+function SegmentedModeRow({ icon, label, value, options, onChange }) {
+  return (
+    <div style={quotationSettingsStyles.segmentedWrap}>
+      <div style={quotationSettingsStyles.segmentedHeader}>
+        <span style={quotationSettingsStyles.toggleRowIcon}>{icon}</span>
+        <span style={quotationSettingsStyles.toggleRowLabel}>{label}</span>
+      </div>
+      <div style={quotationSettingsStyles.segmentedControl}>
+        {options.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              style={{
+                ...quotationSettingsStyles.segmentedBtn,
+                ...(active ? quotationSettingsStyles.segmentedBtnActive : {}),
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 const businessInfoStyles = {
   screen: { width: '100%', minHeight: '100vh', background: '#ffffff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
@@ -16928,8 +17771,21 @@ const businessInfoStyles = {
 
   bankCard: {
     width: '100%', textAlign: 'left', background: '#F1F3F6', border: 'none', borderRadius: '16px',
-    padding: '12px 16px 14px', marginBottom: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column',
-    gap: '3px', fontFamily: 'inherit',
+    padding: '12px 16px 14px', marginBottom: '12px', display: 'flex', flexDirection: 'column',
+    gap: '3px', fontFamily: 'inherit', boxSizing: 'border-box',
+  },
+  bankCardHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
+  bankCardLabelBtn: {
+    background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', textAlign: 'left',
+    fontFamily: 'inherit', flex: 1,
+  },
+  bankShareIconBtn: {
+    background: '#E7F2F0', border: 'none', borderRadius: '50%', width: '30px', height: '30px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0,
+  },
+  bankCardBodyBtn: {
+    width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, margin: 0,
+    cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '3px', fontFamily: 'inherit',
   },
   bankLine: { fontSize: '14.5px', color: '#1E293B', fontWeight: '600' },
 
@@ -16938,6 +17794,20 @@ const businessInfoStyles = {
   updateBtn: {
     width: '100%', height: '52px', borderRadius: '16px', border: 'none', background: '#0F766E',
     color: '#ffffff', fontSize: '15.5px', fontWeight: '700', letterSpacing: '1px', cursor: 'pointer',
+  },
+
+  // Reset + Update side-by-side row used on every document Settings screen. Reset is a
+  // secondary/outlined button (left, less visual weight) and Update stays the filled
+  // primary action (right) - same row, split roughly 40/60 so Update stays the clear
+  // primary tap target on mobile.
+  settingsFooterRow: { display: 'flex', gap: '12px', marginTop: '4px' },
+  resetBtn: {
+    flex: '0.8', height: '52px', borderRadius: '16px', border: '1.5px solid #CBD5E1', background: '#ffffff',
+    color: '#334155', fontSize: '15px', fontWeight: '700', letterSpacing: '0.5px', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  updateBtnHalf: {
+    flex: '1', height: '52px', borderRadius: '16px', border: 'none', background: '#0F766E',
+    color: '#ffffff', fontSize: '15px', fontWeight: '700', letterSpacing: '0.5px', cursor: 'pointer',
   },
 
   modalOverlay: {
