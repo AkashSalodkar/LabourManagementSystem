@@ -90,6 +90,7 @@ namespace LMPTS.API.Controllers
                 TaxLabel = info.TaxLabel,
                 TaxNumber = info.TaxNumber,
                 State = info.State,
+                PinCode = info.PinCode,
                 BankAccountName = info.BankAccountName,
                 BankAccountNumber = info.BankAccountNumber,
                 BankName = info.BankName,
@@ -117,6 +118,7 @@ namespace LMPTS.API.Controllers
             entity.TaxLabel = dto.TaxLabel;
             entity.TaxNumber = dto.TaxNumber;
             entity.State = dto.State;
+            entity.PinCode = dto.PinCode;
             entity.BankAccountName = dto.BankAccountName;
             entity.BankAccountNumber = dto.BankAccountNumber;
             entity.BankName = dto.BankName;

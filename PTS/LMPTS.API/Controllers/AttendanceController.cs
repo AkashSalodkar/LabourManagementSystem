@@ -33,9 +33,25 @@ namespace LMPTS.API.Controllers
                     return NotFound(new { message = "Worker not found." });
                 }
 
-                // Check if attendance already exists for this date
+                // Defense-in-depth: the UI already hides these paths for a removed
+                // project or a removed (deactivated/deleted) employee, but the API
+                // itself should refuse them too rather than relying on the frontend.
+                if (!worker.IsActive || !worker.IsCurrentlyActive)
+                {
+                    return BadRequest(new { message = "Cannot mark attendance for a removed employee." });
+                }
+
+                var project = await _context.Projects.FindAsync(request.ProjectId);
+                if (project == null || !project.IsActive)
+                {
+                    return BadRequest(new { message = "Cannot mark attendance for a removed project." });
+                }
+
+                // Check if attendance already exists for this worker, project and date
                 var existingAttendance = await _context.WorkerAttendances
-                    .FirstOrDefaultAsync(a => a.WorkerId == request.WorkerId && a.AttendanceDate.Date == request.AttendanceDate.Date);
+                    .FirstOrDefaultAsync(a => a.WorkerId == request.WorkerId
+                        && a.ProjectId == request.ProjectId
+                        && a.AttendanceDate.Date == request.AttendanceDate.Date);
 
                 var dailyRate = worker.DailyWage;
                 var netAmount = CalculateNetAmount(dailyRate, request.Status);
@@ -54,6 +70,7 @@ namespace LMPTS.API.Controllers
                     var attendance = new WorkerAttendance
                     {
                         WorkerId = request.WorkerId,
+                        ProjectId = request.ProjectId,
                         AttendanceDate = request.AttendanceDate.Date,
                         Status = request.Status,
                         DailyRate = dailyRate,
@@ -81,8 +98,17 @@ namespace LMPTS.API.Controllers
         {
             try
             {
+                var project = await _context.Projects.FindAsync(request.ProjectId);
+                if (project == null || !project.IsActive)
+                {
+                    return BadRequest(new { message = "Cannot mark attendance for a removed project." });
+                }
+
+                // IsCurrentlyActive added: IsActive alone only excludes soft-deleted workers,
+                // not ones that have been deactivated ("Removed" in the employees list) -
+                // those should never be swept into a bulk mark either.
                 var workers = await _context.Workers
-                    .Where(w => w.ProjectId == request.ProjectId && w.IsActive)
+                    .Where(w => w.ProjectId == request.ProjectId && w.IsActive && w.IsCurrentlyActive)
                     .Include(w => w.Attendances)
                     .ToListAsync();
 
@@ -101,7 +127,9 @@ namespace LMPTS.API.Controllers
                         if (date.Date < worker.JoiningDate.Date) continue;
 
                         var existingAttendance = await _context.WorkerAttendances
-                            .FirstOrDefaultAsync(a => a.WorkerId == worker.Id && a.AttendanceDate.Date == date.Date);
+                            .FirstOrDefaultAsync(a => a.WorkerId == worker.Id
+                                && a.ProjectId == request.ProjectId
+                                && a.AttendanceDate.Date == date.Date);
 
                         var dailyRate = worker.DailyWage;
                         var netAmount = CalculateNetAmount(dailyRate, request.Status);
@@ -119,6 +147,7 @@ namespace LMPTS.API.Controllers
                             var attendance = new WorkerAttendance
                             {
                                 WorkerId = worker.Id,
+                                ProjectId = request.ProjectId,
                                 AttendanceDate = date.Date,
                                 Status = request.Status,
                                 DailyRate = dailyRate,
@@ -173,6 +202,7 @@ namespace LMPTS.API.Controllers
                 {
                     AttendanceId = a.AttendanceId,
                     WorkerId = a.WorkerId,
+                    ProjectId = a.ProjectId,
                     AttendanceDate = a.AttendanceDate,
                     Status = a.Status,
                     DailyRate = a.DailyRate,

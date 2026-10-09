@@ -133,6 +133,10 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasMaxLength(15)
                         .HasColumnType("nvarchar(15)");
 
+                    b.Property<string>("PinCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<string>("QrCodeImg")
                         .HasColumnType("nvarchar(max)");
 
@@ -406,6 +410,9 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("DocSnapshot")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("OtherInfo")
                         .HasColumnType("nvarchar(max)");
 
@@ -467,11 +474,23 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
 
+                    b.Property<string>("ShowBankInfo")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("ShowProductHSN")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ShowShippingAddress")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("ShowSignature")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ShowUpiInfo")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -518,6 +537,9 @@ namespace LMPTS.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal>("GstPercent")
+                        .HasColumnType("decimal(5,2)");
 
                     b.Property<bool>("IsTaxable")
                         .HasColumnType("bit");
@@ -771,6 +793,9 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
+                    b.Property<string>("DocSnapshot")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("date");
 
@@ -855,6 +880,10 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ShowProductHSN")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ShowShippingAddress")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -1041,6 +1070,9 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
+                    b.Property<string>("DocSnapshot")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime?>("DueDate")
                         .HasColumnType("date");
 
@@ -1125,6 +1157,10 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ShowProductHSN")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ShowShippingAddress")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -1266,6 +1302,9 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
+                    b.Property<string>("DocSnapshot")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<decimal>("GrandTotal")
                         .HasColumnType("decimal(18,2)");
 
@@ -1340,6 +1379,10 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ShowProductHSN")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ShowShippingAddress")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -1427,6 +1470,9 @@ namespace LMPTS.Infrastructure.Migrations
 
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
+
+                    b.Property<string>("DocSnapshot")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("GrandTotal")
                         .HasColumnType("decimal(18,2)");
@@ -1594,6 +1640,9 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
+                    b.Property<string>("DocSnapshot")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<decimal>("PaidAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -1701,7 +1750,7 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasDefaultValueSql("GETDATE()");
 
                     b.Property<DateTime?>("EndDate")
-                        .HasColumnType("date");
+                        .HasColumnType("datetime2");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -1710,22 +1759,33 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("PaymentMethod")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("PaymentReference")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("PlanType")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)")
-                        .HasDefaultValue("free");
+                        .HasDefaultValue("trial");
 
                     b.Property<decimal?>("PricePaid")
                         .HasColumnType("decimal(10,2)");
 
+                    b.Property<string>("ProviderPaymentId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<DateTime>("StartDate")
-                        .HasColumnType("date");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -1737,9 +1797,70 @@ namespace LMPTS.Infrastructure.Migrations
 
                     b.HasKey("SubscriptionId");
 
+                    b.HasIndex("ProviderPaymentId")
+                        .IsUnique()
+                        .HasFilter("[ProviderPaymentId] IS NOT NULL");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Subscriptions_OneTrialPerUser")
+                        .HasFilter("[PlanType] = 'trial'");
+
                     b.HasIndex("UserId", "IsActive");
 
                     b.ToTable("Subscriptions");
+                });
+
+            modelBuilder.Entity("LMPTS.Domain.Entities.SubscriptionPayment", b =>
+                {
+                    b.Property<int>("SubscriptionPaymentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SubscriptionPaymentId"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("OrderRef")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ProviderQrId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("QrImageUrl")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("SubscriptionPaymentId");
+
+                    b.HasIndex("OrderRef")
+                        .IsUnique();
+
+                    b.HasIndex("ProviderQrId");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("SubscriptionPayments");
                 });
 
             modelBuilder.Entity("LMPTS.Domain.Entities.User", b =>
@@ -1992,6 +2113,9 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<decimal>("NetAmount")
                         .HasColumnType("decimal(10,2)");
 
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(2)
@@ -2009,7 +2133,9 @@ namespace LMPTS.Infrastructure.Migrations
 
                     b.HasIndex("AttendanceDate");
 
-                    b.HasIndex("WorkerId", "AttendanceDate")
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("WorkerId", "ProjectId", "AttendanceDate")
                         .IsUnique();
 
                     b.ToTable("WorkerAttendances");
@@ -2529,6 +2655,17 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("LMPTS.Domain.Entities.SubscriptionPayment", b =>
+                {
+                    b.HasOne("LMPTS.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("LMPTS.Domain.Entities.Worker", b =>
                 {
                     b.HasOne("LMPTS.Domain.Entities.Project", "Project")
@@ -2553,11 +2690,19 @@ namespace LMPTS.Infrastructure.Migrations
 
             modelBuilder.Entity("LMPTS.Domain.Entities.WorkerAttendance", b =>
                 {
+                    b.HasOne("LMPTS.Domain.Entities.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("LMPTS.Domain.Entities.Worker", "Worker")
                         .WithMany("Attendances")
                         .HasForeignKey("WorkerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Project");
 
                     b.Navigation("Worker");
                 });

@@ -255,46 +255,11 @@ namespace LMPTS.API.Controllers
             }
         }
 
-        [HttpPut("{id}/activate")]
-        public async Task<IActionResult> ActivateWorker(int id, [FromBody] ActivateWorkerRequestDto request)
-        {
-            try
-            {
-                var worker = await _context.Workers
-                    .Include(w => w.InactivePeriods)
-                    .FirstOrDefaultAsync(w => w.Id == id && w.IsActive);
-
-                if (worker == null)
-                {
-                    return NotFound(new { message = "Worker not found." });
-                }
-
-                worker.IsCurrentlyActive = true;
-                worker.LastUpdatedAt = DateTime.UtcNow;
-
-                // Close out the most recent open inactive period — mirrors the
-                // frontend's own "last open period" logic so both stay in sync.
-                var openPeriod = worker.InactivePeriods
-                    .Where(p => p.ReactivatedOn == null)
-                    .OrderByDescending(p => p.DeactivatedOn)
-                    .FirstOrDefault();
-
-                if (openPeriod != null)
-                {
-                    openPeriod.ReactivatedOn = request.ActivationDate.Date;
-                }
-
-                _context.Workers.Update(worker);
-                await _context.SaveChangesAsync();
-
-                return Ok(new { message = "Worker activated successfully." });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error activating worker {id}");
-                return StatusCode(500, new { message = "An error occurred while activating the worker." });
-            }
-        }
+        // Reactivation was intentionally removed: once a worker is deactivated it is
+        // permanent (see DeactivateWorker above) - there is no matching
+        // "PUT {id}/activate" endpoint any more, and the frontend's Reactivate button
+        // was removed to match. ActivateWorkerRequestDto in WorkerActivationDtos.cs is
+        // now unused and can be deleted if you want to fully clean this up.
 
         // Helper Methods
         private WorkerResponseDto MapToWorkerResponse(Worker worker)

@@ -19,6 +19,7 @@ namespace LMPTS.Application.DTOs
         public string? TaxLabel { get; set; }
         public string? TaxNumber { get; set; }
         public string? State { get; set; }
+        public string? PinCode { get; set; }
         public string? BankAccountName { get; set; }
         public string? BankAccountNumber { get; set; }
         public string? BankName { get; set; }

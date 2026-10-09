@@ -73,6 +73,9 @@ namespace LMPTS.Domain.Entities
 
         public bool IsTaxable { get; set; } = false; // Added default
 
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal GstPercent { get; set; } = 0;
+
         [Column(TypeName = "datetime")]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

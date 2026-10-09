@@ -80,6 +80,8 @@ namespace LMPTS.Domain.Entities
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal GrandTotal { get; set; } = 0;
+        public string? DocSnapshot { get; set; }
+
     }
 
     [Table("PurchaseOrders")]
@@ -91,6 +93,7 @@ namespace LMPTS.Domain.Entities
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal GrandTotal { get; set; } = 0;
+        public string? DocSnapshot { get; set; }
     }
 
     [Table("ProformaInvoices")]
@@ -114,6 +117,7 @@ namespace LMPTS.Domain.Entities
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal BalanceDue { get; set; } = 0;
+        public string? DocSnapshot { get; set; }
 
     }
 
@@ -138,6 +142,7 @@ namespace LMPTS.Domain.Entities
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal BalanceDue { get; set; } = 0;
+        public string? DocSnapshot { get; set; }
 
     }
 
@@ -150,6 +155,7 @@ namespace LMPTS.Domain.Entities
 
         [MaxLength(50)]
         public string? RefNo { get; set; }
+        public string? DocSnapshot { get; set; }
     }
 
     [Table("Receipts")]
@@ -182,6 +188,7 @@ namespace LMPTS.Domain.Entities
         public decimal PaidAmount { get; set; } = 0; // Changed to non-nullable with default
 
         public string? PaymentFor { get; set; }
+        public string? DocSnapshot { get; set; }
 
         // Snapshot fields
         [MaxLength(100)]

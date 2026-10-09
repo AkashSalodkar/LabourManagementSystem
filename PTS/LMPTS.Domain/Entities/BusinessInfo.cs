@@ -53,6 +53,9 @@ namespace LMPTS.Domain.Entities
         [MaxLength(50)]
         public string? State { get; set; }
 
+        [MaxLength(50)]
+        public string? PinCode { get; set; }
+
         [MaxLength(100)]
         public string? BankAccountName { get; set; }
 

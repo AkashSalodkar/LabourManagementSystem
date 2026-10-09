@@ -48,6 +48,7 @@ namespace LMPTS.Domain.Entities
         public string DiscountType { get; set; } = "No Discount";
         public string TaxType { get; set; } = "No Tax";
         public string ShowProductHSN { get; set; } = "No";
+        public string ShowShippingAddress { get; set; } = "No";
         public string TopMessage { get; set; } = "";
         public string BottomMessage { get; set; } = "";
         public string ShowBankInfo { get; set; } = "Yes";
@@ -61,6 +62,7 @@ namespace LMPTS.Domain.Entities
         public string DiscountType { get; set; } = "No Discount";
         public string TaxType { get; set; } = "No Tax";
         public string ShowProductHSN { get; set; } = "No";
+        public string ShowShippingAddress { get; set; } = "No";
         public string TopMessage { get; set; } = "";
         public string BottomMessage { get; set; } = "";
         public string ShowBankInfo { get; set; } = "No";
@@ -74,6 +76,7 @@ namespace LMPTS.Domain.Entities
         public string DiscountType { get; set; } = "No Discount";
         public string TaxType { get; set; } = "No Tax";
         public string ShowProductHSN { get; set; } = "No";
+        public string ShowShippingAddress { get; set; } = "No";
         public string TopMessage { get; set; } = "";
         public string BottomMessage { get; set; } = "";
         public string ShowBankInfo { get; set; } = "No";
@@ -85,8 +88,11 @@ namespace LMPTS.Domain.Entities
     public class DeliveryNoteSetting : DocumentSetting
     {
         public string ShowProductHSN { get; set; } = "No";
+        public string ShowShippingAddress { get; set; } = "No";
         public string TopMessage { get; set; } = "";
         public string BottomMessage { get; set; } = "";
+        public string ShowBankInfo { get; set; } = "No";
+        public string ShowUpiInfo { get; set; } = "No";
         public string ShowSignature { get; set; } = "Yes";
     }
 

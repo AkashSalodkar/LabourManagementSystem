@@ -8,6 +8,9 @@ namespace LMPTS.Application.DTOs
         public int WorkerId { get; set; }
 
         [Required]
+        public int ProjectId { get; set; }
+
+        [Required]
         public DateTime AttendanceDate { get; set; }
 
         [Required]
@@ -31,6 +34,7 @@ namespace LMPTS.Application.DTOs
     {
         public int AttendanceId { get; set; }
         public int WorkerId { get; set; }
+        public int ProjectId { get; set; }
         public string WorkerName { get; set; } = string.Empty;
         public DateTime AttendanceDate { get; set; }
         public string Status { get; set; } = string.Empty;

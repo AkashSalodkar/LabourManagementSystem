@@ -70,8 +70,14 @@ namespace LMPTS.Application.DTOs
         public string FullName { get; set; } = string.Empty;
 
         // Base64 data URL (e.g. "data:image/jpeg;base64,...") sent from the client,
-        // or null/empty to leave the existing photo unchanged.
+        // or null/empty to leave the existing photo unchanged. Ignored when
+        // RemoveProfileImage is true.
         public string? ProfileImage { get; set; }
+
+        // Explicit signal that the user tapped "Remove Photo". Needed because a plain
+        // null/empty ProfileImage is indistinguishable from "client didn't touch the photo" -
+        // without this flag the photo could never actually be cleared.
+        public bool RemoveProfileImage { get; set; }
     }
 
     public class OtpResponseDto

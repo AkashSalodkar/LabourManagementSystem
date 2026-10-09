@@ -1,6 +1,8 @@
 using LMPTS.Domain.Entities;
 using LMPTS.Infrastructure.Data;
 using LMPTS.Infrastructure.Sms;
+using LMPTS.Controllers;
+using LMPTS.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
@@ -8,7 +10,12 @@ using Google.Apis.Auth.OAuth2;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // ✅ Blocks data endpoints with HTTP 402 once the free trial / paid period is over.
+    // Login, /api/subscription/* (status, QR order, payment webhook) are exempt inside the filter.
+    options.Filters.AddService<SubscriptionRequiredFilter>();
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -16,6 +23,13 @@ builder.Services.AddSwaggerGen();
 // App Service Application Settings (Msg91__AuthKey etc.), never committed to source.
 builder.Services.Configure<Msg91Settings>(builder.Configuration.GetSection("Msg91"));
 builder.Services.AddHttpClient<ISmsService, Msg91SmsService>();
+
+// ✅ Subscription: 30-day free trial (starts on first login), then Rs.99 / 30 days via UPI.
+// The payment gateway (Razorpay UPI QR) credentials come from App Service Application Settings:
+//   Razorpay__KeyId, Razorpay__KeySecret, Razorpay__WebhookSecret  - never commit them to source.
+builder.Services.AddHttpClient(); // IHttpClientFactory, used by SubscriptionController to call the gateway
+builder.Services.AddScoped<SubscriptionService>();
+builder.Services.AddScoped<SubscriptionRequiredFilter>();
 
 // Database Context
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -130,6 +144,17 @@ else
         // if a developer hasn't set up their local Firebase credentials yet.
         Console.WriteLine("⚠ Firebase credentials not found (FIREBASE_CREDENTIALS_JSON / FirebaseCredentialsPath). " +
             "Phone-auth login/register endpoints will fail until this is configured.");
+    }
+}
+
+// ✅ Warn loudly (without taking the whole app down) if payment settings are missing.
+// Without them trial users are unaffected, but nobody can pay once their trial ends.
+foreach (var razorpayKey in new[] { "Razorpay:KeyId", "Razorpay:KeySecret", "Razorpay:WebhookSecret" })
+{
+    if (string.IsNullOrWhiteSpace(builder.Configuration[razorpayKey]))
+    {
+        Console.WriteLine($"⚠ {razorpayKey} is not configured. UPI subscription payments will fail until it is set " +
+            "(App Service Application Settings, e.g. Razorpay__KeyId).");
     }
 }
 

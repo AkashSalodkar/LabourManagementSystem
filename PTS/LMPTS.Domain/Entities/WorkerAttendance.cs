@@ -13,6 +13,13 @@ namespace LMPTS.Domain.Entities
         [Required]
         public int WorkerId { get; set; }
 
+        // Which project this attendance was recorded under. Historically inferred from
+        // Worker.ProjectId, but a worker's current project can change over time, so the
+        // attendance record needs its own copy to stay accurate against the project it
+        // was actually marked for.
+        [Required]
+        public int ProjectId { get; set; }
+
         [Required]
         [Column(TypeName = "date")]
         public DateTime AttendanceDate { get; set; }
@@ -35,6 +42,9 @@ namespace LMPTS.Domain.Entities
 
         [ForeignKey(nameof(WorkerId))]
         public virtual Worker Worker { get; set; } = null!;
+
+        [ForeignKey(nameof(ProjectId))]
+        public virtual Project Project { get; set; } = null!;
     }
 
     public enum AttendanceStatus

@@ -286,10 +286,16 @@ namespace LMPTS.API.Controllers
 
                 user.FullName = request.FullName.Trim();
 
-                // Empty string means "no change" (client didn't pick a new photo);
-                // an explicit new data URL replaces the stored photo.
-                if (!string.IsNullOrEmpty(request.ProfileImage))
+                if (request.RemoveProfileImage)
                 {
+                    // User explicitly tapped "Remove Photo" - clear it regardless of
+                    // whatever (empty/null) value came in ProfileImage.
+                    user.ProfileImage = null;
+                }
+                else if (!string.IsNullOrEmpty(request.ProfileImage))
+                {
+                    // Empty/null means "no change" (client didn't pick a new photo);
+                    // an explicit new data URL replaces the stored photo.
                     user.ProfileImage = request.ProfileImage;
                 }
 

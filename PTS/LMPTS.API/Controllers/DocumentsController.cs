@@ -39,7 +39,13 @@ namespace LMPTS.API.Controllers
                 var chargesMap = await GetOtherChargesMapAsync("Quotation", ids);
                 var termsMap = await GetTermSelectionsMapAsync("Quotation", ids);
 
-                return Ok(quotations.Select(q => MapQuotationToResponse(q, productsMap[q.Id], chargesMap[q.Id], termsMap[q.Id])));
+                // includeSnapshot: false - DocSnapshot carries a per-document copy of the
+                // business logo/signature/QR (base64) purely so a single quotation can be
+                // reprinted exactly as it looked when created. The list screen never reads
+                // it (see DocumentListCard), so sending it for every row here made this
+                // endpoint's payload grow with quotation count * image size. It's fetched
+                // on demand instead, via GetQuotation, when a specific quotation is opened.
+                return Ok(quotations.Select(q => MapQuotationToResponse(q, productsMap[q.Id], chargesMap[q.Id], termsMap[q.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
             {
@@ -241,7 +247,8 @@ namespace LMPTS.API.Controllers
                 var termsMap = await GetTermSelectionsMapAsync("Invoice", ids);
                 var paidInfosMap = await GetPaidInfosMapAsync("Invoice", ids);
 
-                return Ok(invoices.Select(i => MapInvoiceToResponse(i, productsMap[i.Id], chargesMap[i.Id], termsMap[i.Id], paidInfosMap[i.Id])));
+                // includeSnapshot: false - see the identical note on GetQuotations above.
+                return Ok(invoices.Select(i => MapInvoiceToResponse(i, productsMap[i.Id], chargesMap[i.Id], termsMap[i.Id], paidInfosMap[i.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
             {
@@ -450,7 +457,8 @@ namespace LMPTS.API.Controllers
                 var chargesMap = await GetOtherChargesMapAsync("PurchaseOrder", ids);
                 var termsMap = await GetTermSelectionsMapAsync("PurchaseOrder", ids);
 
-                return Ok(purchaseOrders.Select(p => MapPurchaseOrderToResponse(p, productsMap[p.Id], chargesMap[p.Id], termsMap[p.Id])));
+                // includeSnapshot: false - see the identical note on GetQuotations above.
+                return Ok(purchaseOrders.Select(p => MapPurchaseOrderToResponse(p, productsMap[p.Id], chargesMap[p.Id], termsMap[p.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
             {
@@ -677,7 +685,8 @@ namespace LMPTS.API.Controllers
                 var termsMap = await GetTermSelectionsMapAsync("ProformaInvoice", ids);
                 var paidInfosMap = await GetPaidInfosMapAsync("ProformaInvoice", ids);
 
-                return Ok(proformaInvoices.Select(p => MapProformaInvoiceToResponse(p, productsMap[p.Id], chargesMap[p.Id], termsMap[p.Id], paidInfosMap[p.Id])));
+                // includeSnapshot: false - see the identical note on GetQuotations above.
+                return Ok(proformaInvoices.Select(p => MapProformaInvoiceToResponse(p, productsMap[p.Id], chargesMap[p.Id], termsMap[p.Id], paidInfosMap[p.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
             {
@@ -928,7 +937,8 @@ namespace LMPTS.API.Controllers
                 var chargesMap = await GetOtherChargesMapAsync("DeliveryNote", ids);
                 var termsMap = await GetTermSelectionsMapAsync("DeliveryNote", ids);
 
-                return Ok(deliveryNotes.Select(d => MapDeliveryNoteToResponse(d, productsMap[d.Id], chargesMap[d.Id], termsMap[d.Id])));
+                // includeSnapshot: false - see the identical note on GetQuotations above.
+                return Ok(deliveryNotes.Select(d => MapDeliveryNoteToResponse(d, productsMap[d.Id], chargesMap[d.Id], termsMap[d.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
             {
@@ -1169,7 +1179,8 @@ namespace LMPTS.API.Controllers
                     .OrderByDescending(r => r.CreatedAt)
                     .ToListAsync();
 
-                return Ok(receipts.Select(r => MapReceiptToResponse(r)));
+                // includeSnapshot: false - see the identical note on GetQuotations above.
+                return Ok(receipts.Select(r => MapReceiptToResponse(r, includeSnapshot: false)));
             }
             catch (Exception ex)
             {
@@ -1402,6 +1413,31 @@ namespace LMPTS.API.Controllers
             {
                 _logger.LogError(ex, "Error creating term for user {UserId}", userId);
                 return StatusCode(500, new { message = "An error occurred while creating the term." });
+            }
+        }
+
+        [HttpPut("terms/{id}")]
+        public async Task<IActionResult> UpdateTerm(int id, [FromBody] DocumentTermDto request)
+        {
+            try
+            {
+                var term = await _context.DocumentTerms.FindAsync(id);
+                if (term == null)
+                {
+                    return NotFound(new { message = "Term not found." });
+                }
+
+                term.Text = request.Text;
+                term.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new DocumentTermDto { Id = term.Id.ToString(), Text = term.Text });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating term {Id}", id);
+                return StatusCode(500, new { message = "An error occurred while updating the term." });
             }
         }
 
@@ -1645,7 +1681,7 @@ namespace LMPTS.API.Controllers
         private decimal CalculateGrandTotal(List<DocumentProductDto> products, List<DocumentOtherChargeDto> otherCharges)
         {
             decimal productTotal = products.Sum(p => p.Price * p.Qty * (1 + p.Gst / 100));
-            decimal chargesTotal = otherCharges.Sum(c => c.Amount);
+            decimal chargesTotal = otherCharges.Sum(c => c.Amount * (1 + (c.Taxable ? c.GstPercent / 100 : 0)));
             return Math.Round(productTotal + chargesTotal, 2);
         }
 
@@ -1723,6 +1759,7 @@ namespace LMPTS.API.Controllers
                         Label = c.Label ?? "Other Charges",
                         Amount = c.Amount > 0 ? c.Amount : 0,
                         IsTaxable = c.Taxable,
+                        GstPercent = c.Taxable && c.GstPercent > 0 ? c.GstPercent : 0,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     });
@@ -1841,7 +1878,10 @@ namespace LMPTS.API.Controllers
         // MAPPING METHODS - QUOTATION
         // ============================================================
 
-        private QuotationResponseDto MapQuotationToResponse(Quotation q, IEnumerable<DocumentProduct> qProducts, IEnumerable<DocumentOtherCharge> qCharges, IEnumerable<DocumentTermSelection> qTerms)
+        // includeSnapshot defaults to true so GetQuotation (single), CreateQuotation and
+        // UpdateQuotation - which all need the real DocSnapshot for preview/PDF/share -
+        // are unaffected. Only GetQuotations (the list endpoint) passes false.
+        private QuotationResponseDto MapQuotationToResponse(Quotation q, IEnumerable<DocumentProduct> qProducts, IEnumerable<DocumentOtherCharge> qCharges, IEnumerable<DocumentTermSelection> qTerms, bool includeSnapshot = true)
         {
             return new QuotationResponseDto
             {
@@ -1853,6 +1893,7 @@ namespace LMPTS.API.Controllers
                 CustomerId = q.CustomerId,
                 CustomerName = q.CustomerName,
                 CustomerCompany = q.CustomerCompany,
+                DocSnapshot = includeSnapshot ? q.DocSnapshot : null,
                 CustomerMobile = q.CustomerMobile,
                 CustomerEmail = q.CustomerEmail,
                 CustomerAddressLine1 = q.CustomerAddressLine1,
@@ -1876,7 +1917,8 @@ namespace LMPTS.API.Controllers
                     Id = c.Id.ToString(),
                     Label = c.Label,
                     Amount = c.Amount,
-                    Taxable = c.IsTaxable
+                    Taxable = c.IsTaxable,
+                    GstPercent = c.GstPercent
                 }).ToList(),
                 TermsIds = qTerms.Select(t => t.TermId.ToString()).ToList(),
                 GrandTotal = q.GrandTotal,
@@ -1904,13 +1946,14 @@ namespace LMPTS.API.Controllers
             entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
             entity.CustomerBillingAddress = dto.CustomerBillingAddress;
             entity.CustomerShippingAddress = dto.CustomerShippingAddress;
+            entity.DocSnapshot = dto.DocSnapshot;
         }
 
         // ============================================================
         // MAPPING METHODS - INVOICE
         // ============================================================
 
-        private InvoiceResponseDto MapInvoiceToResponse(Invoice inv, IEnumerable<DocumentProduct> invProducts, IEnumerable<DocumentOtherCharge> invCharges, IEnumerable<DocumentTermSelection> invTerms, IEnumerable<DocumentPaidInfo> invPaidInfos)
+        private InvoiceResponseDto MapInvoiceToResponse(Invoice inv, IEnumerable<DocumentProduct> invProducts, IEnumerable<DocumentOtherCharge> invCharges, IEnumerable<DocumentTermSelection> invTerms, IEnumerable<DocumentPaidInfo> invPaidInfos, bool includeSnapshot = true)
         {
             return new InvoiceResponseDto
             {
@@ -1924,6 +1967,7 @@ namespace LMPTS.API.Controllers
                 CustomerId = inv.CustomerId,
                 CustomerName = inv.CustomerName,
                 CustomerCompany = inv.CustomerCompany,
+                DocSnapshot = includeSnapshot ? inv.DocSnapshot : null,
                 CustomerMobile = inv.CustomerMobile,
                 CustomerEmail = inv.CustomerEmail,
                 CustomerAddressLine1 = inv.CustomerAddressLine1,
@@ -1947,7 +1991,8 @@ namespace LMPTS.API.Controllers
                     Id = c.Id.ToString(),
                     Label = c.Label,
                     Amount = c.Amount,
-                    Taxable = c.IsTaxable
+                    Taxable = c.IsTaxable,
+                    GstPercent = c.GstPercent
                 }).ToList(),
                 TermsIds = invTerms.Select(t => t.TermId.ToString()).ToList(),
                 PaidInfo = invPaidInfos.Select(p => new DocumentPaidInfoDto
@@ -1987,13 +2032,14 @@ namespace LMPTS.API.Controllers
             entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
             entity.CustomerBillingAddress = dto.CustomerBillingAddress;
             entity.CustomerShippingAddress = dto.CustomerShippingAddress;
+            entity.DocSnapshot = dto.DocSnapshot;
         }
 
         // ============================================================
         // MAPPING METHODS - PURCHASE ORDER
         // ============================================================
 
-        private PurchaseOrderResponseDto MapPurchaseOrderToResponse(PurchaseOrder po, IEnumerable<DocumentProduct> poProducts, IEnumerable<DocumentOtherCharge> poCharges, IEnumerable<DocumentTermSelection> poTerms)
+        private PurchaseOrderResponseDto MapPurchaseOrderToResponse(PurchaseOrder po, IEnumerable<DocumentProduct> poProducts, IEnumerable<DocumentOtherCharge> poCharges, IEnumerable<DocumentTermSelection> poTerms, bool includeSnapshot = true)
         {
             return new PurchaseOrderResponseDto
             {
@@ -2005,6 +2051,7 @@ namespace LMPTS.API.Controllers
                 CustomerId = po.CustomerId,
                 CustomerName = po.CustomerName,
                 CustomerCompany = po.CustomerCompany,
+                DocSnapshot = includeSnapshot ? po.DocSnapshot : null,
                 CustomerMobile = po.CustomerMobile,
                 CustomerEmail = po.CustomerEmail,
                 CustomerAddressLine1 = po.CustomerAddressLine1,
@@ -2028,7 +2075,8 @@ namespace LMPTS.API.Controllers
                     Id = c.Id.ToString(),
                     Label = c.Label,
                     Amount = c.Amount,
-                    Taxable = c.IsTaxable
+                    Taxable = c.IsTaxable,
+                    GstPercent = c.GstPercent
                 }).ToList(),
                 TermsIds = poTerms.Select(t => t.TermId.ToString()).ToList(),
                 GrandTotal = po.GrandTotal,
@@ -2054,13 +2102,14 @@ namespace LMPTS.API.Controllers
             entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
             entity.CustomerBillingAddress = dto.CustomerBillingAddress;
             entity.CustomerShippingAddress = dto.CustomerShippingAddress;
+            entity.DocSnapshot = dto.DocSnapshot;
         }
 
         // ============================================================
         // MAPPING METHODS - PROFORMA INVOICE
         // ============================================================
 
-        private ProformaInvoiceResponseDto MapProformaInvoiceToResponse(ProformaInvoice pi, IEnumerable<DocumentProduct> piProducts, IEnumerable<DocumentOtherCharge> piCharges, IEnumerable<DocumentTermSelection> piTerms, IEnumerable<DocumentPaidInfo> piPaidInfos)
+        private ProformaInvoiceResponseDto MapProformaInvoiceToResponse(ProformaInvoice pi, IEnumerable<DocumentProduct> piProducts, IEnumerable<DocumentOtherCharge> piCharges, IEnumerable<DocumentTermSelection> piTerms, IEnumerable<DocumentPaidInfo> piPaidInfos, bool includeSnapshot = true)
         {
             return new ProformaInvoiceResponseDto
             {
@@ -2074,6 +2123,7 @@ namespace LMPTS.API.Controllers
                 CustomerId = pi.CustomerId,
                 CustomerName = pi.CustomerName,
                 CustomerCompany = pi.CustomerCompany,
+                DocSnapshot = includeSnapshot ? pi.DocSnapshot : null,
                 CustomerMobile = pi.CustomerMobile,
                 CustomerEmail = pi.CustomerEmail,
                 CustomerAddressLine1 = pi.CustomerAddressLine1,
@@ -2097,7 +2147,8 @@ namespace LMPTS.API.Controllers
                     Id = c.Id.ToString(),
                     Label = c.Label,
                     Amount = c.Amount,
-                    Taxable = c.IsTaxable
+                    Taxable = c.IsTaxable,
+                    GstPercent = c.GstPercent
                 }).ToList(),
                 TermsIds = piTerms.Select(t => t.TermId.ToString()).ToList(),
                 PaidInfo = piPaidInfos.Select(p => new DocumentPaidInfoDto
@@ -2135,13 +2186,14 @@ namespace LMPTS.API.Controllers
             entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
             entity.CustomerBillingAddress = dto.CustomerBillingAddress;
             entity.CustomerShippingAddress = dto.CustomerShippingAddress;
+            entity.DocSnapshot = dto.DocSnapshot;
         }
 
         // ============================================================
         // MAPPING METHODS - DELIVERY NOTE
         // ============================================================
 
-        private DeliveryNoteResponseDto MapDeliveryNoteToResponse(DeliveryNote dn, IEnumerable<DocumentProduct> dnProducts, IEnumerable<DocumentOtherCharge> dnCharges, IEnumerable<DocumentTermSelection> dnTerms)
+        private DeliveryNoteResponseDto MapDeliveryNoteToResponse(DeliveryNote dn, IEnumerable<DocumentProduct> dnProducts, IEnumerable<DocumentOtherCharge> dnCharges, IEnumerable<DocumentTermSelection> dnTerms, bool includeSnapshot = true)
         {
             return new DeliveryNoteResponseDto
             {
@@ -2154,6 +2206,7 @@ namespace LMPTS.API.Controllers
                 CustomerId = dn.CustomerId,
                 CustomerName = dn.CustomerName,
                 CustomerCompany = dn.CustomerCompany,
+                DocSnapshot = includeSnapshot ? dn.DocSnapshot : null,
                 CustomerMobile = dn.CustomerMobile,
                 CustomerEmail = dn.CustomerEmail,
                 CustomerAddressLine1 = dn.CustomerAddressLine1,
@@ -2177,7 +2230,8 @@ namespace LMPTS.API.Controllers
                     Id = c.Id.ToString(),
                     Label = c.Label,
                     Amount = c.Amount,
-                    Taxable = c.IsTaxable
+                    Taxable = c.IsTaxable,
+                    GstPercent = c.GstPercent
                 }).ToList(),
                 TermsIds = dnTerms.Select(t => t.TermId.ToString()).ToList(),
                 Status = dn.Status,
@@ -2203,13 +2257,14 @@ namespace LMPTS.API.Controllers
             entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
             entity.CustomerBillingAddress = dto.CustomerBillingAddress;
             entity.CustomerShippingAddress = dto.CustomerShippingAddress;
+            entity.DocSnapshot = dto.DocSnapshot;
         }
 
         // ============================================================
         // MAPPING METHODS - RECEIPT
         // ============================================================
 
-        private ReceiptResponseDto MapReceiptToResponse(Receipt r)
+        private ReceiptResponseDto MapReceiptToResponse(Receipt r, bool includeSnapshot = true)
         {
             return new ReceiptResponseDto
             {
@@ -2220,6 +2275,7 @@ namespace LMPTS.API.Controllers
                 CustomerId = r.CustomerId,
                 CustomerName = r.CustomerName,
                 CustomerCompany = r.CustomerCompany,
+                DocSnapshot = includeSnapshot ? r.DocSnapshot : null,
                 CustomerMobile = r.CustomerMobile,
                 CustomerEmail = r.CustomerEmail,
                 CustomerAddressLine1 = r.CustomerAddressLine1,
@@ -2260,6 +2316,7 @@ namespace LMPTS.API.Controllers
             // FIX: Handle nullable decimal properly
             entity.PaidAmount = dto.PaidAmount ?? 0; // Use null-coalescing operator
             entity.PaymentFor = dto.PaymentFor;
+            entity.DocSnapshot = dto.DocSnapshot;
         }
 
         // ============================================================
@@ -2308,6 +2365,7 @@ namespace LMPTS.API.Controllers
                 DiscountType = s.DiscountType,
                 TaxType = s.TaxType,
                 ShowProductHSN = s.ShowProductHSN,
+                ShowShippingAddress = s.ShowShippingAddress,
                 TopMessage = s.TopMessage,
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
@@ -2323,6 +2381,7 @@ namespace LMPTS.API.Controllers
             entity.DiscountType = dto.DiscountType;
             entity.TaxType = dto.TaxType;
             entity.ShowProductHSN = dto.ShowProductHSN;
+            entity.ShowShippingAddress = dto.ShowShippingAddress;
             entity.TopMessage = dto.TopMessage;
             entity.BottomMessage = dto.BottomMessage;
             entity.ShowBankInfo = dto.ShowBankInfo;
@@ -2339,6 +2398,7 @@ namespace LMPTS.API.Controllers
                 DiscountType = s.DiscountType,
                 TaxType = s.TaxType,
                 ShowProductHSN = s.ShowProductHSN,
+                ShowShippingAddress = s.ShowShippingAddress,
                 TopMessage = s.TopMessage,
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
@@ -2354,6 +2414,7 @@ namespace LMPTS.API.Controllers
             entity.DiscountType = dto.DiscountType;
             entity.TaxType = dto.TaxType;
             entity.ShowProductHSN = dto.ShowProductHSN;
+            entity.ShowShippingAddress = dto.ShowShippingAddress;
             entity.TopMessage = dto.TopMessage;
             entity.BottomMessage = dto.BottomMessage;
             entity.ShowBankInfo = dto.ShowBankInfo;
@@ -2370,6 +2431,7 @@ namespace LMPTS.API.Controllers
                 DiscountType = s.DiscountType,
                 TaxType = s.TaxType,
                 ShowProductHSN = s.ShowProductHSN,
+                ShowShippingAddress = s.ShowShippingAddress,
                 TopMessage = s.TopMessage,
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
@@ -2385,6 +2447,7 @@ namespace LMPTS.API.Controllers
             entity.DiscountType = dto.DiscountType;
             entity.TaxType = dto.TaxType;
             entity.ShowProductHSN = dto.ShowProductHSN;
+            entity.ShowShippingAddress = dto.ShowShippingAddress;
             entity.TopMessage = dto.TopMessage;
             entity.BottomMessage = dto.BottomMessage;
             entity.ShowBankInfo = dto.ShowBankInfo;
@@ -2399,8 +2462,11 @@ namespace LMPTS.API.Controllers
                 NumberPrefix = s.NumberPrefix,
                 SerialNumber = s.SerialNumber,
                 ShowProductHSN = s.ShowProductHSN,
+                ShowShippingAddress = s.ShowShippingAddress,
                 TopMessage = s.TopMessage,
                 BottomMessage = s.BottomMessage,
+                ShowBankInfo = s.ShowBankInfo,
+                ShowUpiInfo = s.ShowUpiInfo,
                 ShowSignature = s.ShowSignature
             };
         }
@@ -2410,8 +2476,11 @@ namespace LMPTS.API.Controllers
             entity.NumberPrefix = dto.NumberPrefix;
             entity.SerialNumber = dto.SerialNumber;
             entity.ShowProductHSN = dto.ShowProductHSN;
+            entity.ShowShippingAddress = dto.ShowShippingAddress;
             entity.TopMessage = dto.TopMessage;
             entity.BottomMessage = dto.BottomMessage;
+            entity.ShowBankInfo = dto.ShowBankInfo;
+            entity.ShowUpiInfo = dto.ShowUpiInfo;
             entity.ShowSignature = dto.ShowSignature;
         }
 

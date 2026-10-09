@@ -1,4 +1,4 @@
-﻿using LMPTS.Domain.Entities;
+using LMPTS.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection.Emit;
 
@@ -24,6 +24,7 @@ namespace LMPTS.Infrastructure.Data
         public DbSet<WorkerMonthlyStatement> WorkerMonthlyStatements { get; set; }
         public DbSet<WorkerInactivePeriod> WorkerInactivePeriods { get; set; }
         public DbSet<Subscription> Subscriptions { get; set; }
+        public DbSet<SubscriptionPayment> SubscriptionPayments { get; set; }
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
         public DbSet<DashboardStats> DashboardStats { get; set; }
@@ -124,8 +125,19 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.NetAmount).HasColumnType("decimal(10,2)");
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
-                entity.HasIndex(e => new { e.WorkerId, e.AttendanceDate }).IsUnique();
+                // Was (WorkerId, AttendanceDate) - widened to include ProjectId now that a
+                // single day's attendance is scoped per project a worker was marked under.
+                entity.HasIndex(e => new { e.WorkerId, e.ProjectId, e.AttendanceDate }).IsUnique();
                 entity.HasIndex(e => e.AttendanceDate);
+                entity.HasIndex(e => e.ProjectId);
+                // Restrict, not Cascade: Attendance already cascades to Worker, and Worker
+                // cascades to Project - a second cascading path from Attendance straight to
+                // Project would give SQL Server multiple cascade paths to the same table,
+                // which it rejects at migration time.
+                entity.HasOne(e => e.Project)
+                    .WithMany()
+                    .HasForeignKey(e => e.ProjectId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             // WorkerWageOverride Configuration
@@ -207,18 +219,56 @@ namespace LMPTS.Infrastructure.Data
             });
 
             // Subscription Configuration
+            // One row per access period: PlanType "trial" (exactly one per user) or "monthly" (one per verified UPI payment).
             modelBuilder.Entity<Subscription>(entity =>
             {
                 entity.HasKey(e => e.SubscriptionId);
-                entity.Property(e => e.PlanType).IsRequired().HasMaxLength(20).HasDefaultValue("free");
-                entity.Property(e => e.StartDate).HasColumnType("date");
-                entity.Property(e => e.EndDate).HasColumnType("date");
+                entity.Property(e => e.PlanType).IsRequired().HasMaxLength(20).HasDefaultValue("trial");
+                // Was "date". Trial/paid periods need the exact time, stored in UTC.
+                entity.Property(e => e.StartDate).HasColumnType("datetime2");
+                entity.Property(e => e.EndDate).HasColumnType("datetime2");
                 entity.Property(e => e.PricePaid).HasColumnType("decimal(10,2)");
                 entity.Property(e => e.PaymentMethod).HasMaxLength(50);
                 entity.Property(e => e.Note).HasMaxLength(255);
+                entity.Property(e => e.ProviderPaymentId).HasMaxLength(64);
+                entity.Property(e => e.PaymentReference).HasMaxLength(64);
+                entity.Property(e => e.PaidAt).HasColumnType("datetime2");
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
                 entity.HasIndex(e => new { e.UserId, e.IsActive });
+
+                // The same gateway payment can never create two subscription periods.
+                entity.HasIndex(e => e.ProviderPaymentId)
+                    .IsUnique()
+                    .HasFilter("[ProviderPaymentId] IS NOT NULL");
+
+                // Exactly one free trial per account, no matter how often the user logs in/out.
+                entity.HasIndex(e => e.UserId)
+                    .IsUnique()
+                    .HasDatabaseName("UX_Subscriptions_OneTrialPerUser")
+                    .HasFilter("[PlanType] = 'trial'");
+            });
+
+            // SubscriptionPayment Configuration (UPI QR orders; become "paid" only via the verified gateway webhook)
+            modelBuilder.Entity<SubscriptionPayment>(entity =>
+            {
+                entity.HasKey(e => e.SubscriptionPaymentId);
+                entity.Property(e => e.OrderRef).IsRequired().HasMaxLength(64);
+                entity.Property(e => e.ProviderQrId).IsRequired().HasMaxLength(64);
+                entity.Property(e => e.QrImageUrl).IsRequired().HasMaxLength(400);
+                entity.Property(e => e.Amount).HasColumnType("decimal(10,2)");
+                entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+                entity.Property(e => e.CreatedAt).HasColumnType("datetime2");
+                entity.Property(e => e.ExpiresAt).HasColumnType("datetime2");
+
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasIndex(e => e.OrderRef).IsUnique();
+                entity.HasIndex(e => e.ProviderQrId);
+                entity.HasIndex(e => new { e.UserId, e.CreatedAt });
             });
 
             // Notification Configuration

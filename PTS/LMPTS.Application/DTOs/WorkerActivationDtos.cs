@@ -7,10 +7,8 @@ namespace LMPTS.Application.DTOs
         public DateTime DeactivationDate { get; set; }
     }
 
-    public class ActivateWorkerRequestDto
-    {
-        public DateTime ActivationDate { get; set; }
-    }
+    // ActivateWorkerRequestDto removed - reactivation was intentionally removed
+    // (see WorkerController.DeactivateWorker); there is no longer an activate endpoint.
 
     public class InactivePeriodDto
     {

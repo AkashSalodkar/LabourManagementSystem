@@ -28,8 +28,12 @@ namespace LMPTS.API.Controllers
                 _logger.LogInformation($"Fetching projects for user: {userId}");
 
                 // Get projects with all related data
+                // No IsActive filter here - deactivated projects must stay fetchable (with
+                // IsActive: false in the response) so they keep showing in the frontend's
+                // Deactive tab. Deactivation is permanent (see DeleteProject) and there is
+                // no reactivate path any more, so nothing depends on hiding them from GET.
                 var projects = await _context.Projects
-                    .Where(p => p.UserId == userId && p.IsActive)
+                    .Where(p => p.UserId == userId)
                     .Include(p => p.Workers)
                         .ThenInclude(w => w.Attendances)
                     .Include(p => p.Workers)
@@ -40,6 +44,7 @@ namespace LMPTS.API.Controllers
                         .ThenInclude(w => w.Bonuses)
                     .Include(p => p.Workers)
                         .ThenInclude(w => w.InactivePeriods)
+                    .AsSplitQuery() // avoids cartesian-product row explosion from 5 sibling one-to-many Includes
                     .ToListAsync();
 
                 _logger.LogInformation($"Found {projects.Count} projects for user {userId}");
@@ -94,7 +99,8 @@ namespace LMPTS.API.Controllers
                         .ThenInclude(w => w.Bonuses)
                     .Include(p => p.Workers)
                         .ThenInclude(w => w.InactivePeriods)
-                    .FirstOrDefaultAsync(p => p.Id == id && p.IsActive);
+                    .AsSplitQuery() // avoids cartesian-product row explosion from 6 sibling one-to-many Includes
+                    .FirstOrDefaultAsync(p => p.Id == id);
 
                 if (project == null)
                 {

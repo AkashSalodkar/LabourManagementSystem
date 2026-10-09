@@ -6,13 +6,49 @@ import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Network } from '@capacitor/network';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
-import { FaEye, FaEyeSlash, FaAddressBook, FaWhatsapp } from 'react-icons/fa';
+import { FaEye, FaEyeSlash, FaAddressBook, FaWhatsapp, FaChevronRight } from 'react-icons/fa';
 import { HiOutlineMail } from 'react-icons/hi';
-import { FiUser, FiPhone, FiChevronDown, FiArrowRight, FiArrowLeft, FiFileText, FiChevronRight, FiBox, FiClipboard, FiSearch, FiPlus, FiTrash2, FiHash, FiList, FiTag, FiDollarSign, FiTruck, FiCreditCard, FiFilter, FiCheck, FiCamera, FiImage, FiEdit3, FiEye } from 'react-icons/fi';
+import { FiUser, FiPhone, FiChevronDown, FiArrowRight, FiArrowLeft, FiFileText, FiChevronRight, FiBox, FiClipboard, FiSearch, FiPlus, FiTrash2, FiHash, FiList, FiTag, FiPercent, FiTruck, FiCreditCard, FiFilter, FiCheck, FiCamera, FiImage, FiEdit3, FiEye } from 'react-icons/fi';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
 import { HiOutlineUserGroup, HiOutlineCalendar, HiOutlineWallet, HiOutlineBuildingOffice2, HiOutlineLightBulb, HiOutlinePencil, HiOutlineCog6Tooth } from 'react-icons/hi2';
 import smartpayLogo from './assets/icon.png';
-import { jsPDF } from 'jspdf';
+
+// ===== jsPDF is loaded on demand =====
+// jsPDF is a large library and is only needed when the user exports/shares a PDF, so it is
+// no longer imported at the top of the file (which forced the WebView to download/parse it
+// on every app start). ensureJsPDF() loads it the first time a PDF is generated.
+let jsPDF = null;
+const ensureJsPDF = async () => {
+  if (jsPDF) return jsPDF;
+  try {
+    jsPDF = (await import('jspdf')).jsPDF;
+  } catch (e) {
+    throw new Error('jsPDF library not loaded');
+  }
+  return jsPDF;
+};
+
+// ===== fetch with timeout =====
+// Plain fetch() waits forever. After the app has been in the background, the old network
+// connection is dead and a request can hang indefinitely, which froze the UI on resume.
+// This aborts the request after a timeout so callers' try/catch/finally blocks always run.
+// Default: 20s for reads, 45s for writes (uploads such as profile photos can be larger).
+const fetchWithTimeout = async (url, options = {}, timeoutMs) => {
+  const method = (options.method || 'GET').toUpperCase();
+  const ms = timeoutMs || (method === 'GET' ? 20000 : 45000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error('Request timed out. Please check your connection and try again.');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const PROJECTS_CACHE_KEY_PREFIX = 'workforce_app_projects_cache_';
 
 // ===== Multilingual support: supported languages + translation strings =====
 const SUPPORTED_LANGUAGES = [
@@ -92,6 +128,98 @@ function clampCropBox(box, layout) {
   return { x, y, w, h };
 }
 
+
+// ===== Rupee symbol support for exported PDFs =====
+// jsPDF's built-in core fonts (Helvetica/Times/Courier) only support the WinAnsi
+// character set, which does not include the Indian Rupee sign (₹, U+20B9) - drawing
+// it with doc.text() using those fonts renders a blank box. Rather than embed a full
+// Unicode font family (tens/hundreds of KB), a tiny subset font containing ONLY the ₹
+// glyph (regular + bold weights, ~2KB each) is embedded below. drawAmountText() swaps to
+// this font for just that one character and falls back to the caller's current Helvetica
+// font/style for the rest of the string, so exported PDFs show "₹1,234" exactly like
+// the in-app preview instead of the old "Rs.1,234" placeholder.
+const RUPEE_FONT_NAME = 'NotoSansRupee';
+const RUPEE_FONT_REGULAR_BASE64 = 'AAEAAAAOAIAAAwBgR1BPU0R2THUAAAaoAAAAIEdTVUKTFYIWAAAGyAAAADZPUy8yaOt+AQAAAfgAAABgU1RBVEjvO7wAAAcAAAAA/mNtYXBBY9/kAAACWAAAADxnYXNwAAAAEAAABqAAAAAIZ2x5ZjvggXQAAADsAAAAfGhlYWQj5J4gAAABkAAAADZoaGVhDLMHiwAAAdQAAAAkaG10eAWYAK0AAAHIAAAADGxvY2EAFABSAAABiAAAAAhtYXhwACYBgwAAAWgAAAAgbmFtZXglpQcAAAKUAAAD3HBvc3Q5SbHWAAAGcAAAADAAAgBeAAAB+QLKAAMABwAAMxEhESUhESFeAZv+mAE1/ssCyv02MwJkAAEATwAAAe0CygAaAAAhAzUzMjY3IzUzJiYjIzUhFSMWFzMVIwYGBxMBDL0WUFUHwsEKVUwWAZ69MAmEggdhUL8BSiwuPEA4MkBAJ0NASVEL/sUAAAEAAAADARgAGABmAAYAAQAAAAAAAAAAAAAAAAAEAAQAAAAUABQAPgABAAAAAgIMfzNJpF8PPPUABwPoAAAAAN2A0+cAAAAA3sSEpP2T/nsK8AQrAAAABgACAAAAAAAAAlgAXgEEAAACPABPAAEAAAQt/tsAAAsY/ZP9lArwAAEAAAAAAAAAAAAAAAAAAAADAAQCRgGQAAUAAAKKAlgAAABLAooCWAAAAV4AMgFCAAACCwUCBAUEAgIEAAAAAQAAAAIAAAAAAAAAAEdPT0cAQAAgILkELf7bAAAELQElAAAAAQAAAAACGALKAAAAIAAEAAAAAgAAAAMAAAAUAAMAAQAAABQABAAoAAAABgAEAAEAAgAgILn//wAAACAguf///+HfSQABAAAAAAAAAAAAGgE+AAMAAQQJAAAAaAAAAAMAAQQJAAEAEgBoAAMAAQQJAAIADgB6AAMAAQQJAAMANgCIAAMAAQQJAAQAIgC+AAMAAQQJAAUArADgAAMAAQQJAAYAIAGMAAMAAQQJAQQADgB6AAMAAQQJAQUADAGsAAMAAQQJAQYACAG4AAMAAQQJAQcAFAHAAAMAAQQJAQgACgHUAAMAAQQJAQkADgB6AAMAAQQJAQoADAHeAAMAAQQJAQsAEAHqAAMAAQQJAQwACAH6AAMAAQQJAQ0AEgICAAMAAQQJAQ4ACgIUAAMAAQQJAQ8ACgIeAAMAAQQJARAAEgIoAAMAAQQJAREAEgIoAAMAAQQJARIAGgI6AAMAAQQJARMADAJUAAMAAQQJARQAKAJgAAMAAQQJARUACAKIAAMAAQQJARYADgKQAEMAbwBwAHkAcgBpAGcAaAB0ACAAMgAwADEANQAtADIAMAAyADEAIABHAG8AbwBnAGwAZQAgAEwATABDAC4AIABBAGwAbAAgAFIAaQBnAGgAdABzACAAUgBlAHMAZQByAHYAZQBkAC4ATgBvAHQAbwAgAFMAYQBuAHMAUgBlAGcAdQBsAGEAcgAyAC4AMAAwADgAOwBHAE8ATwBHADsATgBvAHQAbwBTAGEAbgBzAC0AUgBlAGcAdQBsAGEAcgBOAG8AdABvACAAUwBhAG4AcwAgAFIAZQBnAHUAbABhAHIAVgBlAHIAcwBpAG8AbgAgADIALgAwADAAOAA7ACAAdAB0AGYAYQB1AHQAbwBoAGkAbgB0ACAAKAB2ADEALgA4ACkAIAAtAGwAIAA4ACAALQByACAANQAwACAALQBHACAAMgAwADAAIAAtAHgAIAAxADQAIAAtAEQAIABsAGEAdABuACAALQBmACAAbgBvAG4AZQAgAC0AYQAgAHEAcwBxACAALQBYACAAIgAiAE4AbwB0AG8AUwBhAG4AcwAtAFIAZQBnAHUAbABhAHIAVwBlAGkAZwBoAHQAVABoAGkAbgBFAHgAdAByAGEATABpAGcAaAB0AEwAaQBnAGgAdABNAGUAZABpAHUAbQBTAGUAbQBpAEIAbwBsAGQAQgBvAGwAZABFAHgAdAByAGEAQgBvAGwAZABCAGwAYQBjAGsAVwBpAGQAdABoAEMAbwBuAGQAZQBuAHMAZQBkAFMAZQBtAGkAQwBvAG4AZABlAG4AcwBlAGQATgBvAHIAbQBhAGwAQwBvAG4AdAByAGEAcwB0ACAAKABHAHIAbwB0AGUAcwBxAHUAZQApAFQAZQB4AHQARABpAHMAcABsAGEAeQACAAAAAAAA/5wAMgAAAAAAAAAAAAAAAAAAAAAAAAAAAAMAAAADAQIHdW5pMjBCOQABAAH//wAPAAEAAAAKABwAHgABREZMVAAIAAQAAAAA//8AAAAAAAAAAQAAAAoAMgA0AARERkxUABpjeXJsACRncmVrACRsYXRuACQABAAAAAD//wAAAAAAAAAAAAAAAAABAAEACAADAAAAFAAPAAAALAEEd2dodAEFAAB3ZHRoAQ8AAUNUR1IBFAACAB4AKgA2AEIATgBaAGYAcgB+AIoAlgCiAK4AugDGAAEAAAAAAQYAZAAAAAEAAAAAAQcAyAAAAAEAAAAAAQgBLAAAAAEAAAACAQkBkAAAAAEAAAAAAQoB9AAAAAEAAAAAAQsCWAAAAAEAAAAAAQwCvAAAAAEAAAAAAQ0DIAAAAAEAAAAAAQ4DhAAAAAEAAQAAARAAPoAAAAEAAQAAAREASwAAAAEAAQAAARIAV4AAAAEAAQACARMAZAAAAAEAAgACARUAAAAAAAEAAgAAARYAZAAAAAA=';
+const RUPEE_FONT_BOLD_BASE64 = 'AAEAAAAOAIAAAwBgR1BPU0R2THUAAAaYAAAAIEdTVUKTFYIWAAAGuAAAADZPUy8yah2BFAAAAfgAAABgU1RBVEjvO7wAAAbwAAAA/mNtYXBBY9/kAAACWAAAADxnYXNwAAAAEAAABpAAAAAIZ2x5ZpxcQrsAAADsAAAAemhlYWQjzp37AAABkAAAADZoaGVhDJwHhwAAAdQAAAAkaG10eAWYAJ8AAAHIAAAADGxvY2EAFABRAAABiAAAAAhtYXhwACYBggAAAWgAAAAgbmFtZXR/pDAAAAKUAAADynBvc3Q5SbHWAAAGYAAAADAAAgBeAAAB+QLKAAMABwAAMxEhESUhESFeAZv+mAE1/ssCyv02MwJkAAEAQQAAAgQCygAaAAAzAzUzMjY3IzUzJiYjIzUhFSMWFzMVIwYGBxP1tDw1SArDwgk4Mk8Bw50jCXFvCl5KxAE6Si8qSiYzSkomM0pKUw/+zwAAAAEAAAADARgAGABlAAYAAQAAAAAAAAAAAAAAAAAEAAQAAAAUABQAPQABAAAAAgIMw33DdF8PPPUABwPoAAAAAN2A0+cAAAAA3sSEff18/nsK8AQtAAEABgACAAAAAAAAAlgAXgEEAAACPABBAAEAAAQt/tsAAAsY/Xz9kArwAAEAAAAAAAAAAAAAAAAAAAADAAQCbwK8AAUAAAKKAlgAAABLAooCWAAAAV4AMgFIAAACCwgCBAUEAgIEAAAAAQAAAAIAAAAAAAAAAEdPT0cAIAAgILkELf7bAAAELQElAAAAAQAAAAACIgLKAAAAIAAEAAAAAgAAAAMAAAAUAAMAAQAAABQABAAoAAAABgAEAAEAAgAgILn//wAAACAguf///+HfSQABAAAAAAAAAAAAGgE+AAMAAQQJAAAAaAAAAAMAAQQJAAEAEgBoAAMAAQQJAAIACAB6AAMAAQQJAAMAMACCAAMAAQQJAAQAHACyAAMAAQQJAAUArADOAAMAAQQJAAYAGgF6AAMAAQQJAQQADgGUAAMAAQQJAQUADAGiAAMAAQQJAQYACAGuAAMAAQQJAQcAFAG2AAMAAQQJAQgACgHKAAMAAQQJAQkADgGUAAMAAQQJAQoADAHUAAMAAQQJAQsAEAHgAAMAAQQJAQwACAB6AAMAAQQJAQ0AEgHwAAMAAQQJAQ4ACgICAAMAAQQJAQ8ACgIMAAMAAQQJARAAEgIWAAMAAQQJAREAEgIWAAMAAQQJARIAGgIoAAMAAQQJARMADAJCAAMAAQQJARQAKAJOAAMAAQQJARUACAJ2AAMAAQQJARYADgJ+AEMAbwBwAHkAcgBpAGcAaAB0ACAAMgAwADEANQAtADIAMAAyADEAIABHAG8AbwBnAGwAZQAgAEwATABDAC4AIABBAGwAbAAgAFIAaQBnAGgAdABzACAAUgBlAHMAZQByAHYAZQBkAC4ATgBvAHQAbwAgAFMAYQBuAHMAQgBvAGwAZAAyAC4AMAAwADgAOwBHAE8ATwBHADsATgBvAHQAbwBTAGEAbgBzAC0AQgBvAGwAZABOAG8AdABvACAAUwBhAG4AcwAgAEIAbwBsAGQAVgBlAHIAcwBpAG8AbgAgADIALgAwADAAOAA7ACAAdAB0AGYAYQB1AHQAbwBoAGkAbgB0ACAAKAB2ADEALgA4ACkAIAAtAGwAIAA4ACAALQByACAANQAwACAALQBHACAAMgAwADAAIAAtAHgAIAAxADQAIAAtAEQAIABsAGEAdABuACAALQBmACAAbgBvAG4AZQAgAC0AYQAgAHEAcwBxACAALQBYACAAIgAiAE4AbwB0AG8AUwBhAG4AcwAtAEIAbwBsAGQAUgBlAGcAdQBsAGEAcgBXAGUAaQBnAGgAdABUAGgAaQBuAEUAeAB0AHIAYQBMAGkAZwBoAHQATABpAGcAaAB0AE0AZQBkAGkAdQBtAFMAZQBtAGkAQgBvAGwAZABFAHgAdAByAGEAQgBvAGwAZABCAGwAYQBjAGsAVwBpAGQAdABoAEMAbwBuAGQAZQBuAHMAZQBkAFMAZQBtAGkAQwBvAG4AZABlAG4AcwBlAGQATgBvAHIAbQBhAGwAQwBvAG4AdAByAGEAcwB0ACAAKABHAHIAbwB0AGUAcwBxAHUAZQApAFQAZQB4AHQARABpAHMAcABsAGEAeQAAAAIAAAAAAAD/nAAyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAMBAgd1bmkyMEI5AAEAAf//AA8AAQAAAAoAHAAeAAFERkxUAAgABAAAAAD//wAAAAAAAAABAAAACgAyADQABERGTFQAGmN5cmwAJGdyZWsAJGxhdG4AJAAEAAAAAP//AAAAAAAAAAAAAAAAAAEAAQAIAAMAAAAUAA8AAAAsAQR3Z2h0AQUAAHdkdGgBDwABQ1RHUgEUAAIAHgAqADYAQgBOAFoAZgByAH4AigCWAKIArgC6AMYAAQAAAAABBgBkAAAAAQAAAAABBwDIAAAAAQAAAAABCAEsAAAAAQAAAAIBCQGQAAAAAQAAAAABCgH0AAAAAQAAAAABCwJYAAAAAQAAAAABDAK8AAAAAQAAAAABDQMgAAAAAQAAAAABDgOEAAAAAQABAAABEAA+gAAAAQABAAABEQBLAAAAAQABAAABEgBXgAAAAQABAAIBEwBkAAAAAQACAAIBFQAAAAAAAQACAAABFgBkAAAAAA==';
+// Registers the embedded Rupee-glyph font on a jsPDF document instance. jsPDF's added
+// fonts are per-document, so this must be called once for every `new jsPDF(...)`
+// instance before drawAmountText() is used on it.
+const registerRupeeFont = (doc) => {
+  try {
+    doc.addFileToVFS('NotoSansRupee-Regular.ttf', RUPEE_FONT_REGULAR_BASE64);
+    doc.addFont('NotoSansRupee-Regular.ttf', RUPEE_FONT_NAME, 'normal');
+    doc.addFileToVFS('NotoSansRupee-Bold.ttf', RUPEE_FONT_BOLD_BASE64);
+    doc.addFont('NotoSansRupee-Bold.ttf', RUPEE_FONT_NAME, 'bold');
+  } catch (e) { /* Falls back to plain doc.text() rendering below if this ever fails */ }
+};
+// Draws a single-line string that may start with "₹" - optionally preceded by a "+" or
+// "-" sign (e.g. "₹1,234.56", "-₹1,500", "+₹1,500") - rendering the ₹ character with the
+// embedded Rupee font and the sign/rest with Helvetica in the caller's current font
+// style/size - so every existing doc.setFont/doc.setFontSize call before it keeps working
+// unchanged. Supports the same `align` values as doc.text ('left' default, 'right',
+// 'center'). Strings that don't match that pattern are drawn exactly as doc.text() would
+// draw them, so this is a safe drop-in replacement anywhere an amount is drawn.
+const drawAmountText = (doc, text, x, y, opts = {}) => {
+  const str = String(text);
+  // Matches an optional leading sign (e.g. "-₹1,500" from Advance History or
+  // "+₹1,500" from Bonus History/wage credits) followed by the rupee symbol.
+  const match = str.match(/^([+-]?)₹(.*)$/);
+  if (!match) {
+    doc.text(str, x, y, opts);
+    return;
+  }
+  const [, sign, rest] = match;
+  const align = opts.align || 'left';
+  const currentFont = doc.internal.getFont();
+  const style = currentFont.fontStyle === 'bold' ? 'bold' : 'normal';
+  const size = doc.internal.getFontSize();
+  const gap = size * 0.06;
+
+  doc.setFont('helvetica', style);
+  doc.setFontSize(size);
+  const signWidth = sign ? doc.getTextWidth(sign) : 0;
+  const restWidth = doc.getTextWidth(rest);
+  doc.setFont(RUPEE_FONT_NAME, style);
+  doc.setFontSize(size);
+  const symWidth = doc.getTextWidth('₹');
+
+  if (align === 'right') {
+    doc.setFont('helvetica', style);
+    doc.text(rest, x, y, { align: 'right' });
+    doc.setFont(RUPEE_FONT_NAME, style);
+    doc.text('₹', x - restWidth - gap, y, { align: 'right' });
+    if (sign) {
+      doc.setFont('helvetica', style);
+      doc.text(sign, x - restWidth - gap - symWidth, y, { align: 'right' });
+    }
+  } else if (align === 'center') {
+    const totalWidth = signWidth + symWidth + gap + restWidth;
+    let startX = x - totalWidth / 2;
+    if (sign) {
+      doc.setFont('helvetica', style);
+      doc.text(sign, startX, y);
+      startX += signWidth;
+    }
+    doc.setFont(RUPEE_FONT_NAME, style);
+    doc.text('₹', startX, y);
+    doc.setFont('helvetica', style);
+    doc.text(rest, startX + symWidth + gap, y);
+  } else {
+    let startX = x;
+    if (sign) {
+      doc.setFont('helvetica', style);
+      doc.text(sign, startX, y);
+      startX += signWidth;
+    }
+    doc.setFont(RUPEE_FONT_NAME, style);
+    doc.text('₹', startX, y);
+    doc.setFont('helvetica', style);
+    doc.text(rest, startX + symWidth + gap, y);
+  }
+
+  doc.setFont('helvetica', style);
+};
+
 const translations = {
   en: {
     // Navigation
@@ -120,10 +248,17 @@ const translations = {
     presentLabel: 'Present', 
     extraPaidLabel: 'Extra Paid', 
     totalDueLabel: 'Total Due',
+    totalWagesLabel: 'Total Wages',
+    totalBonusLabel: 'Total Bonus',
+    totalPaidLabel: 'Total Paid',
+    paidLabel: 'Paid',
+    dueLabel: 'Due',
+    wagesLabel: 'Wages',
     attendanceMarkedToday: 'Attendance last marked today',
     attendanceMarkedOnPrefix: 'Attendance last marked on',
     attendanceNotMarked: 'Attendance not marked yet',
     noWorksitesMatch: 'No worksites match your search.',
+    noDeactiveWorksitesMatch: 'No removed worksites match your search.',
     greetingHi: 'Hi',
     
     // Project View
@@ -139,11 +274,18 @@ const translations = {
     dateOfJoining: 'Date of Joining',
     dailyWage: 'Daily Wage',
     saveEmployee: 'Save Employee',
+    activeEmployees: 'Active',
+    deactiveEmployees: 'Removed',
+    deactivated: 'Removed',
+    lastDate: 'Last Date',
+    lastDay: 'Last Day',
+    employeeDetails: 'Employee Details',
+    noAttendanceMarkedYet: 'No attendance marked',
     
     // Attendance
     attendance: 'Attendance',
     selectDate: 'Select Date',
-    bulkMark: 'Bulk mark:',
+    bulkMark: 'Mark All',
     allPresent: 'All Present',
     allAbsent: 'All Absent',
     enterEmployeeName: 'Enter Employee Name',
@@ -153,7 +295,6 @@ const translations = {
     
     // Edit Wage
     editWage: 'Edit wage',
-    changeWageForEmployee: 'Change wage for this employee and choose when it applies',
     applyTo: 'Apply to',
     today: 'Today',
     pastDays: 'Past days',
@@ -162,8 +303,9 @@ const translations = {
     appliesUpTo: 'APPLIES UP TO',
     from: 'FROM',
     to: 'TO',
-    appliesFrom: 'APPLIES FROM',
-    newDailyWage: 'NEW DAILY WAGE',
+    newWageStartsFrom: 'NEW WAGE STARTS FROM',
+    newWageStartsFromDesc: 'New daily wage will apply from the selected date onwards.',
+    newDailyWageFromDate: 'NEW DAILY WAGE (FROM SELECTED DATE)',
     noteOptional: 'NOTE (OPTIONAL)',
     cancel: 'Cancel',
     saveWage: 'Save wage',
@@ -250,9 +392,9 @@ const translations = {
     mostPopular: 'MOST POPULAR',
     perMonth: 'per month',
     features: {
-      free: ['1 active project', 'Up to 5 workers', 'Manual attendance marking', 'Basic payment tracking'],
-      pro: ['Unlimited projects', 'Unlimited workers', 'Wage history & wage edits', 'Payment tracking + PDF statements', 'Priority email support'],
-      business: ['Everything in Pro', 'Multiple supervisor logins', 'Data export (CSV/Excel)', 'Dedicated priority support', 'Early access to new features']
+      free: ['1 active project', 'Up to 5 workers', 'Manual attendance marking', 'Basic payment tracking', 'Basic documents (quotations & invoices)'],
+      pro: ['Unlimited projects', 'Unlimited workers', 'Wage history & wage edits', 'Payment tracking + PDF statements', 'Full documents module (quotations, invoices, POs, proforma & delivery notes)', 'Priority email support'],
+      business: ['Everything in Pro', 'Custom document branding & templates', 'Multiple supervisor logins', 'Data export (CSV/Excel)', 'Dedicated priority support', 'Early access to new features']
     },
     
     // Profile
@@ -278,7 +420,7 @@ const translations = {
     editProject: 'Edit Project',
     projectName: 'Project Name',
     saveChanges: 'Save Changes',
-    deleteProject: 'Delete this worksite project completely?',
+    deleteProject: 'This Project will be removed.',
     
     // Employee form validation
     fillRequiredFields: 'Please fill in the following required field(s) before saving:',
@@ -333,10 +475,17 @@ const translations = {
     presentLabel: 'उपस्थित',
     extraPaidLabel: 'अतिरिक्त भुगतान',
     totalDueLabel: 'कुल बकाया',
+    totalWagesLabel: 'कुल मजदूरी',
+    totalBonusLabel: 'कुल बोनस',
+    totalPaidLabel: 'कुल भुगतान',
+    paidLabel: 'भुगतान',
+    dueLabel: 'बकाया',
+    wagesLabel: 'मजदूरी',
     attendanceMarkedToday: 'उपस्थिति आज दर्ज की गई',
     attendanceMarkedOnPrefix: 'उपस्थिति अंतिम बार दर्ज की गई',
     attendanceNotMarked: 'उपस्थिति अभी दर्ज नहीं हुई',
     noWorksitesMatch: 'आपकी खोज से मेल खाने वाली कोई साइट नहीं मिली।',
+    noDeactiveWorksitesMatch: 'आपकी खोज से मेल खाने वाली कोई हटाई गई साइट नहीं मिली।',
     greetingHi: 'नमस्ते',
     
     // Project View
@@ -352,11 +501,18 @@ const translations = {
     dateOfJoining: 'शामिल होने की तारीख',
     dailyWage: 'दैनिक मजदूरी',
     saveEmployee: 'कर्मचारी सहेजें',
+    activeEmployees: 'सक्रिय',
+    deactiveEmployees: 'हटाए गए',
+    deactivated: 'हटाया गया',
+    lastDate: 'अंतिम तारीख',
+    lastDay: 'अंतिम दिन',
+    employeeDetails: 'कर्मचारी विवरण',
+    noAttendanceMarkedYet: 'कोई उपस्थिति दर्ज नहीं',
     
     // Attendance
     attendance: 'उपस्थिति',
     selectDate: 'तारीख चुनें',
-    bulkMark: 'बल्क मार्क:',
+    bulkMark: 'सभी चिह्नित करें',
     allPresent: 'सभी उपस्थित',
     allAbsent: 'सभी अनुपस्थित',
     enterEmployeeName: 'कर्मचारी का नाम दर्ज करें',
@@ -366,7 +522,6 @@ const translations = {
     
     // Edit Wage
     editWage: 'वेतन संपादित करें',
-    changeWageForEmployee: 'इस कर्मचारी के लिए वेतन बदलें और चुनें कि यह कब लागू हो',
     applyTo: 'लागू करें',
     today: 'आज',
     pastDays: 'पिछले दिन',
@@ -375,8 +530,9 @@ const translations = {
     appliesUpTo: 'तक लागू',
     from: 'से',
     to: 'तक',
-    appliesFrom: 'से लागू',
-    newDailyWage: 'नई दैनिक मजदूरी',
+    newWageStartsFrom: 'नई मजदूरी यहां से लागू होगी',
+    newWageStartsFromDesc: 'नई दैनिक मजदूरी चुनी गई तारीख से लागू होगी।',
+    newDailyWageFromDate: 'नई दैनिक मजदूरी (चुनी गई तारीख से)',
     noteOptional: 'नोट (वैकल्पिक)',
     cancel: 'रद्द करें',
     saveWage: 'वेतन सहेजें',
@@ -463,9 +619,9 @@ const translations = {
     mostPopular: 'सबसे लोकप्रिय',
     perMonth: 'प्रति माह',
     features: {
-      free: ['1 सक्रिय प्रोजेक्ट', '5 कर्मचारी तक', 'मैन्युअल उपस्थिति दर्ज करना', 'बुनियादी भुगतान ट्रैकिंग'],
-      pro: ['असीमित प्रोजेक्ट', 'असीमित कर्मचारी', 'वेतन इतिहास और वेतन संपादन', 'भुगतान ट्रैकिंग + पीडीएफ विवरण', 'प्राथमिकता ईमेल सहायता'],
-      business: ['प्रो में सब कुछ', 'कई सुपरवाइजर लॉगिन', 'डेटा निर्यात (CSV/Excel)', 'समर्पित प्राथमिकता सहायता', 'नई सुविधाओं तक जल्दी पहुंच']
+      free: ['1 सक्रिय प्रोजेक्ट', '5 कर्मचारी तक', 'मैन्युअल उपस्थिति दर्ज करना', 'बुनियादी भुगतान ट्रैकिंग', 'बुनियादी दस्तावेज़ (कोटेशन और इनवॉइस)'],
+      pro: ['असीमित प्रोजेक्ट', 'असीमित कर्मचारी', 'वेतन इतिहास और वेतन संपादन', 'भुगतान ट्रैकिंग + पीडीएफ विवरण', 'पूर्ण दस्तावेज़ मॉड्यूल (कोटेशन, इनवॉइस, PO, प्रोफार्मा और डिलीवरी नोट)', 'प्राथमिकता ईमेल सहायता'],
+      business: ['प्रो में सब कुछ', 'कस्टम दस्तावेज़ ब्रांडिंग और टेम्पलेट', 'कई सुपरवाइजर लॉगिन', 'डेटा निर्यात (CSV/Excel)', 'समर्पित प्राथमिकता सहायता', 'नई सुविधाओं तक जल्दी पहुंच']
     },
     
     // Profile
@@ -491,7 +647,7 @@ const translations = {
     editProject: 'प्रोजेक्ट संपादित करें',
     projectName: 'प्रोजेक्ट का नाम',
     saveChanges: 'बदलाव सहेजें',
-    deleteProject: 'क्या आप इस वर्कसाइट प्रोजेक्ट को पूरी तरह से हटाना चाहते हैं?',
+    deleteProject: 'यह प्रोजेक्ट हटा दिया जाएगा।',
     
     // Employee form validation
     fillRequiredFields: 'सहेजने से पहले कृपया निम्नलिखित आवश्यक फ़ील्ड भरें:',
@@ -787,7 +943,7 @@ const API_BASE_URL = `${API_ROOT}/auth`;
 // ===== API SERVICES =====
 const api = {
   get: async (endpoint) => {
-    const response = await fetch(`${API_ROOT}${endpoint}`, {
+    const response = await fetchWithTimeout(`${API_ROOT}${endpoint}`, {
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -795,7 +951,7 @@ const api = {
     return response.json();
   },
   post: async (endpoint, data) => {
-    const response = await fetch(`${API_ROOT}${endpoint}`, {
+    const response = await fetchWithTimeout(`${API_ROOT}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -808,7 +964,7 @@ const api = {
     return response.json();
   },
   put: async (endpoint, data) => {
-    const response = await fetch(`${API_ROOT}${endpoint}`, {
+    const response = await fetchWithTimeout(`${API_ROOT}${endpoint}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -821,7 +977,7 @@ const api = {
     return response.json();
   },
   delete: async (endpoint) => {
-    const response = await fetch(`${API_ROOT}${endpoint}`, {
+    const response = await fetchWithTimeout(`${API_ROOT}${endpoint}`, {
       method: 'DELETE',
       credentials: 'include',
     });
@@ -832,7 +988,7 @@ const api = {
     return response.json();
   },
   patch: async (endpoint, data) => {
-    const response = await fetch(`${API_ROOT}${endpoint}`, {
+    const response = await fetchWithTimeout(`${API_ROOT}${endpoint}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -949,6 +1105,15 @@ const workerService = {
   createWorker: (data) => api.post('/workers', data),
   updateWorker: (id, data) => api.put(`/workers/${id}`, data),
   deleteWorker: (id) => api.delete(`/workers/${id}`),
+  // Deactivate is one-way (no matching activate call - see WorkerController.DeactivateWorker,
+  // reactivation was removed there). Distinct from deleteWorker: this flips IsCurrentlyActive
+  // (business status) only, so the worker keeps showing up in GetWorkersByProject / the
+  // Deactive tab, rather than a real soft-delete that would make it disappear.
+  deactivateWorker: (id, data) => api.put(`/workers/${id}/deactivate`, data),
+  // All of a user's workers across every project - backs the Employees tab.
+  getWorkersByUser: (userId) => api.get(`/workers/user/${userId}`),
+  // Sends a worker to a (possibly different) project - see WorkerController.AssignWorker.
+  assignWorker: (id, data) => api.put(`/workers/${id}/assign`, data),
   updateWage: (id, data) => api.put(`/workers/${id}/wage`, data),
 };
 
@@ -969,9 +1134,13 @@ const loadUserProjects = async (userId) => {
     setLoadingProjects(true);
     const response = await projectService.getProjects(userId);
     setProjects(response.map(mapProjectFromApi));
+    // Cache the raw API response so the next app start can show projects instantly
+    // instead of blocking on a "Loading..." screen until the network call returns.
+    try { localStorage.setItem(PROJECTS_CACHE_KEY_PREFIX + userId, JSON.stringify(response)); } catch { /* ignore */ }
   } catch (error) {
     console.error('Error loading projects:', error);
-    setProjects([]);
+    // Keep whatever is already on screen (cached or previously loaded) on failure,
+    // instead of wiping the user's projects because of one failed/timed-out request.
   } finally {
     setLoadingProjects(false);
   }
@@ -1061,6 +1230,7 @@ const settingsService = {
 const termsService = {
   getTerms: (userId, documentType) => api.get(`/documents/terms?userId=${userId}&documentType=${documentType}`),
   createTerm: (userId, documentType, data) => api.post(`/documents/terms?userId=${userId}&documentType=${documentType}`, data),
+  updateTerm: (id, data) => api.put(`/documents/terms/${id}`, data),
   deleteTerm: (id) => api.delete(`/documents/terms/${id}`),
 };
 // Add this state near other state declarations
@@ -1088,7 +1258,7 @@ const loadUserBusinessInfo = async (userId) => {
         taxLabel: response.taxLabel || 'GSTIN',
         taxNumber: response.taxNumber || '',
         state: response.state || '',
-        pincode: response.pincode || '',
+        pincode: response.pinCode || '',
         bankAccountName: response.bankAccountName || '',
         bankAccountNumber: response.bankAccountNumber || '',
         bankName: response.bankName || '',
@@ -1126,8 +1296,12 @@ const loadUserInvoices = async (userId) => {
   try {
     setLoadingInvoices(true);
     const response = await invoicesService.getInvoices(userId);
-    setInvoices(response);
-    try { localStorage.setItem(INVOICES_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+    const parsedInvoices = response.map(inv => ({
+      ...inv,
+      docSnapshot: inv.docSnapshot ? JSON.parse(inv.docSnapshot) : null
+    }));
+    setInvoices(parsedInvoices);
+    try { localStorage.setItem(INVOICES_STORAGE_KEY, JSON.stringify(parsedInvoices)); } catch { /* ignore */ }
   } catch (error) {
     console.error('Error loading invoices:', error);
   } finally {
@@ -1135,29 +1309,38 @@ const loadUserInvoices = async (userId) => {
   }
 };
 
+// Do the same for purchase orders, proforma invoices, delivery notes
+
 // ===== LOAD PURCHASE ORDERS =====
 const [loadingPurchaseOrders, setLoadingPurchaseOrders] = useState(false);
 const loadUserPurchaseOrders = async (userId) => {
   try {
     setLoadingPurchaseOrders(true);
     const response = await purchaseOrdersService.getPurchaseOrders(userId);
-    setPurchaseOrders(response);
-    try { localStorage.setItem(PURCHASE_ORDERS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+    const parsedPurchaseOrders = response.map(po => ({
+      ...po,
+      docSnapshot: po.docSnapshot ? JSON.parse(po.docSnapshot) : null
+    }));
+    setPurchaseOrders(parsedPurchaseOrders);
+    try { localStorage.setItem(PURCHASE_ORDERS_STORAGE_KEY, JSON.stringify(parsedPurchaseOrders)); } catch { /* ignore */ }
   } catch (error) {
     console.error('Error loading purchase orders:', error);
   } finally {
     setLoadingPurchaseOrders(false);
   }
 };
-
 // ===== LOAD PROFORMA INVOICES =====
 const [loadingProformaInvoices, setLoadingProformaInvoices] = useState(false);
 const loadUserProformaInvoices = async (userId) => {
   try {
     setLoadingProformaInvoices(true);
     const response = await proformaInvoicesService.getProformaInvoices(userId);
-    setProformaInvoices(response);
-    try { localStorage.setItem(PROFORMA_INVOICES_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+    const parsedProformaInvoices = response.map(pi => ({
+      ...pi,
+      docSnapshot: pi.docSnapshot ? JSON.parse(pi.docSnapshot) : null
+    }));
+    setProformaInvoices(parsedProformaInvoices);
+    try { localStorage.setItem(PROFORMA_INVOICES_STORAGE_KEY, JSON.stringify(parsedProformaInvoices)); } catch { /* ignore */ }
   } catch (error) {
     console.error('Error loading proforma invoices:', error);
   } finally {
@@ -1171,8 +1354,12 @@ const loadUserDeliveryNotes = async (userId) => {
   try {
     setLoadingDeliveryNotes(true);
     const response = await deliveryNotesService.getDeliveryNotes(userId);
-    setDeliveryNotes(response);
-    try { localStorage.setItem(DELIVERY_NOTES_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+    const parsedDeliveryNotes = response.map(dn => ({
+      ...dn,
+      docSnapshot: dn.docSnapshot ? JSON.parse(dn.docSnapshot) : null
+    }));
+    setDeliveryNotes(parsedDeliveryNotes);
+    try { localStorage.setItem(DELIVERY_NOTES_STORAGE_KEY, JSON.stringify(parsedDeliveryNotes)); } catch { /* ignore */ }
   } catch (error) {
     console.error('Error loading delivery notes:', error);
   } finally {
@@ -1186,8 +1373,23 @@ const loadUserReceipts = async (userId) => {
   try {
     setLoadingReceipts(true);
     const response = await receiptsService.getReceipts(userId);
-    setReceipts(response);
-    try { localStorage.setItem(RECEIPTS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+    const parsedReceipts = response.map(r => {
+      // Per-row try/catch so one bad/corrupt docSnapshot value can't throw
+      // inside .map() and abort parsing of every other receipt (mirrors the
+      // fallback pattern buildQuotationDocModel already uses).
+      let parsedSnapshot = null;
+      if (r.docSnapshot) {
+        try {
+          parsedSnapshot = JSON.parse(r.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing docSnapshot for receipt', r.id, e);
+          parsedSnapshot = null;
+        }
+      }
+      return { ...r, docSnapshot: parsedSnapshot };
+    });
+    setReceipts(parsedReceipts);
+    try { localStorage.setItem(RECEIPTS_STORAGE_KEY, JSON.stringify(parsedReceipts)); } catch { /* ignore */ }
   } catch (error) {
     console.error('Error loading receipts:', error);
   } finally {
@@ -1206,27 +1408,96 @@ const loadUserSettings = async (userId) => {
       // Normalize any legacy/invalid GST Display value (e.g. old "No Tax") coming
       // from the server to the supported Yes/No options, defaulting to "Yes".
       const normalizedQuotation = { ...response.quotation, taxType: response.quotation.taxType === 'No' ? 'No' : 'Yes' };
-      setQuotationSettings(prev => ({ ...prev, ...normalizedQuotation }));
-      localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedQuotation));
+      // Same schema-version safeguard as loadQuotationSettings() below: settings saved
+      // under an older schema (or a build that used to pre-fill "Customize" with preset
+      // text) can't be trusted to reflect a real user choice - migrate them back to
+      // "Default" mode/text. Whenever a message field is in "Default" mode, always force
+      // it to the CURRENT default copy rather than whatever text the server happens to
+      // have stored, so switching Customize -> Default always lands on the same text the
+      // screen showed on load (fixes the default message appearing to "change").
+      const isCurrentQuotationSchema = normalizedQuotation.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+      const quotationTopMode = isCurrentQuotationSchema ? (normalizedQuotation.topMessageMode || 'Default') : 'Default';
+      const quotationBottomMode = isCurrentQuotationSchema ? (normalizedQuotation.bottomMessageMode || 'Default') : 'Default';
+      const finalQuotation = {
+        ...normalizedQuotation,
+        messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+        topMessageMode: quotationTopMode,
+        topMessage: quotationTopMode === 'Default' ? QUOTATION_DEFAULT_TOP_MESSAGE : normalizedQuotation.topMessage,
+        bottomMessageMode: quotationBottomMode,
+        bottomMessage: quotationBottomMode === 'Default' ? QUOTATION_DEFAULT_BOTTOM_MESSAGE : normalizedQuotation.bottomMessage,
+      };
+      setQuotationSettings(prev => ({ ...prev, ...finalQuotation }));
+      localStorage.setItem(QUOTATION_SETTINGS_STORAGE_KEY, JSON.stringify(finalQuotation));
     }
     if (response.invoice) {
       const normalizedInvoice = { ...response.invoice, taxType: response.invoice.taxType === 'No' ? 'No' : 'Yes' };
-      setInvoiceSettings(prev => ({ ...prev, ...normalizedInvoice }));
-      localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedInvoice));
+      // Same schema-version safeguard as loadInvoiceSettings() below: whenever a message
+      // field is in "Default" mode, force it to the CURRENT default copy rather than
+      // whatever text the server happens to have stored, so switching Customize -> Default
+      // always lands on the same text the screen showed on load.
+      const isCurrentInvoiceSchema = normalizedInvoice.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+      const invoiceTopMode = isCurrentInvoiceSchema ? (normalizedInvoice.topMessageMode || 'Default') : 'Default';
+      const invoiceBottomMode = isCurrentInvoiceSchema ? (normalizedInvoice.bottomMessageMode || 'Default') : 'Default';
+      const finalInvoice = {
+        ...normalizedInvoice,
+        messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+        topMessageMode: invoiceTopMode,
+        topMessage: invoiceTopMode === 'Default' ? INVOICE_DEFAULT_TOP_MESSAGE : normalizedInvoice.topMessage,
+        bottomMessageMode: invoiceBottomMode,
+        bottomMessage: invoiceBottomMode === 'Default' ? INVOICE_DEFAULT_BOTTOM_MESSAGE : normalizedInvoice.bottomMessage,
+      };
+      setInvoiceSettings(prev => ({ ...prev, ...finalInvoice }));
+      localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(finalInvoice));
     }
     if (response.purchaseOrder) {
       const normalizedPurchaseOrder = { ...response.purchaseOrder, taxType: response.purchaseOrder.taxType === 'No' ? 'No' : 'Yes' };
-      setPurchaseOrderSettings(prev => ({ ...prev, ...normalizedPurchaseOrder }));
-      localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedPurchaseOrder));
+      // Same schema-version safeguard as loadPurchaseOrderSettings() below.
+      const isCurrentPOSchema = normalizedPurchaseOrder.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+      const poTopMode = isCurrentPOSchema ? (normalizedPurchaseOrder.topMessageMode || 'Default') : 'Default';
+      const poBottomMode = isCurrentPOSchema ? (normalizedPurchaseOrder.bottomMessageMode || 'Default') : 'Default';
+      const finalPurchaseOrder = {
+        ...normalizedPurchaseOrder,
+        messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+        topMessageMode: poTopMode,
+        topMessage: poTopMode === 'Default' ? PURCHASE_ORDER_DEFAULT_TOP_MESSAGE : normalizedPurchaseOrder.topMessage,
+        bottomMessageMode: poBottomMode,
+        bottomMessage: poBottomMode === 'Default' ? PURCHASE_ORDER_DEFAULT_BOTTOM_MESSAGE : normalizedPurchaseOrder.bottomMessage,
+      };
+      setPurchaseOrderSettings(prev => ({ ...prev, ...finalPurchaseOrder }));
+      localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(finalPurchaseOrder));
     }
     if (response.proformaInvoice) {
       const normalizedProformaInvoice = { ...response.proformaInvoice, taxType: response.proformaInvoice.taxType === 'No' ? 'No' : 'Yes' };
-      setProformaInvoiceSettings(prev => ({ ...prev, ...normalizedProformaInvoice }));
-      localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(normalizedProformaInvoice));
+      // Same schema-version safeguard as loadProformaInvoiceSettings() below.
+      const isCurrentProformaSchema = normalizedProformaInvoice.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+      const proformaTopMode = isCurrentProformaSchema ? (normalizedProformaInvoice.topMessageMode || 'Default') : 'Default';
+      const proformaBottomMode = isCurrentProformaSchema ? (normalizedProformaInvoice.bottomMessageMode || 'Default') : 'Default';
+      const finalProformaInvoice = {
+        ...normalizedProformaInvoice,
+        messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+        topMessageMode: proformaTopMode,
+        topMessage: proformaTopMode === 'Default' ? PROFORMA_INVOICE_DEFAULT_TOP_MESSAGE : normalizedProformaInvoice.topMessage,
+        bottomMessageMode: proformaBottomMode,
+        bottomMessage: proformaBottomMode === 'Default' ? PROFORMA_INVOICE_DEFAULT_BOTTOM_MESSAGE : normalizedProformaInvoice.bottomMessage,
+      };
+      setProformaInvoiceSettings(prev => ({ ...prev, ...finalProformaInvoice }));
+      localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(finalProformaInvoice));
     }
     if (response.deliveryNote) {
-      setDeliveryNoteSettings(prev => ({ ...prev, ...response.deliveryNote }));
-      localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(response.deliveryNote));
+      // Same schema-version safeguard as loadDeliveryNoteSettings() below.
+      const isCurrentDNSchema = response.deliveryNote.messageModeSchemaVersion === MESSAGE_MODE_SCHEMA_VERSION;
+      const dnTopMode = isCurrentDNSchema ? (response.deliveryNote.topMessageMode || 'Default') : 'Default';
+      const dnBottomMode = isCurrentDNSchema ? (response.deliveryNote.bottomMessageMode || 'Default') : 'Default';
+      const finalDeliveryNote = {
+        ...response.deliveryNote,
+        messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
+        topMessageMode: dnTopMode,
+        topMessage: dnTopMode === 'Default' ? DELIVERY_NOTE_DEFAULT_TOP_MESSAGE : response.deliveryNote.topMessage,
+        bottomMessageMode: dnBottomMode,
+        bottomMessage: dnBottomMode === 'Default' ? DELIVERY_NOTE_DEFAULT_BOTTOM_MESSAGE : response.deliveryNote.bottomMessage,
+      };
+      setDeliveryNoteSettings(prev => ({ ...prev, ...finalDeliveryNote }));
+      localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(finalDeliveryNote));
     }
     if (response.receipt) {
       setReceiptSettings(prev => ({ ...prev, ...response.receipt }));
@@ -1247,7 +1518,11 @@ const loadUserSettings = async (userId) => {
 const loadUserTerms = async (userId) => {
   try {
     // Load terms for each document type
-    const types = ['Quotation', 'Invoice', 'PurchaseOrder', 'ProformaInvoice', 'DeliveryNote'];
+    // NOTE: these must match the exact documentType strings used when terms are created
+    // (see openAddTermsModal's context values / handleAddTerm) - the server matches on
+    // this string exactly, so a casing mismatch here silently returns zero terms for
+    // every document type on reload (e.g. after a fresh install with no local cache).
+    const types = ['quotation', 'invoice', 'purchaseOrder', 'proformaInvoice', 'deliveryNote'];
     const results = await Promise.all(
       types.map(type => termsService.getTerms(userId, type).catch(() => []))
     );
@@ -1264,16 +1539,27 @@ const loadUserTerms = async (userId) => {
 // Loads this user's quotations from the server and replaces local state +
 // the localStorage cache with what the DB actually has, the same pattern
 // used for loadUserProjects above.
+const [loadingQuotations, setLoadingQuotations] = useState(false);
 const loadUserQuotations = async (userId) => {
   try {
     setLoadingQuotations(true);
     const response = await documentService.getQuotations(userId);
-    setQuotations(response);
-    try { localStorage.setItem(QUOTATIONS_STORAGE_KEY, JSON.stringify(response)); } catch { /* ignore */ }
+    const parsedQuotations = response.map(q => {
+      let parsedSnapshot = null;
+      if (q.docSnapshot) {
+        try {
+          parsedSnapshot = JSON.parse(q.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing docSnapshot for quotation', q.id, e);
+          parsedSnapshot = null;
+        }
+      }
+      return { ...q, docSnapshot: parsedSnapshot };
+    });
+    setQuotations(parsedQuotations);
+    try { localStorage.setItem(QUOTATIONS_STORAGE_KEY, JSON.stringify(parsedQuotations)); } catch { /* ignore */ }
   } catch (error) {
     console.error('Error loading quotations:', error);
-    // Keep whatever was already loaded from the localStorage cache on failure,
-    // so the user can still see their last-known quotations while offline.
   } finally {
     setLoadingQuotations(false);
   }
@@ -1355,6 +1641,13 @@ const paymentService = {
   const [userName, setUserName] = useState(persistedUser?.fullName || undefined);
   
   const [profileImg, setProfileImg] = useState(persistedUser?.profileImg || null);
+  // Draft photo for the Update Profile modal. `undefined` = no pending change (modal
+  // preview falls back to the currently-saved `profileImg`); `null` = user tapped "Remove
+  // Photo" in the modal; a data URL = a newly picked/cropped photo. Kept separate from
+  // `profileImg` (which the Main Page and other headers read directly) so picking a new
+  // photo only previews inside the modal and does not touch the Main Page until the user
+  // actually taps Save Changes.
+  const [draftProfileImg, setDraftProfileImg] = useState(undefined);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   // Shared initials fallback (e.g. "Nilendra Gokhe" -> "NG") used everywhere the
@@ -1368,6 +1661,10 @@ const paymentService = {
   const [activeModule, setActiveModule] = useState(null);
   // ===== Sub-screen inside the Quotations module (e.g. 'business' = Update Business Info) =====
   const [quotationSubView, setQuotationSubView] = useState(null);
+  // Where a document's Settings detail screen (e.g. 'quotationSettingsDetail') should return to
+  // on Back - captured at the moment Settings is opened, since it's now reachable both from the
+  // per-document "Make X" page header and (still, internally) from the Settings menu list.
+  const [settingsReturnView, setSettingsReturnView] = useState('settingsMenu');
   // Where the product-picker screen ("Select Product") should return to on Back - captured at
   // the moment it's opened, since it can be reached either directly from a document's PRODUCTS
   // row or from that document's Add Product line form (when changing an already-picked product).
@@ -1438,7 +1735,7 @@ const paymentService = {
       taxLabel: businessInfo.taxLabel,
       taxNumber: businessInfo.taxNumber,
       state: businessInfo.state,
-      pincode: businessInfo.pincode,
+      pinCode: businessInfo.pincode,
       bankAccountName: businessInfo.bankAccountName,
       bankAccountNumber: businessInfo.bankAccountNumber,
       bankName: businessInfo.bankName,
@@ -1464,7 +1761,7 @@ const paymentService = {
       taxLabel: result.taxLabel || prev.taxLabel,
       taxNumber: result.taxNumber || prev.taxNumber,
       state: result.state || prev.state,
-      pincode: result.pincode || prev.pincode,
+      pincode: result.pinCode || prev.pincode,
       bankAccountName: result.bankAccountName || prev.bankAccountName,
       bankAccountNumber: result.bankAccountNumber || prev.bankAccountNumber,
       bankName: result.bankName || prev.bankName,
@@ -1633,14 +1930,35 @@ const paymentService = {
     const sy = (cropBox.y - cropImgLayout.offsetY) * scale;
     const sw = cropBox.w * scale;
     const sh = cropBox.h * scale;
+
+    // A camera photo can be several megapixels at native resolution. Keeping that full
+    // resolution here (the old code scaled `sw`/`sh` back up to the source image's native
+    // pixels) is what made saved logo/profile photos multi-MB PNGs - which later bloated
+    // generated PDFs to several MB and made the native Share sheet intermittently fail
+    // ("Could not prepare the document for sharing"). None of these ever display bigger
+    // than a small avatar or a 34pt PDF logo, so cap the output resolution before encoding.
+    const MAX_DIMENSION = imageCropper.key === 'qrCodeImg' ? 500 : 400;
+    const outScale = Math.min(1, MAX_DIMENSION / Math.max(sw, sh));
+    const outW = Math.max(1, Math.round(sw * outScale));
+    const outH = Math.max(1, Math.round(sh * outScale));
+
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(sw));
-    canvas.height = Math.max(1, Math.round(sh));
+    canvas.width = outW;
+    canvas.height = outH;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/png');
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+
+    // QR codes need crisp, lossless edges to stay scannable - everything else (a photo of
+    // a logo/stamp, a profile picture) is a continuous-tone photo that compresses far
+    // smaller as JPEG with no visible quality loss at these output sizes.
+    const dataUrl = imageCropper.key === 'qrCodeImg'
+      ? canvas.toDataURL('image/png')
+      : canvas.toDataURL('image/jpeg', 0.85);
     if (imageCropper.key === 'profileImg') {
-      setProfileImg(dataUrl);
+      // Only update the Update Profile modal's draft - NOT the saved `profileImg` that the
+      // Main Page reads from - so the new photo previews in the modal but doesn't show up
+      // elsewhere until Save Changes is clicked.
+      setDraftProfileImg(dataUrl);
     } else {
       updateBusinessField(imageCropper.key, dataUrl);
     }
@@ -1716,7 +2034,7 @@ const paymentService = {
   // ===== Quotations module: Quotation Settings =====
   // Professional default copy used whenever "Default" mode is selected for the top/bottom
   // message (also the fallback text for brand-new settings before the user has customized).
-  const QUOTATION_DEFAULT_TOP_MESSAGE = 'Thank you for considering us. Please find our quotation below';
+  const QUOTATION_DEFAULT_TOP_MESSAGE = 'Please find our quotation below';
   const QUOTATION_DEFAULT_BOTTOM_MESSAGE = 'We look forward to working with you';
   // The true, hardcoded factory defaults for Quotation Settings - used (a) as the very
   // first-run values before anything has ever been saved, and (b) by the Reset button,
@@ -1835,8 +2153,8 @@ const handleUpdateQuotationSettings = async () => {
   // ===== Quotations module: Invoice Settings =====
   // Professional default copy used whenever "Default" mode is selected for the top/bottom
   // message (also the fallback text for brand-new settings before the user has customized).
-  const INVOICE_DEFAULT_TOP_MESSAGE = 'Thank you for your continued business. Please find the invoice details below';
-  const INVOICE_DEFAULT_BOTTOM_MESSAGE = 'Thank you for your prompt payment';
+  const INVOICE_DEFAULT_TOP_MESSAGE = 'Please find the invoice details below';
+  const INVOICE_DEFAULT_BOTTOM_MESSAGE = 'Thank you for choosing us';
   // The true, hardcoded factory defaults for Invoice Settings - used (a) as the very
   // first-run values before anything has ever been saved, and (b) by the Reset button,
   // which must always land on these exact values regardless of whatever was previously
@@ -1940,7 +2258,7 @@ const handleUpdateQuotationSettings = async () => {
     await settingsService.updateInvoiceSettings(loggedInUser.userId, invoiceSettings);
     try { localStorage.setItem(INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(invoiceSettings)); } catch { /* ignore */ }
     showSuccess('Invoice settings updated.');
-    setQuotationSubView('settingsMenu');
+    setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating invoice settings:', error);
     showAlert('Could not save settings. Please try again.');
@@ -1950,7 +2268,7 @@ const handleUpdateQuotationSettings = async () => {
   // ===== Quotations module: Purchase Order Settings =====
   // Professional default copy used whenever "Default" mode is selected for the top/bottom
   // message (also the fallback text for brand-new settings before the user has customized).
-  const PURCHASE_ORDER_DEFAULT_TOP_MESSAGE = 'Dear Sir/Madam,\nThank you for your interest. Please find below the purchase order for your review and approval.';
+  const PURCHASE_ORDER_DEFAULT_TOP_MESSAGE = 'Please find the purchase order below';
   const PURCHASE_ORDER_DEFAULT_BOTTOM_MESSAGE = 'Thank you for your prompt attention to this order';
   // The true, hardcoded factory defaults for Purchase Order Settings - used (a) as the very
   // first-run values before anything has ever been saved, and (b) by the Reset button,
@@ -2055,7 +2373,7 @@ const handleUpdateQuotationSettings = async () => {
     await settingsService.updatePurchaseOrderSettings(loggedInUser.userId, purchaseOrderSettings);
     try { localStorage.setItem(PURCHASE_ORDER_SETTINGS_STORAGE_KEY, JSON.stringify(purchaseOrderSettings)); } catch { /* ignore */ }
     showSuccess('Purchase order settings updated.');
-    setQuotationSubView('settingsMenu');
+    setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating purchase order settings:', error);
     showAlert('Could not save settings. Please try again.');
@@ -2066,7 +2384,7 @@ const handleUpdateQuotationSettings = async () => {
   // ===== Quotations module: Proforma Invoice Settings =====
 // Professional default copy used whenever "Default" mode is selected for the top/bottom
 // message (also the fallback text for brand-new settings before the user has customized).
-const PROFORMA_INVOICE_DEFAULT_TOP_MESSAGE = 'Thank you for your interest. Please find the proforma invoice below';
+const PROFORMA_INVOICE_DEFAULT_TOP_MESSAGE = 'Please find the proforma invoice below';
 const PROFORMA_INVOICE_DEFAULT_BOTTOM_MESSAGE = 'We look forward to your confirmation.';
 // The true, hardcoded factory defaults for Proforma Invoice Settings - used (a) as the very
 // first-run values before anything has ever been saved, and (b) by the Reset button, which
@@ -2171,7 +2489,7 @@ const applyProformaInvoiceMessageMode = (kind, mode) => {
     await settingsService.updateProformaInvoiceSettings(loggedInUser.userId, proformaInvoiceSettings);
     try { localStorage.setItem(PROFORMA_INVOICE_SETTINGS_STORAGE_KEY, JSON.stringify(proformaInvoiceSettings)); } catch { /* ignore */ }
     showSuccess('Proforma invoice settings updated.');
-    setQuotationSubView('settingsMenu');
+    setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating proforma invoice settings:', error);
     showAlert('Could not save settings. Please try again.');
@@ -2197,6 +2515,8 @@ const getDefaultDeliveryNoteSettings = () => ({
   topMessage: DELIVERY_NOTE_DEFAULT_TOP_MESSAGE,
   bottomMessageMode: 'Default',
   bottomMessage: DELIVERY_NOTE_DEFAULT_BOTTOM_MESSAGE,
+  showBankInfo: 'No',
+  showUpiInfo: 'No',
   showSignature: 'Yes',
   messageModeSchemaVersion: MESSAGE_MODE_SCHEMA_VERSION,
 });
@@ -2281,7 +2601,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
     await settingsService.updateDeliveryNoteSettings(loggedInUser.userId, deliveryNoteSettings);
     try { localStorage.setItem(DELIVERY_NOTE_SETTINGS_STORAGE_KEY, JSON.stringify(deliveryNoteSettings)); } catch { /* ignore */ }
     showSuccess('Delivery note settings updated.');
-    setQuotationSubView('settingsMenu');
+    setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating delivery note settings:', error);
     showAlert('Could not save settings. Please try again.');
@@ -2315,7 +2635,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
     await settingsService.updateReceiptSettings(loggedInUser.userId, receiptSettings);
     try { localStorage.setItem(RECEIPT_SETTINGS_STORAGE_KEY, JSON.stringify(receiptSettings)); } catch { /* ignore */ }
     showSuccess('Receipt settings updated.');
-    setQuotationSubView('settingsMenu');
+    setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating receipt settings:', error);
     showAlert('Could not save settings. Please try again.');
@@ -2377,6 +2697,9 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerForm, setCustomerForm] = useState(emptyCustomerForm);
   const [editingCustomerId, setEditingCustomerId] = useState(null);
+  // Guards against double-tap / double-click while a save is in flight, so
+  // repeated clicks on "Add Customer" don't create duplicate customers.
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
   const updateCustomerField = (key, value) => setCustomerForm(prev => ({ ...prev, [key]: value }));
   const [customerGstinError, setCustomerGstinError] = useState(false);
   const [customerMobileError, setCustomerMobileError] = useState(false);
@@ -2422,6 +2745,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
     setQuotationSubView('addCustomer');
   };
   const handleSaveCustomer = async () => {
+    if (isSavingCustomer) return; // guard against double-tap / double-click while a save is in flight
     if (!customerForm.name.trim()) {
       showAlert('Please enter the customer name.');
       return;
@@ -2481,6 +2805,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
       return;
     }
 
+    setIsSavingCustomer(true);
     try {
       if (editingCustomerId) {
         const saved = await customerService.updateCustomer(editingCustomerId, finalCustomerForm);
@@ -2495,6 +2820,8 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
     } catch (error) {
       console.error('Error saving customer:', error);
       showAlert('Could not save the customer to the server. Please try again.');
+    } finally {
+      setIsSavingCustomer(false);
     }
   };
   const handleDeleteCustomer = (customer) => {
@@ -2892,7 +3219,7 @@ const handleDeleteProduct = (product) => {
       gst: Number(product.gst) || 0,
       unit: product.unit || '',
       hsn: product.hsn || '',
-      description: product.description || prev.description,
+      description: product.description || '',
       qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked,
                 // instead of carrying over whatever quantity was typed for the previous pick.
     }));
@@ -2933,9 +3260,23 @@ const handleDeleteProduct = (product) => {
   };
 
   const [isOtherChargeModalOpen, setIsOtherChargeModalOpen] = useState(false);
-  const [otherChargeForm, setOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const [otherChargeForm, setOtherChargeForm] = useState({ label: '', amount: '', taxable: false, gstPercent: '' });
+  const [editingOtherChargeId, setEditingOtherChargeId] = useState(null);
   const openOtherChargeModal = () => {
-    setOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setOtherChargeForm({ label: '', amount: '', taxable: false, gstPercent: '' });
+    setEditingOtherChargeId(null);
+    setIsOtherChargeModalOpen(true);
+  };
+  // Opens the same modal pre-filled with an existing other charge's data, so the user can
+  // correct its amount/label/tax without deleting and re-adding it.
+  const openEditOtherChargeModal = (charge) => {
+    setOtherChargeForm({
+      label: charge.label || 'Other Charges',
+      amount: charge.amount !== undefined && charge.amount !== null ? String(charge.amount) : '',
+      taxable: !!charge.taxable,
+      gstPercent: charge.taxable && charge.gstPercent !== undefined && charge.gstPercent !== null ? String(charge.gstPercent) : '',
+    });
+    setEditingOtherChargeId(charge.id);
     setIsOtherChargeModalOpen(true);
   };
   const handleSaveOtherCharge = () => {
@@ -2943,8 +3284,18 @@ const handleDeleteProduct = (product) => {
       showAlert('Please enter a valid other charge amount.');
       return;
     }
-    const newCharge = { ...otherChargeForm, id: genId() };
-    setQuotationForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    if (otherChargeForm.taxable && (( otherChargeForm.gstPercent === '' || otherChargeForm.gstPercent === null || otherChargeForm.gstPercent === undefined) || Number(otherChargeForm.gstPercent) < 0)) {
+      showAlert('Please enter a valid tax percentage.');
+      return;
+    }
+    const savedCharge = { ...otherChargeForm, label: otherChargeForm.label.trim() || 'Other Charges', gstPercent: otherChargeForm.taxable ? (Number(otherChargeForm.gstPercent) || 0) : 0 };
+    setQuotationForm((prev) => ({
+      ...prev,
+      otherCharges: editingOtherChargeId
+        ? prev.otherCharges.map((c) => (c.id === editingOtherChargeId ? { ...savedCharge, id: editingOtherChargeId } : c))
+        : [...prev.otherCharges, { ...savedCharge, id: genId() }],
+    }));
+    setEditingOtherChargeId(null);
     setIsOtherChargeModalOpen(false);
   };
   const removeQuotationOtherCharge = (id) => {
@@ -3039,9 +3390,23 @@ const handleDeleteProduct = (product) => {
   const [isAddTermsModalOpen, setIsAddTermsModalOpen] = useState(false);
   const [newTermText, setNewTermText] = useState('');
   const [termsModalContext, setTermsModalContext] = useState('quotation'); // 'quotation' | 'invoice' | 'purchaseOrder' | 'proformaInvoice' | 'deliveryNote'
+  // The id of the term currently being edited, or null when the modal is being used to add
+  // a brand new term. Kept alongside termsModalContext (not per-document-type) since only
+  // one Select Terms screen - and therefore only one instance of this modal - can be open
+  // at a time.
+  const [editingTermId, setEditingTermId] = useState(null);
   const openAddTermsModal = (context = 'quotation') => {
     setNewTermText('');
     setTermsModalContext(context);
+    setEditingTermId(null);
+    setIsAddTermsModalOpen(true);
+  };
+  // Opens the same modal pre-filled with an existing term's text, so the user can correct
+  // it in place instead of deleting it and adding a new one.
+  const openEditTermsModal = (term, context = 'quotation') => {
+    setNewTermText(term.text || '');
+    setTermsModalContext(context);
+    setEditingTermId(term.id);
     setIsAddTermsModalOpen(true);
   };
   // Find the openAddTermsModal function and update handleAddTerm:
@@ -3057,6 +3422,18 @@ const handleAddTerm = async () => {
   }
 
   try {
+    if (editingTermId) {
+      const updatedTerm = await termsService.updateTerm(editingTermId, { text: newTermText.trim() });
+      const catalog = getTermsCatalogByContext(termsModalContext);
+      persistTermsByContext(
+        termsModalContext,
+        catalog.map((t) => (t.id === editingTermId ? { ...t, ...updatedTerm, text: newTermText.trim() } : t))
+      );
+      setEditingTermId(null);
+      setIsAddTermsModalOpen(false);
+      return;
+    }
+
     const newTerm = await termsService.createTerm(
       loggedInUser.userId, 
       termsModalContext, 
@@ -3078,8 +3455,8 @@ const handleAddTerm = async () => {
     }
     setIsAddTermsModalOpen(false);
   } catch (error) {
-    console.error('Error adding term:', error);
-    showAlert('Could not save the term. Please try again.');
+    console.error(editingTermId ? 'Error updating term:' : 'Error adding term:', error);
+    showAlert(editingTermId ? 'Could not update the term. Please try again.' : 'Could not save the term. Please try again.');
   }
 };
   const selectedQuotationTerms = quotationTerms.filter((term) => quotationForm.termsIds.includes(term.id));
@@ -3117,10 +3494,11 @@ const handleAddTerm = async () => {
 
 
   const quotationProductsTotal = quotationForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
-  const quotationOtherChargesTotal = quotationForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const quotationOtherChargesTotal = quotationForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0) * (1 + (c.taxable ? (Number(c.gstPercent) || 0) / 100 : 0)), 0);
   const quotationAmountDue = Math.round(quotationProductsTotal + quotationOtherChargesTotal);
 
   const handleGenerateQuotation = async () => {
+  if (isSavingQuotation) return;
   if (!quotationForm.customerId) {
     showAlert('Please select a customer.');
     return;
@@ -3146,27 +3524,37 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedQuotationCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...quotationForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(quotationSettings) };
+  const docSnapshot = buildDocSettingsSnapshot(quotationSettings);
 
+  const payload = { 
+    ...quotationForm, 
+    ...customerSnapshot, 
+    docSnapshot: JSON.stringify(docSnapshot)
+  };
+
+  setIsSavingQuotation(true);
   try {
     if (editingQuotationId) {
       const saved = await documentService.updateQuotation(editingQuotationId, payload);
-      persistQuotations(quotations.map((q) => (q.id === editingQuotationId ? saved : q)));
+      const parsedSaved = { ...saved, docSnapshot: saved.docSnapshot ? JSON.parse(saved.docSnapshot) : null };
+      persistQuotations(quotations.map((q) => (q.id === editingQuotationId ? parsedSaved : q)));
       showSuccess('Quotation updated successfully.');
       setEditingQuotationId(null);
       setQuotationSubView('quotationDetail');
     } else {
       const created = await documentService.createQuotation(loggedInUser.userId, payload);
-      persistQuotations([...quotations, created]);
+      const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+      persistQuotations([...quotations, parsedCreated]);
       showSuccess('Quotation generated successfully.');
       setQuotationSubView('quotationList');
     }
   } catch (error) {
     console.error('Error saving quotation:', error);
     showAlert('Could not save the quotation. Please try again.');
+  } finally {
+    setIsSavingQuotation(false);
   }
 };
-
 
   // ===== Quotations module: Make Purchase Order =====
   const emptyPurchaseOrderForm = () => ({
@@ -3264,7 +3652,7 @@ const handleAddTerm = async () => {
       gst: Number(product.gst) || 0,
       unit: product.unit || '',
       hsn: product.hsn || '',
-      description: product.description || prev.description,
+      description: product.description || '',
       qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
     }));
     setQuotationSubView('addPurchaseOrderProductLine');
@@ -3303,9 +3691,21 @@ const handleAddTerm = async () => {
 
 
   const [isPurchaseOrderOtherChargeModalOpen, setIsPurchaseOrderOtherChargeModalOpen] = useState(false);
-  const [purchaseOrderOtherChargeForm, setPurchaseOrderOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const [purchaseOrderOtherChargeForm, setPurchaseOrderOtherChargeForm] = useState({ label: '', amount: '', taxable: false, gstPercent: '' });
+  const [editingPurchaseOrderOtherChargeId, setEditingPurchaseOrderOtherChargeId] = useState(null);
   const openPurchaseOrderOtherChargeModal = () => {
-    setPurchaseOrderOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setPurchaseOrderOtherChargeForm({ label: '', amount: '', taxable: false, gstPercent: '' });
+    setEditingPurchaseOrderOtherChargeId(null);
+    setIsPurchaseOrderOtherChargeModalOpen(true);
+  };
+  const openEditPurchaseOrderOtherChargeModal = (charge) => {
+    setPurchaseOrderOtherChargeForm({
+      label: charge.label || 'Other Charges',
+      amount: charge.amount !== undefined && charge.amount !== null ? String(charge.amount) : '',
+      taxable: !!charge.taxable,
+      gstPercent: charge.taxable && charge.gstPercent !== undefined && charge.gstPercent !== null ? String(charge.gstPercent) : '',
+    });
+    setEditingPurchaseOrderOtherChargeId(charge.id);
     setIsPurchaseOrderOtherChargeModalOpen(true);
   };
   const handleSavePurchaseOrderOtherCharge = () => {
@@ -3313,8 +3713,18 @@ const handleAddTerm = async () => {
       showAlert('Please enter a valid other charge amount.');
       return;
     }
-    const newCharge = { ...purchaseOrderOtherChargeForm, id: genId() };
-    setPurchaseOrderForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    if (purchaseOrderOtherChargeForm.taxable && (( purchaseOrderOtherChargeForm.gstPercent === '' || purchaseOrderOtherChargeForm.gstPercent === null || purchaseOrderOtherChargeForm.gstPercent === undefined) || Number(purchaseOrderOtherChargeForm.gstPercent) < 0)) {
+      showAlert('Please enter a valid tax percentage.');
+      return;
+    }
+    const savedCharge = { ...purchaseOrderOtherChargeForm, label: purchaseOrderOtherChargeForm.label.trim() || 'Other Charges', gstPercent: purchaseOrderOtherChargeForm.taxable ? (Number(purchaseOrderOtherChargeForm.gstPercent) || 0) : 0 };
+    setPurchaseOrderForm((prev) => ({
+      ...prev,
+      otherCharges: editingPurchaseOrderOtherChargeId
+        ? prev.otherCharges.map((c) => (c.id === editingPurchaseOrderOtherChargeId ? { ...savedCharge, id: editingPurchaseOrderOtherChargeId } : c))
+        : [...prev.otherCharges, { ...savedCharge, id: genId() }],
+    }));
+    setEditingPurchaseOrderOtherChargeId(null);
     setIsPurchaseOrderOtherChargeModalOpen(false);
   };
   const removePurchaseOrderOtherCharge = (id) => {
@@ -3341,10 +3751,11 @@ const handleAddTerm = async () => {
   const selectedPurchaseOrderTerms = purchaseOrderTerms.filter((term) => purchaseOrderForm.termsIds.includes(term.id));
 
   const purchaseOrderProductsTotal = purchaseOrderForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
-  const purchaseOrderOtherChargesTotal = purchaseOrderForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const purchaseOrderOtherChargesTotal = purchaseOrderForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0) * (1 + (c.taxable ? (Number(c.gstPercent) || 0) / 100 : 0)), 0);
   const purchaseOrderAmountDue = Math.round(purchaseOrderProductsTotal + purchaseOrderOtherChargesTotal);
 
   const handleGeneratePurchaseOrder = async () => {
+  if (isSavingPurchaseOrder) return;
   if (!purchaseOrderForm.customerId) {
     showAlert('Please select a customer.');
     return;
@@ -3370,27 +3781,36 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedPurchaseOrderCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...purchaseOrderForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(purchaseOrderSettings) };
+  const docSnapshot = buildDocSettingsSnapshot(purchaseOrderSettings);
+  const payload = { 
+    ...purchaseOrderForm, 
+    ...customerSnapshot, 
+    docSnapshot: JSON.stringify(docSnapshot)
+  };
 
+  setIsSavingPurchaseOrder(true);
   try {
     if (editingPurchaseOrderId) {
       const saved = await purchaseOrdersService.updatePurchaseOrder(editingPurchaseOrderId, payload);
-      persistPurchaseOrders(purchaseOrders.map((o) => (o.id === editingPurchaseOrderId ? saved : o)));
+      const parsedSaved = { ...saved, docSnapshot: saved.docSnapshot ? JSON.parse(saved.docSnapshot) : null };
+      persistPurchaseOrders(purchaseOrders.map((o) => (o.id === editingPurchaseOrderId ? parsedSaved : o)));
       showSuccess('Purchase Order updated successfully.');
       setEditingPurchaseOrderId(null);
       setQuotationSubView('purchaseOrderDetail');
     } else {
       const created = await purchaseOrdersService.createPurchaseOrder(loggedInUser.userId, payload);
-      persistPurchaseOrders([...purchaseOrders, created]);
+      const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+      persistPurchaseOrders([...purchaseOrders, parsedCreated]);
       showSuccess('Purchase Order generated successfully.');
       setQuotationSubView('purchaseOrderList');
     }
   } catch (error) {
     console.error('Error saving purchase order:', error);
     showAlert('Could not save the purchase order. Please try again.');
+  } finally {
+    setIsSavingPurchaseOrder(false);
   }
 };
-
   // ===== Quotations module: Make Proforma Invoice =====
   const emptyProformaInvoiceForm = () => ({
     date: formatQuotationDate(new Date()),
@@ -3490,7 +3910,7 @@ const handleAddTerm = async () => {
       gst: Number(product.gst) || 0,
       unit: product.unit || '',
       hsn: product.hsn || '',
-      description: product.description || prev.description,
+      description: product.description || '',
       qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
     }));
     setQuotationSubView('addProformaInvoiceProductLine');
@@ -3528,9 +3948,23 @@ const handleAddTerm = async () => {
   };
 
   const [isProformaInvoiceOtherChargeModalOpen, setIsProformaInvoiceOtherChargeModalOpen] = useState(false);
-  const [proformaInvoiceOtherChargeForm, setProformaInvoiceOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const [proformaInvoiceOtherChargeForm, setProformaInvoiceOtherChargeForm] = useState({ label: '', amount: '', taxable: false, gstPercent: '' });
+  const [editingProformaInvoiceOtherChargeId, setEditingProformaInvoiceOtherChargeId] = useState(null);
   const openProformaInvoiceOtherChargeModal = () => {
-    setProformaInvoiceOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setProformaInvoiceOtherChargeForm({ label: '', amount: '', taxable: false, gstPercent: '' });
+    setEditingProformaInvoiceOtherChargeId(null);
+    setIsProformaInvoiceOtherChargeModalOpen(true);
+  };
+  // Opens the same modal pre-filled with an existing other charge's data, so the user can
+  // correct its amount/label/tax without deleting and re-adding it.
+  const openEditProformaInvoiceOtherChargeModal = (charge) => {
+    setProformaInvoiceOtherChargeForm({
+      label: charge.label || 'Other Charges',
+      amount: charge.amount !== undefined && charge.amount !== null ? String(charge.amount) : '',
+      taxable: !!charge.taxable,
+      gstPercent: charge.taxable && charge.gstPercent !== undefined && charge.gstPercent !== null ? String(charge.gstPercent) : '',
+    });
+    setEditingProformaInvoiceOtherChargeId(charge.id);
     setIsProformaInvoiceOtherChargeModalOpen(true);
   };
   const handleSaveProformaInvoiceOtherCharge = () => {
@@ -3538,8 +3972,18 @@ const handleAddTerm = async () => {
       showAlert('Please enter a valid other charge amount.');
       return;
     }
-    const newCharge = { ...proformaInvoiceOtherChargeForm, id: genId() };
-    setProformaInvoiceForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    if (proformaInvoiceOtherChargeForm.taxable && (( proformaInvoiceOtherChargeForm.gstPercent === '' || proformaInvoiceOtherChargeForm.gstPercent === null || proformaInvoiceOtherChargeForm.gstPercent === undefined) || Number(proformaInvoiceOtherChargeForm.gstPercent) < 0)) {
+      showAlert('Please enter a valid tax percentage.');
+      return;
+    }
+    const savedCharge = { ...proformaInvoiceOtherChargeForm, label: proformaInvoiceOtherChargeForm.label.trim() || 'Other Charges', gstPercent: proformaInvoiceOtherChargeForm.taxable ? (Number(proformaInvoiceOtherChargeForm.gstPercent) || 0) : 0 };
+    setProformaInvoiceForm((prev) => ({
+      ...prev,
+      otherCharges: editingProformaInvoiceOtherChargeId
+        ? prev.otherCharges.map((c) => (c.id === editingProformaInvoiceOtherChargeId ? { ...savedCharge, id: editingProformaInvoiceOtherChargeId } : c))
+        : [...prev.otherCharges, { ...savedCharge, id: genId() }],
+    }));
+    setEditingProformaInvoiceOtherChargeId(null);
     setIsProformaInvoiceOtherChargeModalOpen(false);
   };
   const removeProformaInvoiceOtherCharge = (id) => {
@@ -3569,11 +4013,26 @@ const handleAddTerm = async () => {
   const emptyProformaPaidInfoForm = () => ({ date: '', amount: '', note: '' });
   const [isProformaPaidInfoModalOpen, setIsProformaPaidInfoModalOpen] = useState(false);
   const [proformaPaidInfoForm, setProformaPaidInfoForm] = useState(emptyProformaPaidInfoForm);
+  const [editingProformaPaidInfoId, setEditingProformaPaidInfoId] = useState(null);
   const [isProformaPaidInfoDatePickerOpen, setIsProformaPaidInfoDatePickerOpen] = useState(false);
   const [proformaPaidInfoCalendarMonth, setProformaPaidInfoCalendarMonth] = useState(() => new Date());
   const openAddProformaPaidInfoModal = () => {
     setProformaPaidInfoForm(emptyProformaPaidInfoForm());
+    setEditingProformaPaidInfoId(null);
     setProformaPaidInfoCalendarMonth(new Date());
+    setIsProformaPaidInfoModalOpen(true);
+  };
+  // Opens the same modal pre-filled with an existing paid info entry's data, so the user
+  // can correct its amount/date/note without deleting and re-adding it (mirrors
+  // openEditProformaInvoiceOtherChargeModal).
+  const openEditProformaPaidInfoModal = (paidInfo) => {
+    setProformaPaidInfoForm({
+      date: paidInfo.date || '',
+      amount: paidInfo.amount !== undefined && paidInfo.amount !== null ? String(paidInfo.amount) : '',
+      note: paidInfo.note || '',
+    });
+    setEditingProformaPaidInfoId(paidInfo.id);
+    setProformaPaidInfoCalendarMonth(parseQuotationDate(paidInfo.date) || new Date());
     setIsProformaPaidInfoModalOpen(true);
   };
   const handleSaveProformaPaidInfo = () => {
@@ -3585,8 +4044,15 @@ const handleAddTerm = async () => {
       showAlert(t('selectDateForAdvanceError') || 'Please select the paid date.');
       return;
     }
-    const newPaidInfo = { id: genId(), date: proformaPaidInfoForm.date, amount: Number(proformaPaidInfoForm.amount), note: proformaPaidInfoForm.note };
-    setProformaInvoiceForm((prev) => ({ ...prev, paidInfo: [...prev.paidInfo, newPaidInfo] }));
+    setProformaInvoiceForm((prev) => ({
+      ...prev,
+      paidInfo: editingProformaPaidInfoId
+        ? prev.paidInfo.map((p) => (p.id === editingProformaPaidInfoId
+            ? { ...p, date: proformaPaidInfoForm.date, amount: Number(proformaPaidInfoForm.amount), note: proformaPaidInfoForm.note }
+            : p))
+        : [...prev.paidInfo, { id: genId(), date: proformaPaidInfoForm.date, amount: Number(proformaPaidInfoForm.amount), note: proformaPaidInfoForm.note }],
+    }));
+    setEditingProformaPaidInfoId(null);
     setIsProformaPaidInfoModalOpen(false);
   };
   const removeProformaPaidInfoLine = (id) => {
@@ -3609,12 +4075,13 @@ const handleAddTerm = async () => {
   };
 
   const proformaInvoiceProductsTotal = proformaInvoiceForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
-  const proformaInvoiceOtherChargesTotal = proformaInvoiceForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const proformaInvoiceOtherChargesTotal = proformaInvoiceForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0) * (1 + (c.taxable ? (Number(c.gstPercent) || 0) / 100 : 0)), 0);
   const proformaInvoiceGrandTotal = Math.round(proformaInvoiceProductsTotal + proformaInvoiceOtherChargesTotal);
   const proformaInvoicePaidTotal = proformaInvoiceForm.paidInfo.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const proformaInvoiceAmountDue = Math.max(0, proformaInvoiceGrandTotal - proformaInvoicePaidTotal);
 
   const handleGenerateProformaInvoice = async () => {
+  if (isSavingProformaInvoice) return;
   if (!proformaInvoiceForm.customerId) {
     showAlert('Please select a customer.');
     return;
@@ -3640,24 +4107,34 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedProformaInvoiceCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...proformaInvoiceForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(proformaInvoiceSettings) };
+  const docSnapshot = buildDocSettingsSnapshot(proformaInvoiceSettings);
+  const payload = { 
+    ...proformaInvoiceForm, 
+    ...customerSnapshot, 
+    docSnapshot: JSON.stringify(docSnapshot)
+  };
 
+  setIsSavingProformaInvoice(true);
   try {
     if (editingProformaInvoiceId) {
       const saved = await proformaInvoicesService.updateProformaInvoice(editingProformaInvoiceId, payload);
-      persistProformaInvoices(proformaInvoices.map((inv) => (inv.id === editingProformaInvoiceId ? saved : inv)));
+      const parsedSaved = { ...saved, docSnapshot: saved.docSnapshot ? JSON.parse(saved.docSnapshot) : null };
+      persistProformaInvoices(proformaInvoices.map((inv) => (inv.id === editingProformaInvoiceId ? parsedSaved : inv)));
       showSuccess('Proforma Invoice updated successfully.');
       setEditingProformaInvoiceId(null);
       setQuotationSubView('proformaInvoiceDetail');
     } else {
       const created = await proformaInvoicesService.createProformaInvoice(loggedInUser.userId, payload);
-      persistProformaInvoices([...proformaInvoices, created]);
+      const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+      persistProformaInvoices([...proformaInvoices, parsedCreated]);
       showSuccess('Proforma Invoice generated successfully.');
       setQuotationSubView('proformaInvoiceList');
     }
   } catch (error) {
     console.error('Error saving proforma invoice:', error);
     showAlert('Could not save the proforma invoice. Please try again.');
+  } finally {
+    setIsSavingProformaInvoice(false);
   }
 };
 
@@ -3757,7 +4234,7 @@ const handleAddTerm = async () => {
       gst: Number(product.gst) || 0,
       unit: product.unit || '',
       hsn: product.hsn || '',
-      description: product.description || prev.description,
+      description: product.description || '',
       qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
     }));
     setQuotationSubView('addDeliveryNoteProductLine');
@@ -3815,6 +4292,7 @@ const handleAddTerm = async () => {
   const selectedDeliveryNoteTerms = deliveryNoteTerms.filter((term) => deliveryNoteForm.termsIds.includes(term.id));
 
   const handleGenerateDeliveryNote = async () => {
+  if (isSavingDeliveryNote) return;
   if (!deliveryNoteForm.customerId) {
     showAlert('Please select a customer.');
     return;
@@ -3840,24 +4318,34 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedDeliveryNoteCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...deliveryNoteForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings) };
+  const docSnapshot = buildDocSettingsSnapshot(deliveryNoteSettings);
+  const payload = { 
+    ...deliveryNoteForm, 
+    ...customerSnapshot, 
+    docSnapshot: JSON.stringify(docSnapshot)
+  };
 
+  setIsSavingDeliveryNote(true);
   try {
     if (editingDeliveryNoteId) {
       const saved = await deliveryNotesService.updateDeliveryNote(editingDeliveryNoteId, payload);
-      persistDeliveryNotes(deliveryNotes.map((dn) => (dn.id === editingDeliveryNoteId ? saved : dn)));
+      const parsedSaved = { ...saved, docSnapshot: saved.docSnapshot ? JSON.parse(saved.docSnapshot) : null };
+      persistDeliveryNotes(deliveryNotes.map((dn) => (dn.id === editingDeliveryNoteId ? parsedSaved : dn)));
       showSuccess('Delivery Note updated successfully.');
       setEditingDeliveryNoteId(null);
       setQuotationSubView('deliveryNoteDetail');
     } else {
       const created = await deliveryNotesService.createDeliveryNote(loggedInUser.userId, payload);
-      persistDeliveryNotes([...deliveryNotes, created]);
+      const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+      persistDeliveryNotes([...deliveryNotes, parsedCreated]);
       showSuccess('Delivery Note generated successfully.');
       setQuotationSubView('deliveryNoteList');
     }
   } catch (error) {
     console.error('Error saving delivery note:', error);
     showAlert('Could not save the delivery note. Please try again.');
+  } finally {
+    setIsSavingDeliveryNote(false);
   }
 };
 
@@ -3962,7 +4450,7 @@ const handleAddTerm = async () => {
       gst: Number(product.gst) || 0,
       unit: product.unit || '',
       hsn: product.hsn || '',
-      description: product.description || prev.description,
+      description: product.description || '',
       qty: '1', // Reset quantity to 1 whenever a (possibly different) product is picked.
     }));
     setQuotationSubView('addInvoiceProductLine');
@@ -4000,9 +4488,23 @@ const handleAddTerm = async () => {
   };
 
   const [isInvoiceOtherChargeModalOpen, setIsInvoiceOtherChargeModalOpen] = useState(false);
-  const [invoiceOtherChargeForm, setInvoiceOtherChargeForm] = useState({ label: 'Other Charges', amount: '', taxable: false });
+  const [invoiceOtherChargeForm, setInvoiceOtherChargeForm] = useState({ label: '', amount: '', taxable: false, gstPercent: '' });
+  const [editingInvoiceOtherChargeId, setEditingInvoiceOtherChargeId] = useState(null);
   const openInvoiceOtherChargeModal = () => {
-    setInvoiceOtherChargeForm({ label: 'Other Charges', amount: '', taxable: false });
+    setInvoiceOtherChargeForm({ label: '', amount: '', taxable: false, gstPercent: '' });
+    setEditingInvoiceOtherChargeId(null);
+    setIsInvoiceOtherChargeModalOpen(true);
+  };
+  // Opens the same modal pre-filled with an existing other charge's data, so the user can
+  // correct its amount/label/tax without deleting and re-adding it.
+  const openEditInvoiceOtherChargeModal = (charge) => {
+    setInvoiceOtherChargeForm({
+      label: charge.label || 'Other Charges',
+      amount: charge.amount !== undefined && charge.amount !== null ? String(charge.amount) : '',
+      taxable: !!charge.taxable,
+      gstPercent: charge.taxable && charge.gstPercent !== undefined && charge.gstPercent !== null ? String(charge.gstPercent) : '',
+    });
+    setEditingInvoiceOtherChargeId(charge.id);
     setIsInvoiceOtherChargeModalOpen(true);
   };
   const handleSaveInvoiceOtherCharge = () => {
@@ -4010,8 +4512,18 @@ const handleAddTerm = async () => {
       showAlert('Please enter a valid other charge amount.');
       return;
     }
-    const newCharge = { ...invoiceOtherChargeForm, id: genId() };
-    setInvoiceForm((prev) => ({ ...prev, otherCharges: [...prev.otherCharges, newCharge] }));
+    if (invoiceOtherChargeForm.taxable && (( invoiceOtherChargeForm.gstPercent === '' || invoiceOtherChargeForm.gstPercent === null || invoiceOtherChargeForm.gstPercent === undefined) || Number(invoiceOtherChargeForm.gstPercent) < 0)) {
+      showAlert('Please enter a valid tax percentage.');
+      return;
+    }
+    const savedCharge = { ...invoiceOtherChargeForm, label: invoiceOtherChargeForm.label.trim() || 'Other Charges', gstPercent: invoiceOtherChargeForm.taxable ? (Number(invoiceOtherChargeForm.gstPercent) || 0) : 0 };
+    setInvoiceForm((prev) => ({
+      ...prev,
+      otherCharges: editingInvoiceOtherChargeId
+        ? prev.otherCharges.map((c) => (c.id === editingInvoiceOtherChargeId ? { ...savedCharge, id: editingInvoiceOtherChargeId } : c))
+        : [...prev.otherCharges, { ...savedCharge, id: genId() }],
+    }));
+    setEditingInvoiceOtherChargeId(null);
     setIsInvoiceOtherChargeModalOpen(false);
   };
   const removeInvoiceOtherCharge = (id) => {
@@ -4041,11 +4553,26 @@ const handleAddTerm = async () => {
   const emptyPaidInfoForm = () => ({ date: '', amount: '', note: '' });
   const [isPaidInfoModalOpen, setIsPaidInfoModalOpen] = useState(false);
   const [paidInfoForm, setPaidInfoForm] = useState(emptyPaidInfoForm);
+  const [editingPaidInfoId, setEditingPaidInfoId] = useState(null);
   const [isPaidInfoDatePickerOpen, setIsPaidInfoDatePickerOpen] = useState(false);
   const [paidInfoCalendarMonth, setPaidInfoCalendarMonth] = useState(() => new Date());
   const openAddPaidInfoModal = () => {
     setPaidInfoForm(emptyPaidInfoForm());
+    setEditingPaidInfoId(null);
     setPaidInfoCalendarMonth(new Date());
+    setIsPaidInfoModalOpen(true);
+  };
+  // Opens the same modal pre-filled with an existing paid info entry's data, so the user
+  // can correct its amount/date/note without deleting and re-adding it (mirrors
+  // openEditProformaPaidInfoModal).
+  const openEditPaidInfoModal = (paidInfo) => {
+    setPaidInfoForm({
+      date: paidInfo.date || '',
+      amount: paidInfo.amount !== undefined && paidInfo.amount !== null ? String(paidInfo.amount) : '',
+      note: paidInfo.note || '',
+    });
+    setEditingPaidInfoId(paidInfo.id);
+    setPaidInfoCalendarMonth(parseQuotationDate(paidInfo.date) || new Date());
     setIsPaidInfoModalOpen(true);
   };
   const handleSavePaidInfo = () => {
@@ -4057,8 +4584,15 @@ const handleAddTerm = async () => {
       showAlert(t('selectDateForAdvanceError') || 'Please select the paid date.');
       return;
     }
-    const newPaidInfo = { id: genId(), date: paidInfoForm.date, amount: Number(paidInfoForm.amount), note: paidInfoForm.note };
-    setInvoiceForm((prev) => ({ ...prev, paidInfo: [...prev.paidInfo, newPaidInfo] }));
+    setInvoiceForm((prev) => ({
+      ...prev,
+      paidInfo: editingPaidInfoId
+        ? prev.paidInfo.map((p) => (p.id === editingPaidInfoId
+            ? { ...p, date: paidInfoForm.date, amount: Number(paidInfoForm.amount), note: paidInfoForm.note }
+            : p))
+        : [...prev.paidInfo, { id: genId(), date: paidInfoForm.date, amount: Number(paidInfoForm.amount), note: paidInfoForm.note }],
+    }));
+    setEditingPaidInfoId(null);
     setIsPaidInfoModalOpen(false);
   };
   const removePaidInfoLine = (id) => {
@@ -4081,12 +4615,13 @@ const handleAddTerm = async () => {
   };
 
   const invoiceProductsTotal = invoiceForm.products.reduce((sum, p) => sum + p.price * p.qty * (1 + p.gst / 100), 0);
-  const invoiceOtherChargesTotal = invoiceForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  const invoiceOtherChargesTotal = invoiceForm.otherCharges.reduce((sum, c) => sum + (Number(c.amount) || 0) * (1 + (c.taxable ? (Number(c.gstPercent) || 0) / 100 : 0)), 0);
   const invoiceGrandTotal = Math.round(invoiceProductsTotal + invoiceOtherChargesTotal);
   const invoicePaidTotal = invoiceForm.paidInfo.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const invoiceAmountDue = Math.max(0, invoiceGrandTotal - invoicePaidTotal);
 
   const handleGenerateInvoice = async () => {
+  if (isSavingInvoice) return;
   if (!invoiceForm.customerId) {
     showAlert('Please select a customer.');
     return;
@@ -4112,25 +4647,35 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedInvoiceCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...invoiceForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(invoiceSettings) };
+  const docSnapshot = buildDocSettingsSnapshot(invoiceSettings);
+  const payload = { 
+    ...invoiceForm, 
+    ...customerSnapshot, 
+    docSnapshot: JSON.stringify(docSnapshot),
+    status: 'Unpaid'
+  };
 
+  setIsSavingInvoice(true);
   try {
     if (editingInvoiceId) {
       const saved = await invoicesService.updateInvoice(editingInvoiceId, payload);
-      persistInvoices(invoices.map((inv) => (inv.id === editingInvoiceId ? saved : inv)));
+      const parsedSaved = { ...saved, docSnapshot: saved.docSnapshot ? JSON.parse(saved.docSnapshot) : null };
+      persistInvoices(invoices.map((inv) => (inv.id === editingInvoiceId ? parsedSaved : inv)));
       showSuccess('Invoice updated successfully.');
       setEditingInvoiceId(null);
       setQuotationSubView('invoiceDetail');
     } else {
-      // New invoices default to 'Unpaid' until the user marks them Paid / Partially Paid / Cancelled.
-      const created = await invoicesService.createInvoice(loggedInUser.userId, { ...payload, status: 'Unpaid' });
-      persistInvoices([...invoices, created]);
+      const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
+      const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+      persistInvoices([...invoices, parsedCreated]);
       showSuccess('Invoice generated successfully.');
       setQuotationSubView('invoiceList');
     }
   } catch (error) {
     console.error('Error saving invoice:', error);
     showAlert('Could not save the invoice. Please try again.');
+  } finally {
+    setIsSavingInvoice(false);
   }
 };
 
@@ -4221,6 +4766,7 @@ const handleAddTerm = async () => {
   const receiptPaidAmount = Number(receiptForm.paidAmount) || 0;
 
   const handleGenerateReceipt = async () => {
+  if (isSavingReceipt) return;
   if (!receiptForm.customerId) {
     showAlert('Please select a customer.');
     return;
@@ -4246,24 +4792,34 @@ const handleAddTerm = async () => {
     customerShippingAddress: selectedReceiptCustomer?.shippingAddress || '',
   };
 
-  const payload = { ...receiptForm, ...customerSnapshot, docSnapshot: buildDocSettingsSnapshot(receiptSettings) };
+  const docSnapshot = buildDocSettingsSnapshot(receiptSettings);
+  const payload = { 
+    ...receiptForm, 
+    ...customerSnapshot, 
+    docSnapshot: JSON.stringify(docSnapshot)
+  };
 
+  setIsSavingReceipt(true);
   try {
     if (editingReceiptId) {
       const saved = await receiptsService.updateReceipt(editingReceiptId, payload);
-      persistReceipts(receipts.map((r) => (r.id === editingReceiptId ? saved : r)));
+      const parsedSaved = { ...saved, docSnapshot: saved.docSnapshot ? JSON.parse(saved.docSnapshot) : null };
+      persistReceipts(receipts.map((r) => (r.id === editingReceiptId ? parsedSaved : r)));
       showSuccess('Receipt updated successfully.');
       setEditingReceiptId(null);
       setQuotationSubView('receiptDetail');
     } else {
       const created = await receiptsService.createReceipt(loggedInUser.userId, payload);
-      persistReceipts([...receipts, created]);
+      const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+      persistReceipts([...receipts, parsedCreated]);
       showSuccess('Receipt generated successfully.');
       setQuotationSubView('receiptList');
     }
   } catch (error) {
     console.error('Error saving receipt:', error);
     showAlert('Could not save the receipt. Please try again.');
+  } finally {
+    setIsSavingReceipt(false);
   }
 };
 
@@ -4274,6 +4830,16 @@ const handleAddTerm = async () => {
   const [editingDeliveryNoteId, setEditingDeliveryNoteId] = useState(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState(null);
   const [editingReceiptId, setEditingReceiptId] = useState(null);
+  // Guards against double-tap / double-click while a Generate/Update/Save is in
+  // flight, so repeated clicks don't create duplicate quotations, purchase
+  // orders, proforma invoices, delivery notes, invoices, or receipts (same
+  // fix pattern as isSavingWorker for Save Employee).
+  const [isSavingQuotation, setIsSavingQuotation] = useState(false);
+  const [isSavingPurchaseOrder, setIsSavingPurchaseOrder] = useState(false);
+  const [isSavingProformaInvoice, setIsSavingProformaInvoice] = useState(false);
+  const [isSavingDeliveryNote, setIsSavingDeliveryNote] = useState(false);
+  const [isSavingInvoice, setIsSavingInvoice] = useState(false);
+  const [isSavingReceipt, setIsSavingReceipt] = useState(false);
 
   const [showQuotationStatusSheet, setShowQuotationStatusSheet] = useState(false);
   const [showPurchaseOrderMoreSheet, setShowPurchaseOrderMoreSheet] = useState(false);
@@ -4346,26 +4912,34 @@ const handleAddTerm = async () => {
   // the information hierarchy stays identical across document types.
   // Pass either `amount` (a number, rendered as ₹X) or `amountText` (a raw
   // string, e.g. "2 items") for document types that don't carry a price.
+  // Compact single-card-row layout: a small initial avatar for quick scanning, name +
+  // doc#/date stacked tightly on two lines in the middle, amount + status stacked on the
+  // right, and a trailing chevron for affordance. Deliberately kept to two text lines and
+  // tight padding so noticeably more documents fit on screen without a scroll.
   const DocumentListCard = ({ name, docNumber, date, amount, amountText, status, onClick, rightAccessory }) => {
     const statusMeta = status ? (documentStatusColors[status] || documentStatusColors['In-Progress']) : null;
+    const initial = (name || '?').trim().charAt(0).toUpperCase() || '?';
     return (
       <button type="button" onClick={onClick} style={customerModuleStyles.docCard}>
-        <span style={customerModuleStyles.docCardName}>{name}</span>
-        <div style={customerModuleStyles.docCardRight}>
-          <span style={customerModuleStyles.docCardNumber}>{docNumber}</span>
-          <span style={customerModuleStyles.docCardDate}>{date}</span>
-          <div style={customerModuleStyles.docCardBottomRow}>
+        <div style={customerModuleStyles.docCardAvatar}>{initial}</div>
+        <div style={customerModuleStyles.docCardMain}>
+          <span style={customerModuleStyles.docCardName}>{name}</span>
+          <div style={customerModuleStyles.docCardSubRow}>
+            <span style={customerModuleStyles.docCardMeta}>{docNumber} · {date}</span>
             {rightAccessory}
-            {statusMeta && (
-              <span style={{ ...customerModuleStyles.docCardStatusPill, background: statusMeta.bg, color: statusMeta.text }}>
-                {status}
-              </span>
-            )}
-            <span style={customerModuleStyles.docCardAmount}>
-              {amountText !== undefined ? amountText : `₹${Number(amount || 0).toLocaleString('en-IN')}`}
-            </span>
           </div>
         </div>
+        <div style={customerModuleStyles.docCardRight}>
+          <span style={customerModuleStyles.docCardAmount}>
+            {amountText !== undefined ? amountText : `₹${Number(amount || 0).toLocaleString('en-IN')}`}
+          </span>
+          {statusMeta && (
+            <span style={{ ...customerModuleStyles.docCardStatusPill, background: statusMeta.bg, color: statusMeta.text }}>
+              {status}
+            </span>
+          )}
+        </div>
+        <FiChevronRight size={15} color="#CBD5E1" style={{ flexShrink: 0 }} />
       </button>
     );
   };
@@ -4463,249 +5037,360 @@ const handleAddTerm = async () => {
   // itself so later changes to Business Info, that document type's Settings, or Column
   // Heading Settings never alter an already-created document - it only picks up new values
   // the next time the user opens that specific document in Edit and taps Update/Generate.
-  const buildDocSettingsSnapshot = (settings = {}) => ({
-    topMessageMode: settings.topMessageMode,
-    topMessage: settings.topMessage,
-    bottomMessageMode: settings.bottomMessageMode,
-    bottomMessage: settings.bottomMessage,
-    showBankInfo: settings.showBankInfo,
-    showUpiInfo: settings.showUpiInfo,
-    showSignature: settings.showSignature,
-    showProductHSN: settings.showProductHSN,
-    showShippingAddress: settings.showShippingAddress,
-    taxType: settings.taxType,
-    hsnLabel: columnHeadingSettings.hsnLabel || 'HSN',
-    businessName: businessInfo?.businessName || '',
-    businessPhone: businessInfo?.phone || '',
-    businessEmail: businessInfo?.email || '',
-    logoImg: businessInfo?.logoImg || null,
-    signatureImg: businessInfo?.signatureImg || null,
-    bankAccountName: businessInfo?.bankAccountName || '',
-    bankAccountNumber: businessInfo?.bankAccountNumber || '',
-    bankName: businessInfo?.bankName || '',
-    ifscCode: businessInfo?.ifscCode || '',
-    upiId: businessInfo?.upiId || '',
-    qrCodeImg: businessInfo?.qrCodeImg || null,
-  });
-  const buildQuotationDocModel = (q) => {
-    const snap = q.docSnapshot || buildDocSettingsSnapshot(quotationSettings);
-    const rows = (q.products || []).map((p, idx) => {
-      const taxableAmt = (p.price || 0) * (p.qty || 0);
-      const gstAmt = taxableAmt * (p.gst || 0) / 100;
-      return {
-        index: idx + 1, name: p.name, hsn: p.hsn || '-', qty: p.qty, unit: p.unit || '',
-        price: p.price || 0, gstPct: p.gst || 0, gstAmt, total: taxableAmt + gstAmt,
-      };
-    });
-    const subTotal = (q.products || []).reduce((sum, p) => sum + (p.price || 0) * (p.qty || 0), 0);
-    const gstTotal = (q.products || []).reduce((sum, p) => sum + ((p.price || 0) * (p.qty || 0) * (p.gst || 0) / 100), 0);
-    const extraChargesTotal = (q.otherCharges || []).reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
-    const customerLines = buildCustomerLines(q);
-    const termsLines = quotationTerms.filter((t) => (q.termsIds || []).includes(t.id)).map((t) => t.text);
+  // This function returns an object (not a string)
+const buildDocSettingsSnapshot = (settings = {}) => ({
+  topMessageMode: settings.topMessageMode,
+  topMessage: settings.topMessage,
+  bottomMessageMode: settings.bottomMessageMode,
+  bottomMessage: settings.bottomMessage,
+  showBankInfo: settings.showBankInfo,
+  showUpiInfo: settings.showUpiInfo,
+  showSignature: settings.showSignature,
+  showProductHSN: settings.showProductHSN,
+  showShippingAddress: settings.showShippingAddress,
+  taxType: settings.taxType,
+  hsnLabel: columnHeadingSettings.hsnLabel || 'HSN',
+  businessName: businessInfo?.businessName || '',
+  businessPhone: businessInfo?.phone || '',
+  businessEmail: businessInfo?.email || '',
+  logoImg: businessInfo?.logoImg || null,
+  signatureImg: businessInfo?.signatureImg || null,
+  bankAccountName: businessInfo?.bankAccountName || '',
+  bankAccountNumber: businessInfo?.bankAccountNumber || '',
+  bankName: businessInfo?.bankName || '',
+  ifscCode: businessInfo?.ifscCode || '',
+  upiId: businessInfo?.upiId || '',
+  qrCodeImg: businessInfo?.qrCodeImg || null,
+});
+const buildQuotationDocModel = (q) => {
+  // If docSnapshot is a string, parse it; if it's already an object, use it
+  let snap = q.docSnapshot;
+  if (typeof snap === 'string') {
+    try {
+      snap = JSON.parse(snap);
+    } catch (e) {
+      snap = null;
+    }
+  }
+  // Fallback to current settings if no valid snapshot
+  if (!snap) {
+    snap = buildDocSettingsSnapshot(quotationSettings);
+  }
+  
+  const rows = (q.products || []).map((p, idx) => {
+    const taxableAmt = (p.price || 0) * (p.qty || 0);
+    const gstAmt = taxableAmt * (p.gst || 0) / 100;
     return {
-      quotationTitle: 'Quotation',
-      docTitle: 'Quotation',
-      toLabel: 'To,',
-      pricing: true,
-      businessName: snap.businessName || 'Manufacturer',
-      businessPhone: snap.businessPhone || '',
-      businessEmail: snap.businessEmail || '',
-      hsnLabel: snap.hsnLabel || 'HSN',
-      date: q.date,
-      customerLines,
-      shippingAddress: q.customerShippingAddress || '',
-      rows,
-      subTotal,
-      gstTotal,
-      otherChargesTotal: extraChargesTotal,
-      grandTotal: q.grandTotal || 0,
-      termsLines,
-      greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
-      closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
-      signatureName: snap.businessName || 'Manufacturer',
-      logoImg: snap.logoImg || null,
-      signatureImg: snap.signatureImg || null,
-      // Quotation Settings toggles: only shown on the Quotation PDF/preview when set to "Yes".
-      showGst: snap.taxType !== 'No',
-      showHsn: snap.showProductHSN === 'Yes',
-      showShippingAddress: snap.showShippingAddress === 'Yes',
-      showBankInfo: snap.showBankInfo === 'Yes',
-      showUpi: snap.showUpiInfo === 'Yes',
-      showSignature: snap.showSignature !== 'No',
-      bankAccountName: snap.bankAccountName || '',
-      bankAccountNumber: snap.bankAccountNumber || '',
-      bankName: snap.bankName || '',
-      ifscCode: snap.ifscCode || '',
-      upiId: snap.upiId || '',
-      qrCodeImg: snap.qrCodeImg || null,
+      index: idx + 1, name: p.name, hsn: p.hsn || '-', qty: p.qty, unit: p.unit || '',
+      price: p.price || 0, gstPct: p.gst || 0, gstAmt, total: taxableAmt + gstAmt,
     };
+  });
+  const subTotal = (q.products || []).reduce((sum, p) => sum + (p.price || 0) * (p.qty || 0), 0);
+  const gstTotal = (q.products || []).reduce((sum, p) => sum + ((p.price || 0) * (p.qty || 0) * (p.gst || 0) / 100), 0);
+  const otherChargesRows = (q.otherCharges || []).map((c) => {
+    const amount = Number(c.amount) || 0;
+    const gstPercent = c.taxable ? (Number(c.gstPercent) || 0) : 0;
+    const gstAmt = amount * gstPercent / 100;
+    return { label: c.label || 'Other Charges', amount, taxable: !!c.taxable, gstPercent, gstAmt, total: amount + gstAmt };
+  });
+  const extraChargesTotal = otherChargesRows.reduce((sum, c) => sum + c.total, 0);
+  const customerLines = buildCustomerLines(q);
+  const termsLines = quotationTerms.filter((t) => (q.termsIds || []).includes(t.id)).map((t) => t.text);
+  return {
+    quotationTitle: 'Quotation',
+    docTitle: 'Quotation',
+    toLabel: 'To,',
+    pricing: true,
+    businessName: snap.businessName || 'Manufacturer',
+    businessPhone: snap.businessPhone || '',
+    businessEmail: snap.businessEmail || '',
+    hsnLabel: snap.hsnLabel || 'HSN',
+    date: q.date,
+    customerLines,
+    shippingAddress: q.customerShippingAddress || '',
+    rows,
+    subTotal,
+    gstTotal,
+    otherChargesTotal: extraChargesTotal,
+    otherChargesRows,
+    grandTotal: q.grandTotal || 0,
+    termsLines,
+    greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+    closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+    signatureName: snap.businessName || 'Manufacturer',
+    logoImg: snap.logoImg || null,
+    signatureImg: snap.signatureImg || null,
+    showGst: snap.taxType !== 'No',
+    showHsn: snap.showProductHSN === 'Yes',
+    showShippingAddress: snap.showShippingAddress === 'Yes',
+    showBankInfo: snap.showBankInfo === 'Yes',
+    showUpi: snap.showUpiInfo === 'Yes',
+    showSignature: snap.showSignature !== 'No',
+    bankAccountName: snap.bankAccountName || '',
+    bankAccountNumber: snap.bankAccountNumber || '',
+    bankName: snap.bankName || '',
+    ifscCode: snap.ifscCode || '',
+    upiId: snap.upiId || '',
+    qrCodeImg: snap.qrCodeImg || null,
   };
-
+};
+const buildReceiptDocModel = (r) => {
+  // If docSnapshot is a string, parse it; if it's already an object, use it
+  let snap = r.docSnapshot;
+  if (typeof snap === 'string') {
+    try {
+      snap = JSON.parse(snap);
+    } catch (e) {
+      snap = null;
+    }
+  }
+  // Fallback to current settings if no valid snapshot
+  if (!snap) {
+    snap = buildDocSettingsSnapshot(receiptSettings);
+  }
+  
+  const customerLines = buildCustomerLines(r);
+  
+  return {
+    docTitle: 'Receipt',
+    businessName: snap.businessName || 'Manufacturer',
+    businessPhone: snap.businessPhone || '',
+    businessEmail: snap.businessEmail || '',
+    date: r.date,
+    toLabel: 'To,',
+    customerLines,
+    paymentMode: r.paymentMode || '-',
+    referenceNo: r.referenceNo || '-',
+    paidAmount: r.paidAmount || 0,
+    paymentFor: r.paymentFor || '-',
+    signatureName: snap.businessName || 'Manufacturer',
+    logoImg: snap.logoImg || null,
+    signatureImg: snap.signatureImg || null,
+    showSignature: snap.showSignature !== 'No',
+  };
+};
   // Generic document-model builder shared by Invoice / Purchase Order / Proforma Invoice /
   // Delivery Note detail screens and their PDFs. Produces the exact same shape as
   // buildQuotationDocModel (header/business info + logo, To/Date, item rows, totals,
   // terms, signature + signature image) so every document type gets the identical layout
   // Quotation Detail already has — only the type-specific text/labels/fields passed in via
   // `opts` differ (doc title prefix, greeting/closing copy, which totals rows apply, etc).
-  const buildDocModel = (doc, opts) => {
-    const {
-      docTypeLabel, docNo, terms, toLabel, greetingLines, closingText, pricing = true, hasPayment = false,
-      showBankInfo = false, showUpi = false, showSignature = true, showHsn = true, showGst = true, showShippingAddress = false,
-      snapshot = {},
-    } = opts;
-    const rows = (doc.products || []).map((p, idx) => {
-      const taxableAmt = (p.price || 0) * (p.qty || 0);
-      const gstAmt = taxableAmt * (p.gst || 0) / 100;
-      return {
-        index: idx + 1, name: p.name, hsn: p.hsn || '-', qty: p.qty, unit: p.unit || '',
-        price: p.price || 0, gstPct: p.gst || 0, gstAmt, total: taxableAmt + gstAmt,
-      };
-    });
-    const subTotal = (doc.products || []).reduce((sum, p) => sum + (p.price || 0) * (p.qty || 0), 0);
-    const gstTotal = (doc.products || []).reduce((sum, p) => sum + ((p.price || 0) * (p.qty || 0) * (p.gst || 0) / 100), 0);
-    const extraChargesTotal = (doc.otherCharges || []).reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
-    const customerLines = buildCustomerLines(doc);
-    const termsLines = (terms || []).filter((t) => (doc.termsIds || []).includes(t.id)).map((t) => t.text);
+const buildDocModel = (doc, opts) => {
+  const {
+    docTypeLabel, docNo, terms, toLabel, greetingLines, closingText, pricing = true, hasPayment = false,
+    showBankInfo = false, showUpi = false, showSignature = true, showHsn = true, showGst = true, 
+    showShippingAddress = false, showReceivedBy = false, snapshot = {},
+  } = opts;
+  
+  const rows = (doc.products || []).map((p, idx) => {
+    const taxableAmt = (p.price || 0) * (p.qty || 0);
+    const gstAmt = taxableAmt * (p.gst || 0) / 100;
     return {
-      docTitle: docTypeLabel,
-      businessName: snapshot.businessName || 'Manufacturer',
-      businessPhone: snapshot.businessPhone || '',
-      businessEmail: snapshot.businessEmail || '',
-      hsnLabel: snapshot.hsnLabel || 'HSN',
-      date: doc.date,
-      toLabel: toLabel || 'To,',
-      customerLines,
-      shippingAddress: doc.customerShippingAddress || '',
-      greetingLines: greetingLines || [],
-      closingText: closingText || '',
-      rows,
-      subTotal,
-      gstTotal,
-      otherChargesTotal: extraChargesTotal,
-      grandTotal: doc.grandTotal || 0,
-      hasPayment,
-      paidTotal: doc.paidTotal || 0,
-      balanceDue: doc.balanceDue ?? doc.grandTotal ?? 0,
-      paidInfo: doc.paidInfo || [],
-      termsLines,
-      signatureName: snapshot.businessName || 'Manufacturer',
-      logoImg: snapshot.logoImg || null,
-      signatureImg: snapshot.signatureImg || null,
-      pricing,
-      otherInfo: doc.otherInfo || '',
-      // Settings toggles: only shown on this doc type's PDF/preview when the caller opts in
-      // (driven by that document type's own Settings screen, e.g. Purchase Order Settings).
-      showBankInfo,
-      showUpi,
-      showSignature,
-      showHsn,
-      showGst,
-      showShippingAddress,
-      bankAccountName: snapshot.bankAccountName || '',
-      bankAccountNumber: snapshot.bankAccountNumber || '',
-      bankName: snapshot.bankName || '',
-      ifscCode: snapshot.ifscCode || '',
-      upiId: snapshot.upiId || '',
-      qrCodeImg: snapshot.qrCodeImg || null,
+      index: idx + 1, name: p.name, hsn: p.hsn || '-', qty: p.qty, unit: p.unit || '',
+      price: p.price || 0, gstPct: p.gst || 0, gstAmt, total: taxableAmt + gstAmt,
     };
+  });
+  const subTotal = (doc.products || []).reduce((sum, p) => sum + (p.price || 0) * (p.qty || 0), 0);
+  const gstTotal = (doc.products || []).reduce((sum, p) => sum + ((p.price || 0) * (p.qty || 0) * (p.gst || 0) / 100), 0);
+  
+  // Updated other charges with tax information
+  const otherChargesRows = (doc.otherCharges || []).map((c) => {
+    const amount = Number(c.amount) || 0;
+    const gstPercent = c.taxable ? (Number(c.gstPercent) || 0) : 0;
+    const gstAmt = amount * gstPercent / 100;
+    return { 
+      label: c.label || 'Other Charges', 
+      amount, 
+      taxable: !!c.taxable, 
+      gstPercent, 
+      gstAmt, 
+      total: amount + gstAmt,
+      displayLabel: c.taxable && gstPercent > 0 ? `${c.label} (GST ${gstPercent}%)` : c.label
+    };
+  });
+  const extraChargesTotal = otherChargesRows.reduce((sum, c) => sum + c.total, 0);
+  const customerLines = buildCustomerLines(doc);
+  const termsLines = (terms || []).filter((t) => (doc.termsIds || []).includes(t.id)).map((t) => t.text);
+  
+  return {
+    docTitle: docTypeLabel,
+    businessName: snapshot.businessName || 'Manufacturer',
+    businessPhone: snapshot.businessPhone || '',
+    businessEmail: snapshot.businessEmail || '',
+    hsnLabel: snapshot.hsnLabel || 'HSN',
+    date: doc.date,
+    toLabel: toLabel || 'To,',
+    customerLines,
+    shippingAddress: doc.customerShippingAddress || '',
+    greetingLines: greetingLines || [],
+    closingText: closingText || '',
+    rows,
+    subTotal,
+    gstTotal,
+    otherChargesTotal: extraChargesTotal,
+    otherChargesRows,
+    grandTotal: doc.grandTotal || 0,
+    hasPayment,
+    paidTotal: doc.paidTotal || 0,
+    balanceDue: doc.balanceDue ?? doc.grandTotal ?? 0,
+    paidInfo: doc.paidInfo || [],
+    termsLines,
+    signatureName: snapshot.businessName || 'Manufacturer',
+    logoImg: snapshot.logoImg || null,
+    signatureImg: snapshot.signatureImg || null,
+    pricing,
+    otherInfo: doc.otherInfo || '',
+    showBankInfo,
+    showUpi,
+    showSignature,
+    showHsn,
+    showGst,
+    showShippingAddress,
+    showReceivedBy,
+    bankAccountName: snapshot.bankAccountName || '',
+    bankAccountNumber: snapshot.bankAccountNumber || '',
+    bankName: snapshot.bankName || '',
+    ifscCode: snapshot.ifscCode || '',
+    upiId: snapshot.upiId || '',
+    qrCodeImg: snapshot.qrCodeImg || null,
   };
+};
 
   // Type-specific wrappers around buildDocModel — each just supplies the doc-type label,
   // number field, terms catalog, and greeting/closing copy appropriate to that document,
   // while the shape (header + logo, To/Date, table, totals, terms, signature + signature
   // image) stays identical to Quotation Detail's design across every document type.
-  const buildPurchaseOrderDocModel = (o) => {
-    const snap = o.docSnapshot || buildDocSettingsSnapshot(purchaseOrderSettings);
-    return buildDocModel(o, {
-      docTypeLabel: 'Purchase Order',
-      docNo: o.purchaseOrderNo,
-      terms: purchaseOrderTerms,
-      toLabel: 'To,',
-      greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
-      closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
-      pricing: true,
-      hasPayment: false,
-      // Purchase Order Settings toggles: HSN and GST were previously always shown regardless
-      // of the "Product HSN Display" / "GST Display" toggles below — wired up here so the
-      // Purchase Order PDF/preview matches its own Settings screen, same as every other doc type.
-      showHsn: snap.showProductHSN === 'Yes',
-      showGst: snap.taxType !== 'No',
-      showShippingAddress: snap.showShippingAddress === 'Yes',
-      showBankInfo: snap.showBankInfo === 'Yes',
-      showUpi: snap.showUpiInfo === 'Yes',
-      showSignature: snap.showSignature !== 'No',
-      snapshot: snap,
-    });
-  };
-  const buildProformaInvoiceDocModel = (inv) => {
-  const snap = inv.docSnapshot || buildDocSettingsSnapshot(proformaInvoiceSettings);
-  return buildDocModel(inv, {
-  docTypeLabel: 'Proforma Invoice',
-  docNo: inv.proformaInvoiceNo,
-  terms: proformaInvoiceTerms,
-  toLabel: 'Bill To,',
-  greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
-  closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
-  pricing: true,
-  hasPayment: true,
-  // Proforma Invoice Settings toggles: only shown on the Proforma Invoice PDF/preview
-  // when set to "Yes", matching how Quotation/Invoice Settings drive their own detail screens.
-  showHsn: snap.showProductHSN === 'Yes',
-  showGst: snap.taxType !== 'No',
-  showShippingAddress: snap.showShippingAddress === 'Yes',
-  showBankInfo: snap.showBankInfo === 'Yes',
-  showUpi: snap.showUpiInfo === 'Yes',
-  showSignature: snap.showSignature !== 'No',
-  snapshot: snap,
-});
+const buildPurchaseOrderDocModel = (o) => {
+  // If docSnapshot is a string, parse it; if it's already an object, use it
+  let snap = o.docSnapshot;
+  if (typeof snap === 'string') {
+    try {
+      snap = JSON.parse(snap);
+    } catch (e) {
+      snap = null;
+    }
+  }
+  // Fallback to current settings if no valid snapshot
+  if (!snap) {
+    snap = buildDocSettingsSnapshot(purchaseOrderSettings);
+  }
+  
+  return buildDocModel(o, {
+    docTypeLabel: 'Purchase Order',
+    docNo: o.purchaseOrderNo,
+    terms: purchaseOrderTerms,
+    toLabel: 'To,',
+    greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+    closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+    pricing: true,
+    hasPayment: false,
+    showHsn: snap.showProductHSN === 'Yes',
+    showGst: snap.taxType !== 'No',
+    showShippingAddress: snap.showShippingAddress === 'Yes',
+    showBankInfo: snap.showBankInfo === 'Yes',
+    showUpi: snap.showUpiInfo === 'Yes',
+    showSignature: snap.showSignature !== 'No',
+    snapshot: snap,
+  });
 };
-  const buildInvoiceDocModel = (inv) => {
-    const snap = inv.docSnapshot || buildDocSettingsSnapshot(invoiceSettings);
-    return buildDocModel(inv, {
-      docTypeLabel: 'Invoice',
-      docNo: inv.invoiceNo,
-      terms: invoiceTerms,
-      toLabel: 'Bill To,',
-      greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
-      closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
-      pricing: true,
-      hasPayment: true,
-      // Invoice Settings toggles: only shown on the Invoice PDF/preview when set to "Yes",
-      // matching how Quotation Settings drives Quotation Detail.
-      showHsn: snap.showProductHSN === 'Yes',
-      showGst: snap.taxType !== 'No',
-      showShippingAddress: snap.showShippingAddress === 'Yes',
-      showBankInfo: snap.showBankInfo === 'Yes',
-      showUpi: snap.showUpiInfo === 'Yes',
-      showSignature: snap.showSignature !== 'No',
-      snapshot: snap,
-    });
-  };
-  const buildDeliveryNoteDocModel = (dn) => {
-  const snap = dn.docSnapshot || buildDocSettingsSnapshot(deliveryNoteSettings);
+const buildProformaInvoiceDocModel = (inv) => {
+  // If docSnapshot is a string, parse it; if it's already an object, use it
+  let snap = inv.docSnapshot;
+  if (typeof snap === 'string') {
+    try {
+      snap = JSON.parse(snap);
+    } catch (e) {
+      snap = null;
+    }
+  }
+  // Fallback to current settings if no valid snapshot
+  if (!snap) {
+    snap = buildDocSettingsSnapshot(proformaInvoiceSettings);
+  }
+  
+  return buildDocModel(inv, {
+    docTypeLabel: 'Proforma Invoice',
+    docNo: inv.proformaInvoiceNo,
+    terms: proformaInvoiceTerms,
+    toLabel: 'Bill To,',
+    greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+    closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+    pricing: true,
+    hasPayment: true,
+    showHsn: snap.showProductHSN === 'Yes',
+    showGst: snap.taxType !== 'No',
+    showShippingAddress: snap.showShippingAddress === 'Yes',
+    showBankInfo: snap.showBankInfo === 'Yes',
+    showUpi: snap.showUpiInfo === 'Yes',
+    showSignature: snap.showSignature !== 'No',
+    snapshot: snap,
+  });
+};
+const buildInvoiceDocModel = (inv) => {
+  // If docSnapshot is a string, parse it; if it's already an object, use it
+  let snap = inv.docSnapshot;
+  if (typeof snap === 'string') {
+    try {
+      snap = JSON.parse(snap);
+    } catch (e) {
+      snap = null;
+    }
+  }
+  // Fallback to current settings if no valid snapshot
+  if (!snap) {
+    snap = buildDocSettingsSnapshot(invoiceSettings);
+  }
+  
+  return buildDocModel(inv, {
+    docTypeLabel: 'Invoice',
+    docNo: inv.invoiceNo,
+    terms: invoiceTerms,
+    toLabel: 'Bill To,',
+    greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+    closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+    pricing: true,
+    hasPayment: true,
+    showHsn: snap.showProductHSN === 'Yes',
+    showGst: snap.taxType !== 'No',
+    showShippingAddress: snap.showShippingAddress === 'Yes',
+    showBankInfo: snap.showBankInfo === 'Yes',
+    showUpi: snap.showUpiInfo === 'Yes',
+    showSignature: snap.showSignature !== 'No',
+    snapshot: snap,
+  });
+};
+const buildDeliveryNoteDocModel = (dn) => {
+  // If docSnapshot is a string, parse it; if it's already an object, use it
+  let snap = dn.docSnapshot;
+  if (typeof snap === 'string') {
+    try {
+      snap = JSON.parse(snap);
+    } catch (e) {
+      snap = null;
+    }
+  }
+  // Fallback to current settings if no valid snapshot
+  if (!snap) {
+    snap = buildDocSettingsSnapshot(deliveryNoteSettings);
+  }
+  
   return buildDocModel(dn, {
-  docTypeLabel: 'Delivery Note',
-  docNo: dn.deliveryNoteNo,
-  terms: deliveryNoteTerms,
-  toLabel: 'To,',
-  greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
-  closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
-  pricing: false,
-  hasPayment: false,
-  // Delivery Note Settings toggles: HSN and Signature were previously always shown
-  // regardless of the "Product HSN Display" / "Signature Display" toggles below — wired
-  // up here so the Delivery Note PDF/preview matches its own Settings screen.
-  showHsn: snap.showProductHSN === 'Yes',
-  showSignature: snap.showSignature !== 'No',
-  showShippingAddress: snap.showShippingAddress === 'Yes',
-  // Delivery Note only: a "Received By" acknowledgement block (Name / Date / Signature)
-  // is shown on the left, at the very bottom of the document - below Terms & Conditions
-  // and any other trailing sections, alongside the business's own Authorized Signature
-  // on the right. See showReceivedBy handling in GeneratedDocumentPreview and
-  // shareStandardDocumentPdf.
-  showReceivedBy: true,
-  snapshot: snap,
-});
+    docTypeLabel: 'Delivery Note',
+    docNo: dn.deliveryNoteNo,
+    terms: deliveryNoteTerms,
+    toLabel: 'To,',
+    greetingLines: snap.topMessageMode === 'Hide' ? [] : splitTopMessageLines(snap.topMessage),
+    closingText: snap.bottomMessageMode === 'Hide' ? '' : (snap.bottomMessage || ''),
+    pricing: false,
+    hasPayment: false,
+    showHsn: snap.showProductHSN === 'Yes',
+    showSignature: snap.showSignature !== 'No',
+    showShippingAddress: snap.showShippingAddress === 'Yes',
+    showBankInfo: snap.showBankInfo === 'Yes',
+    showUpi: snap.showUpiInfo === 'Yes',
+    showReceivedBy: true,
+    snapshot: snap,
+  });
 };
 
   // Renders the full document body (header/logo, To+Date, greeting, item table, totals,
@@ -4713,171 +5398,261 @@ const handleAddTerm = async () => {
   // model built by buildDocModel/buildQuotationDocModel — the exact same visual structure
   // Quotation Detail uses, reused by every other document type's in-app preview.
   const GeneratedDocumentPreview = ({ model }) => {
-    // These settings-driven flags default to "on" (undefined !== false) for document types
-    // that don't define them (Invoice/Purchase Order/Proforma Invoice/Delivery Note), so
-    // their preview keeps behaving exactly as before. Only Quotation sets them explicitly,
-    // driven by Quotation Settings.
-    const showHsn = model.showHsn !== false;
-    const showGst = model.showGst !== false;
-    const showSignature = model.showSignature !== false;
-    const showShippingAddress = !!model.showShippingAddress && !!model.shippingAddress;
-    const showBankInfo = !!model.showBankInfo && (model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode);
-    const showUpi = !!model.showUpi && (model.upiId || model.qrCodeImg);
-    const showReceivedBy = !!model.showReceivedBy;
-    const totalCols = 2 + (showHsn ? 1 : 0) + 1 + (model.pricing ? (1 + (showGst ? 1 : 0) + 1) : 0);
-    const footerColSpan = totalCols - 1;
-    return (
-      <>
-        {/* Header: Doc title (top, centered), then Business info + logo below */}
-        <div style={{ marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0' }}>
-          <p style={{ ...docStyles.docTypeLabel, textTransform: 'none', textAlign: 'center', margin: '0 0 12px' }}>{model.docTitle}</p>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <h2 style={docStyles.businessName}>{model.businessName}</h2>
-              {model.businessPhone && <p style={docStyles.contactLine}>{model.businessPhone}</p>}
-              {model.businessEmail && <p style={docStyles.contactLine}>{model.businessEmail}</p>}
-            </div>
-            {model.logoImg && (
-              <img src={model.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
-            )}
-          </div>
-        </div>
-
-        {/* To, (left) | Date (right) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: showShippingAddress ? '10px' : '16px' }}>
-          <div style={{ flex: 1 }}>
-            <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>{model.toLabel}</p>
-            {model.customerLines.map((line, idx) => (
-              <p key={idx} style={idx === 0 ? docStyles.toName : docStyles.contactLine}>{line}</p>
-            ))}
-          </div>
-          <div style={{ flexShrink: 0, textAlign: 'right' }}>
-            <p style={docStyles.docMetaLine}>Date: {model.date}</p>
-          </div>
-        </div>
-
-        {/* Shipping Address (Quotation only, when enabled in Quotation Settings) */}
-        {showShippingAddress && (
-          <div style={{ marginBottom: '16px' }}>
-            <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>Shipping Address</p>
-            <p style={docStyles.contactLine}>{model.shippingAddress}</p>
-          </div>
-        )}
-
-        {model.greetingLines.length > 0 && (
-          <p style={docStyles.bodyText}>
-            {model.greetingLines.map((line, idx) => (
-              <Fragment key={idx}>
-                {line}
-                {idx < model.greetingLines.length - 1 ? <br /> : null}
-              </Fragment>
-            ))}
-          </p>
-        )}
-
-        {/* Table */}
-        <div style={docStyles.tableWrap}>
-          <table style={docStyles.table}>
-            <thead>
-              <tr>
-                <th style={{ ...docStyles.th, width: model.pricing ? '6%' : '10%' }}>#</th>
-                <th style={{ ...docStyles.th, width: model.pricing ? '22%' : '42%', wordBreak: 'break-word' }}>Item</th>
-                {showHsn && <th style={{ ...docStyles.th, width: model.pricing ? '11%' : '23%', wordBreak: 'break-word' }}>{model.hsnLabel}</th>}
-                <th style={{ ...docStyles.th, textAlign: 'center', width: model.pricing ? '11%' : '25%' }}>Qty</th>
-                {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '17%' }}>Price</th>}
-                {model.pricing && showGst && <th style={{ ...docStyles.th, textAlign: 'right', width: '15%' }}>GST</th>}
-                {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '18%' }}>Total</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {model.rows.map((r) => (
-                <tr key={r.index}>
-                  <td style={docStyles.td}>{r.index}</td>
-                  <td style={docStyles.td}>
-                    <div style={docStyles.tdBold}>{r.name}</div>
-                  </td>
-                  {showHsn && <td style={docStyles.td}>{r.hsn}</td>}
-                  <td style={{ ...docStyles.td, textAlign: 'center' }}>
-                    {r.qty}{r.unit ? <span style={{ fontSize: '9px', color: '#94A3B8' }}> {r.unit}</span> : null}
-                  </td>
-                  {model.pricing && <td style={{ ...docStyles.td, textAlign: 'right' }}>₹{Number(r.price).toFixed(2)}</td>}
-                  {model.pricing && showGst && (
-                    <td style={{ ...docStyles.td, textAlign: 'right' }}>
-                      {r.gstPct}%
-                      <div style={{ fontSize: '9px', color: '#94A3B8' }}>₹{r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                    </td>
-                  )}
-                  {model.pricing && <td style={{ ...docStyles.td, ...docStyles.tdBold, textAlign: 'right' }}>₹{r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>}
-                </tr>
-              ))}
-            </tbody>
-            {model.pricing && (
-              <tfoot>
-                <tr>
-                  <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Sub Total</td>
-                  <td style={docStyles.totalsValue}>₹{model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
-                </tr>
-                {model.otherChargesTotal > 0 && (
-                  <tr>
-                    <td colSpan={footerColSpan} style={docStyles.totalsLabel}>Other Charges</td>
-                    <td style={docStyles.totalsValue}>₹{model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>
-                  </tr>
-                )}
-                <tr style={{ borderTop: '1.5px solid #0F172A' }}>
-                  <td colSpan={footerColSpan} style={docStyles.grandTotalLabel}>Grand Total</td>
-                  <td style={docStyles.grandTotalValue}>₹{model.grandTotal.toLocaleString('en-IN')}</td>
-                </tr>
-                {model.hasPayment && model.paidTotal > 0 && (
-                  <>
-                    <tr>
-                      <td colSpan={footerColSpan} style={{ padding: '6px 5px', textAlign: 'right', fontWeight: '600', fontSize: '10.5px', color: '#16A34A' }}>Paid</td>
-                      <td style={{ padding: '6px 5px', textAlign: 'right', fontWeight: '700', fontSize: '10.5px', color: '#16A34A' }}>₹{model.paidTotal.toLocaleString('en-IN')}</td>
-                    </tr>
-                    <tr>
-                      <td colSpan={footerColSpan} style={{ ...docStyles.totalsLabel, fontWeight: '700', color: '#0F172A' }}>Balance Due</td>
-                      <td style={{ ...docStyles.totalsValue, fontSize: '11.5px', fontWeight: '800' }}>₹{model.balanceDue.toLocaleString('en-IN')}</td>
-                    </tr>
-                  </>
-                )}
-              </tfoot>
-            )}
-          </table>
-        </div>
-
-        {/* Left column (closing text, QR, Payment Instructions) runs alongside the Signature on the right, both starting right after Grand Total */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', margin: '4px 0 18px' }}>
+  // These settings-driven flags default to "on" (undefined !== false) for document types
+  // that don't define them (Invoice/Purchase Order/Proforma Invoice/Delivery Note), so
+  // their preview keeps behaving exactly as before. Only Quotation sets them explicitly,
+  // driven by Quotation Settings.
+  const showHsn = model.showHsn !== false;
+  const showGst = model.showGst !== false;
+  const showSignature = model.showSignature !== false;
+  const showShippingAddress = !!model.showShippingAddress && !!model.shippingAddress;
+  const showBankInfo = !!model.showBankInfo && (model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode);
+  const showUpi = !!model.showUpi && (model.upiId || model.qrCodeImg);
+  const showReceivedBy = !!model.showReceivedBy;
+  const totalCols = 2 + (showHsn ? 1 : 0) + 1 + (model.pricing ? (1 + (showGst ? 1 : 0) + 1) : 0);
+  const footerColSpan = totalCols - 1;
+  return (
+    <>
+      {/* Header: Doc title (top, centered), then Business info + logo below */}
+      <div style={{ marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #E2E8F0' }}>
+        <p style={{ ...docStyles.docTypeLabel, textTransform: 'none', textAlign: 'center', margin: '0 0 12px' }}>{model.docTitle}</p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {model.otherInfo && (
-              <p style={{ ...docStyles.bodyText, margin: '0 0 16px' }}>{model.otherInfo}</p>
-            )}
-
-            {model.closingText && (
-              <p style={{ ...docStyles.closingText, margin: '0 0 18px' }}>{model.closingText}</p>
-            )}
-
-            {/* UPI / QR Code (Quotation only, when enabled) */}
-            {showUpi && (
-              <div style={{ textAlign: 'left', marginBottom: '18px' }}>
-                {model.qrCodeImg && (
-                  <img src={model.qrCodeImg} alt="UPI QR Code" style={{ width: '120px', height: '120px', objectFit: 'contain', background: '#ffffff', padding: '4px', borderRadius: '8px', border: '1px solid #E2E8F0', display: 'block', marginRight: 'auto', imageRendering: 'pixelated' }} />
-                )}
-                {model.upiId && <p style={{ ...docStyles.addressLine, margin: '4px 0 0' }}>{model.upiId}</p>}
-              </div>
-            )}
-
-            {/* Payment Instructions (bank info) */}
-            {showBankInfo && (
-              <div>
-                <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 6px' }}>Payment Instructions</p>
-                {model.bankAccountName && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Account Holder Name: {model.bankAccountName}</p>}
-                {model.bankAccountNumber && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Account Number: {model.bankAccountNumber}</p>}
-                {model.bankName && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Bank Name: {model.bankName}</p>}
-                {model.ifscCode && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>IFSC Code: {model.ifscCode}</p>}
-              </div>
-            )}
+            <h2 style={docStyles.businessName}>{model.businessName}</h2>
+            {model.businessPhone && <p style={docStyles.contactLine}>{model.businessPhone}</p>}
+            {model.businessEmail && <p style={docStyles.contactLine}>{model.businessEmail}</p>}
           </div>
+          {model.logoImg && (
+            <img src={model.logoImg} alt="Business Logo" style={{ width: '48px', height: '48px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0, border: '1px solid #E2E8F0' }} />
+          )}
+        </div>
+      </div>
 
-          {showSignature && !showReceivedBy && (
+      {/* To, (left) | Date (right) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: showShippingAddress ? '10px' : '16px' }}>
+        <div style={{ flex: 1 }}>
+          <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>{model.toLabel}</p>
+          {model.customerLines.map((line, idx) => (
+            <p key={idx} style={idx === 0 ? docStyles.toName : docStyles.contactLine}>{line}</p>
+          ))}
+        </div>
+        <div style={{ flexShrink: 0, textAlign: 'right' }}>
+          <p style={docStyles.docMetaLine}>Date: {model.date}</p>
+        </div>
+      </div>
+
+      {/* Shipping Address (Quotation only, when enabled in Quotation Settings) */}
+      {showShippingAddress && (
+        <div style={{ marginBottom: '16px' }}>
+          <p style={{ ...docStyles.sectionLabel, textTransform: 'none' }}>Shipping Address</p>
+          <p style={docStyles.contactLine}>{model.shippingAddress}</p>
+        </div>
+      )}
+
+      {model.greetingLines.length > 0 && (
+        <p style={docStyles.bodyText}>
+          {model.greetingLines.map((line, idx) => (
+            <Fragment key={idx}>
+              {line}
+              {idx < model.greetingLines.length - 1 ? <br /> : null}
+            </Fragment>
+          ))}
+        </p>
+      )}
+
+      {/* Table */}
+      <div style={docStyles.tableWrap}>
+        <table style={docStyles.table}>
+          <thead>
+            <tr>
+              <th style={{ ...docStyles.th, width: model.pricing ? '6%' : '10%' }}>#</th>
+              <th style={{ ...docStyles.th, width: model.pricing ? '22%' : '42%', wordBreak: 'break-word' }}>Item</th>
+              {showHsn && <th style={{ ...docStyles.th, width: model.pricing ? '11%' : '23%', wordBreak: 'break-word' }}>{model.hsnLabel}</th>}
+              <th style={{ ...docStyles.th, textAlign: 'center', width: model.pricing ? '11%' : '25%' }}>Qty</th>
+              {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '17%' }}>Price</th>}
+              {model.pricing && showGst && <th style={{ ...docStyles.th, textAlign: 'right', width: '15%' }}>GST</th>}
+              {model.pricing && <th style={{ ...docStyles.th, textAlign: 'right', width: '18%' }}>Total</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {model.rows.map((r) => (
+              <tr key={r.index}>
+                <td style={docStyles.td}>{r.index}</td>
+                <td style={docStyles.td}>
+                  <div style={docStyles.tdBold}>{r.name}</div>
+                </td>
+                {showHsn && (
+                  <td style={{ ...docStyles.td, whiteSpace: 'pre-line', wordBreak: 'break-all' }}>
+                    {String(r.hsn || '').match(/.{1,4}/g)?.join('\n') || r.hsn}
+                  </td>
+                )}
+                <td style={{ ...docStyles.td, textAlign: 'center' }}>
+                  {r.qty}{r.unit ? <span style={{ fontSize: '9px', color: '#94A3B8' }}> {r.unit}</span> : null}
+                </td>
+                {model.pricing && <td style={{ ...docStyles.td, textAlign: 'right' }}>₹{Number(r.price).toFixed(2)}</td>}
+                {model.pricing && showGst && (
+                  <td style={{ ...docStyles.td, textAlign: 'right' }}>
+                    {r.gstPct}%
+                    <div style={{ fontSize: '9px', color: '#94A3B8' }}>₹{r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
+                  </td>
+                )}
+                {model.pricing && <td style={{ ...docStyles.td, ...docStyles.tdBold, textAlign: 'right' }}>₹{r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</td>}
+              </tr>
+            ))}
+          </tbody>
+          {model.pricing && (
+            <tfoot>
+              <tr>
+                <td colSpan={footerColSpan} style={docStyles.totalsLabel}>
+                  Sub Total
+                  {model.gstTotal > 0 && (
+                    <span style={{ display: 'block', fontSize: '9px', color: '#64748B', fontWeight: '500' }}>
+                      Tax: ₹{model.gstTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </span>
+                  )}
+                </td>
+                <td style={docStyles.totalsValue}>
+                  ₹{(model.subTotal + model.gstTotal).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                </td>
+              </tr>
+              {/* Updated Other Charges with tax breakdown */}
+              {(model.otherChargesRows || []).map((c, idx) => {
+                const taxAmount = c.taxable ? (c.amount * c.gstPercent / 100) : 0;
+                const totalWithTax = c.amount + taxAmount;
+                return (
+                  <tr key={idx}>
+                    <td colSpan={footerColSpan} style={docStyles.totalsLabel}>
+                      {c.label}
+                      {c.taxable && c.gstPercent > 0 && (
+                        <span style={{ display: 'block', fontSize: '9px', color: '#64748B', fontWeight: '500' }}>
+                          Tax ({c.gstPercent}%): ₹{taxAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </td>
+                    <td style={docStyles.totalsValue}>
+                      ₹{totalWithTax.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr style={{ borderTop: '1.5px solid #0F172A' }}>
+                <td colSpan={footerColSpan} style={docStyles.grandTotalLabel}>Grand Total</td>
+                <td style={docStyles.grandTotalValue}>₹{model.grandTotal.toLocaleString('en-IN')}</td>
+              </tr>
+              {model.hasPayment && model.paidTotal > 0 && (
+                <>
+                  <tr>
+                    <td colSpan={footerColSpan} style={{ padding: '6px 5px', textAlign: 'right', fontWeight: '600', fontSize: '10.5px', color: '#16A34A' }}>Paid</td>
+                    <td style={{ padding: '6px 5px', textAlign: 'right', fontWeight: '700', fontSize: '10.5px', color: '#16A34A' }}>₹{model.paidTotal.toLocaleString('en-IN')}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan={footerColSpan} style={{ ...docStyles.totalsLabel, fontWeight: '700', color: '#0F172A' }}>Balance Due</td>
+                    <td style={{ ...docStyles.totalsValue, fontSize: '11.5px', fontWeight: '800' }}>₹{model.balanceDue.toLocaleString('en-IN')}</td>
+                  </tr>
+                </>
+              )}
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      {/* Other Info - full width, above the bottom-message/terms/payment grid */}
+      {model.otherInfo && (
+        <p style={{ ...docStyles.bodyText, margin: '4px 0 14px' }}>{model.otherInfo}</p>
+      )}
+
+      {/* Bottom message (row 1, spans all 3 cols) / Terms & Conditions (row 2, spans all
+          3 cols) / Payment Instructions (row 3, col 1) + QR Code (row 3, col 2, col 3 left
+          empty) - laid out as a single 3-column grid so the QR code sits right next to
+          Payment Instructions instead of drifting to the far right. */}
+      {(model.closingText || model.termsLines.length > 0 || showBankInfo || showUpi) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '18px', rowGap: '14px', margin: '0 0 18px' }}>
+          {model.closingText && (
+            <p style={{ ...docStyles.closingText, gridColumn: '1 / -1', margin: 0 }}>{model.closingText}</p>
+          )}
+
+          {model.termsLines.length > 0 && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 4px' }}>Terms & Conditions</p>
+              {model.termsLines.map((term, idx) => (
+                <p key={idx} style={{ ...docStyles.addressLine, margin: idx === 0 ? 0 : '2px 0 0' }}>
+                  {'\u2022'} {term}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {showBankInfo && (
+            <div style={{ minWidth: 0, gridColumn: '1' }}>
+              <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 6px' }}>Payment Instructions</p>
+              {model.bankAccountName && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Account Holder Name: {model.bankAccountName}</p>}
+              {model.bankAccountNumber && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Account Number: {model.bankAccountNumber}</p>}
+              {model.bankName && <p style={{ ...docStyles.addressLine, margin: '0 0 2px' }}>Bank Name: {model.bankName}</p>}
+              {model.ifscCode && <p style={{ ...docStyles.addressLine, margin: 0 }}>IFSC Code: {model.ifscCode}</p>}
+            </div>
+          )}
+          {showUpi && (
+            <div style={{ textAlign: 'center', flexShrink: 0, gridColumn: '2' }}>
+              {model.qrCodeImg && (
+                <img src={model.qrCodeImg} alt="UPI QR Code" style={{ width: '76px', height: '76px', objectFit: 'contain', background: '#ffffff', padding: '4px', borderRadius: '8px', border: '1px solid #E2E8F0', display: 'block', imageRendering: 'pixelated' }} />
+              )}
+              {model.upiId && <p style={{ ...docStyles.addressLine, margin: '4px 0 0', fontSize: '9px' }}>{model.upiId}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payment History */}
+      {model.hasPayment && model.paidInfo.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <p style={docStyles.sectionLabel}>Payment History</p>
+          {model.paidInfo.map((p) => (
+            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#475569', padding: '4px 0', borderBottom: '1px solid #F1F5F9' }}>
+              <span>{p.date}{p.note ? ` — ${p.note}` : ''}</span>
+              <span style={{ fontWeight: '600', color: '#0F172A' }}>₹{p.amount}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Signature - standalone row, bottom right, below Terms & Conditions / Payment
+          Instructions / QR above. Skipped for Delivery Note, where it is drawn instead
+          alongside the "Received By" acknowledgement block right below. */}
+      {showSignature && !showReceivedBy && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '18px' }}>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
+            {model.signatureImg ? (
+              <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
+            ) : (
+              <div style={{ height: '34px' }}></div>
+            )}
+            <p style={docStyles.signatureCaption}>Authorized Signature</p>
+          </div>
+        </div>
+      )}
+
+      {/* Received By (Delivery Note only) - Name/Date/Signature acknowledgement on the
+          left, business's own Authorized Signature on the right, both at the very
+          bottom, below Terms & Conditions / Payment Instructions / QR above. */}
+      {showReceivedBy && (
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginTop: '6px', marginBottom: '18px' }}>
+          <div style={{ flex: 1, maxWidth: '260px' }}>
+            <p style={{ ...docStyles.sectionLabel, textTransform: 'none', margin: '0 0 14px' }}>Received By:</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '20px' }}>
+              <span style={docStyles.addressLine}>Name:</span>
+              <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '20px' }}>
+              <span style={docStyles.addressLine}>Date:</span>
+              <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+              <span style={docStyles.addressLine}>Signature:</span>
+              <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
+            </div>
+          </div>
+          {showSignature && (
             <div style={{ textAlign: 'right', flexShrink: 0 }}>
               <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
               {model.signatureImg ? (
@@ -4889,73 +5664,16 @@ const handleAddTerm = async () => {
             </div>
           )}
         </div>
+      )}
 
-        {/* Terms & Conditions */}
-        {model.termsLines.length > 0 && (
-          <div style={{ marginBottom: '18px' }}>
-            <p style={{ ...docStyles.sectionLabel, textTransform: 'uppercase', margin: '0 0 6px' }}>Terms & Conditions:</p>
-            {model.termsLines.map((term, idx) => (
-              <p key={idx} style={{ ...docStyles.addressLine, margin: '0 0 4px' }}>{'\u2022'} {term}</p>
-            ))}
-          </div>
-        )}
-
-        {/* Payment History */}
-        {model.hasPayment && model.paidInfo.length > 0 && (
-          <div style={{ marginBottom: '16px' }}>
-            <p style={docStyles.sectionLabel}>Payment History</p>
-            {model.paidInfo.map((p) => (
-              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#475569', padding: '4px 0', borderBottom: '1px solid #F1F5F9' }}>
-                <span>{p.date}{p.note ? ` — ${p.note}` : ''}</span>
-                <span style={{ fontWeight: '600', color: '#0F172A' }}>₹{p.amount}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Received By (Delivery Note only) - Name/Date/Signature acknowledgement on the
-            left, business's own Authorized Signature on the right, both at the very
-            bottom, below Terms & Conditions / Payment Instructions / QR above. */}
-        {showReceivedBy && (
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginTop: '6px', marginBottom: '18px' }}>
-            <div style={{ flex: 1, maxWidth: '260px' }}>
-              <p style={{ ...docStyles.sectionLabel, textTransform: 'none', margin: '0 0 14px' }}>Received By:</p>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '20px' }}>
-                <span style={docStyles.addressLine}>Name:</span>
-                <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '20px' }}>
-                <span style={docStyles.addressLine}>Date:</span>
-                <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                <span style={docStyles.addressLine}>Signature:</span>
-                <span style={{ flex: 1, borderBottom: '1px solid #94A3B8', height: '1px' }} />
-              </div>
-            </div>
-            {showSignature && (
-              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <p style={docStyles.signatureLabel}>For, {model.signatureName}</p>
-                {model.signatureImg ? (
-                  <img src={model.signatureImg} alt="Authorized Signature" style={{ height: '34px', maxWidth: '160px', objectFit: 'contain', marginLeft: 'auto', display: 'block' }} />
-                ) : (
-                  <div style={{ height: '34px' }}></div>
-                )}
-                <p style={docStyles.signatureCaption}>Authorized Signature</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Generated with SmartManage - brand footer */}
-        <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <img src={smartpayLogo} alt="SmartManage" style={{ width: '20px', height: '20px', borderRadius: '5px', objectFit: 'cover', display: 'block' }} />
-          <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', letterSpacing: '0.2px' }}>Generated with SmartManage</span>
-        </div>
-      </>
-    );
-  };
-
+      {/* Generated with SmartManage - brand footer */}
+      <div style={{ marginTop: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <img src={smartpayLogo} alt="SmartManage" style={{ width: '20px', height: '20px', borderRadius: '5px', objectFit: 'cover', display: 'block' }} />
+        <span style={{ fontSize: '11px', fontWeight: '600', color: '#94A3B8', letterSpacing: '0.2px' }}>Generated with SmartManage</span>
+      </div>
+    </>
+  );
+};
 
 
   // (Duplicate/Edit/Status live purely in-app; Share hands the user a real .pdf file
@@ -4982,13 +5700,105 @@ const handleAddTerm = async () => {
     }
   };
 
+  // Safety net for logo/signature/QR images that were saved BEFORE the crop tool started
+  // downscaling photos (see handleConfirmImageCrop) - a business logo captured with a
+  // phone camera can be several megapixels/several MB even as-is. Embedding that straight
+  // into a PDF (even displayed at a tiny 34x34pt box) produced multi-MB PDFs, and pushing
+  // a payload that large across the native bridge to Capacitor's Filesystem/Share plugins
+  // is what made "Share" intermittently fail with "Could not prepare the document for
+  // sharing" - whether it failed depended on device memory at that moment, so it wasn't
+  // reproducible every time. Downscaling right here, at the moment an image goes into a
+  // PDF, fixes every already-saved oversized logo/signature/QR without requiring the user
+  // to re-upload anything. Results are cached per data-URL so repeat shares of the same
+  // business logo don't redo the work.
+  const pdfSafeImageCacheRef = useRef(new Map());
+  const getPdfSafeImage = (dataUrl, { maxDim = 320, keepPng = false } = {}) => new Promise((resolve) => {
+    if (!dataUrl) { resolve(null); return; }
+    const cacheKey = `${maxDim}:${keepPng}:${dataUrl.length}:${dataUrl.slice(0, 48)}`;
+    const cached = pdfSafeImageCacheRef.current.get(cacheKey);
+    if (cached) { resolve(cached); return; }
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxDim / Math.max(img.naturalWidth || maxDim, img.naturalHeight || maxDim));
+          if (scale >= 1) { pdfSafeImageCacheRef.current.set(cacheKey, dataUrl); resolve(dataUrl); return; }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          // QR codes (keepPng) need crisp lossless edges to stay scannable; logos and
+          // signatures compress far smaller as JPEG with no visible loss at PDF size.
+          const out = keepPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85);
+          pdfSafeImageCacheRef.current.set(cacheKey, out);
+          resolve(out);
+        } catch (e) {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    } catch (e) {
+      resolve(dataUrl);
+    }
+  });
+
   // Renders a clean, professional business-document PDF: consistent typography hierarchy,
   // a bold-but-not-oversized Grand Total, and a small "Generated with SmartManage" brand
   // mark bottom-left — the same design system used across every module in the app.
+  // Single, shared "deliver this PDF" step used by every document type's Share action
+  // (Quotation, Invoice, Purchase Order, Proforma Invoice, Delivery Note, Receipt, Bank
+  // Info). Previously each PDF-generation function carried its own copy of this dispatch
+  // logic; keeping only one copy guarantees every document type behaves identically -
+  // there is no way for one doc type to open the OS share sheet while another silently
+  // falls back to a direct download, because they all now call this exact function.
+  const deliverGeneratedPdf = async (doc, sanitizedFileName) => {
+    const dataUrl = doc.output('datauristring');
+    const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+
+    if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
+      window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
+      return;
+    }
+    if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
+      const { Filesystem, Share } = window.Capacitor.Plugins;
+      const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'CACHE' });
+      if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
+      return;
+    }
+    // Web/browser fallback: use the native OS share sheet when available, otherwise just
+    // download the PDF.
+    if (navigator.share) {
+      try {
+        const blob = doc.output('blob');
+        const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: sanitizedFileName });
+          return;
+        }
+      } catch (shareErr) {
+        // User cancelled the share sheet, or the browser refused - fall through to download.
+      }
+    }
+    const ua = navigator.userAgent || '';
+    const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
+    if (isBareAndroidWebView) {
+      const link = document.createElement('a');
+      link.href = `data:application/pdf;base64,${pdfBase64}`;
+      link.download = sanitizedFileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      doc.save(sanitizedFileName);
+    }
+  };
+
   const shareGeneratedDocumentPdf = async ({ fileNameBase, title, docNo, date, lines }) => {
     const sanitizedFileName = `${(fileNameBase || title || 'Document').toString().trim().replace(/\s+/g, '_')}.pdf`;
     try {
-      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
+      await ensureJsPDF();
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
       const marginX = 44;
       const pageWidth = doc.internal.pageSize.getWidth();
@@ -5073,47 +5883,7 @@ const handleAddTerm = async () => {
 
       drawBrandFooter();
 
-      const dataUrl = doc.output('datauristring');
-      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-
-      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
-        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
-        return;
-      }
-      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
-        const { Filesystem, Share } = window.Capacitor.Plugins;
-        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
-        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
-        return;
-      }
-
-      // Web/browser fallback: use the native OS share sheet (Screenshot 2/3 behaviour) when available,
-      // otherwise just download the PDF.
-      if (navigator.share) {
-        try {
-          const blob = doc.output('blob');
-          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
-          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file], title: sanitizedFileName });
-            return;
-          }
-        } catch (shareErr) {
-          // User cancelled the share sheet, or the browser refused - fall through to download.
-        }
-      }
-
-      const ua = navigator.userAgent || '';
-      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
-      if (isBareAndroidWebView) {
-        const link = document.createElement('a');
-        link.href = `data:application/pdf;base64,${pdfBase64}`;
-        link.download = sanitizedFileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        doc.save(sanitizedFileName);
-      }
+      await deliverGeneratedPdf(doc, sanitizedFileName);
     } catch (err) {
       console.error('PDF share failed:', err);
       showAlert('Could not prepare the document for sharing. Please try again.');
@@ -5139,15 +5909,39 @@ const handleAddTerm = async () => {
     });
   };
 
+  // Returns doc's 1-based position among all documents of the same type (list),
+  // ordered by creation - i.e. this is the Nth quotation/invoice/etc. the logged-in
+  // user has made overall (numbering is separate per document type). Used to name
+  // shared PDFs as "<LoggedInUserName>_<DocType>_<n>.pdf".
+  const getDocTypeSequence = (list, doc) => {
+    if (!doc) return 1;
+    const sortKey = (d) => (d.createdAt ? new Date(d.createdAt).getTime() : (Number(d.id) || 0));
+    const sorted = [...(list || [])].sort((a, b) => sortKey(a) - sortKey(b));
+    const idx = sorted.findIndex((d) => d.id === doc.id);
+    return idx >= 0 ? idx + 1 : sorted.length + 1;
+  };
+
+  // Builds the PDF filename "<LoggedInUserName>_<DocType>_<n>" (without extension) for
+  // a shared document, where <n> comes from getDocTypeSequence.
+  const buildUserDocFileName = (list, doc, docTypeLabel) => {
+    const seq = getDocTypeSequence(list, doc);
+    const namePart = (loggedInUser?.fullName || 'User').toString().trim().replace(/\s+/g, '_');
+    return `${namePart}_${docTypeLabel}_${seq}`;
+  };
+
   // Dedicated Quotation PDF renderer - draws the SAME header/To-Date/table/totals/
   // terms/signature layout as the in-app "Quotation Detail" preview, built from the
   // exact same buildQuotationDocModel() data, so Share always matches what's on screen.
   const shareQuotationPdf = async (q) => {
-    const sanitizedFileName = `Quotation_${q.quotationNo || ''}`.trim().replace(/\s+/g, '_') + '.pdf';
+    const sanitizedFileName = buildUserDocFileName(quotations, q, 'Quotation').replace(/\s+/g, '_') + '.pdf';
     try {
-      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
+      await ensureJsPDF();
       const model = buildQuotationDocModel(q);
+      model.logoImg = await getPdfSafeImage(model.logoImg, { maxDim: 200 });
+      model.signatureImg = await getPdfSafeImage(model.signatureImg, { maxDim: 300, keepPng: true });
+      model.qrCodeImg = await getPdfSafeImage(model.qrCodeImg, { maxDim: 300, keepPng: true });
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      registerRupeeFont(doc);
       const marginX = 44;
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
@@ -5295,7 +6089,7 @@ const handleAddTerm = async () => {
       model.rows.forEach((r) => {
         const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[colIndex.item] - 4);
         // When the GST column is shown, each row draws a small sub-line (the GST amount,
-        // e.g. "Rs.33,600") 9pt below the main row baseline. rowH must account for that
+        // e.g. "₹33,600") 9pt below the main row baseline. rowH must account for that
         // sub-line's full height, or the divider line below gets drawn too early and
         // overlaps/"cuts" into the row's own text instead of sitting cleanly beneath it.
         const mainRowH = Math.max(13, nameLines.length * 10 + 3);
@@ -5312,22 +6106,22 @@ const handleAddTerm = async () => {
         doc.setTextColor('#334155');
         if (showHsn) doc.text(String(r.hsn), colX[colIndex.hsn], y);
         doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[colIndex.qty] + colWidths[colIndex.qty] / 2, y, { align: 'center' });
-        doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[colIndex.price] + colWidths[colIndex.price], y, { align: 'right' });
+        drawAmountText(doc, `₹${Number(r.price).toFixed(2)}`, colX[colIndex.price] + colWidths[colIndex.price], y, { align: 'right' });
         if (showGst) {
           doc.text(`${r.gstPct}%`, colX[colIndex.gst] + colWidths[colIndex.gst], y, { align: 'right' });
           doc.setFontSize(7.5);
           doc.setTextColor('#94A3B8');
-          doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[colIndex.gst] + colWidths[colIndex.gst], y + 9, { align: 'right' });
+          drawAmountText(doc, `₹${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[colIndex.gst] + colWidths[colIndex.gst], y + 9, { align: 'right' });
           doc.setFontSize(9);
         }
         doc.setFont('helvetica', 'bold');
         doc.setTextColor('#0F172A');
-        doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[colIndex.total] + colWidths[colIndex.total], y, { align: 'right' });
+        drawAmountText(doc, `₹${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[colIndex.total] + colWidths[colIndex.total], y, { align: 'right' });
         y += rowH + 6;
-        doc.setDrawColor('#EEF1F5');
-        doc.setLineWidth(0.5);
-        doc.line(marginX, y - 4, pageWidth - marginX, y - 4);
       });
+      doc.setDrawColor('#EEF1F5');
+      doc.setLineWidth(0.5);
+      doc.line(marginX, y - 4, pageWidth - marginX, y - 4);
       y += 8;
 
       // ---- Sub Total / Other Charges / Grand Total
@@ -5338,17 +6132,55 @@ const handleAddTerm = async () => {
       doc.setTextColor('#64748B');
       doc.text('Sub Total', totalLabelX, y, { align: 'left' });
       doc.setTextColor('#334155');
-      doc.text(`Rs.${model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+      drawAmountText(doc, `₹${(model.subTotal + model.gstTotal).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
       y += 15;
-
-      if (model.otherChargesTotal > 0) {
-        ensureSpace(18);
-        doc.setTextColor('#64748B');
-        doc.text('Other Charges', totalLabelX, y, { align: 'left' });
-        doc.setTextColor('#334155');
-        doc.text(`Rs.${model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
-        y += 15;
+      if (model.gstTotal > 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#94A3B8');
+        const subTaxLabel = 'GST: ';
+        doc.text(subTaxLabel, totalLabelX, y, { align: 'left' });
+        const subTaxLabelWidth = doc.getTextWidth(subTaxLabel);
+        drawAmountText(doc, `₹${model.gstTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, totalLabelX + subTaxLabelWidth, y, { align: 'left' });
+        doc.setFontSize(9.5);
+        y += 12;
       }
+
+      // Updated Other Charges with tax breakdown - the charge label (e.g. "Handling and
+      // Transport (Tax 5%)") can wrap onto multiple lines when it's long, so its wrapped
+      // line count is measured up front and the "₹..." amount is placed below
+      // the LAST wrapped line, not a fixed offset - otherwise a wrapped label's second
+      // line collides with the amount drawn right underneath the first line.
+      (model.otherChargesRows || []).forEach((c) => {
+        const taxAmount = c.taxable ? (c.amount * c.gstPercent / 100) : 0;
+        const totalWithTax = c.amount + taxAmount;
+        const chargeLabel = c.taxable && c.gstPercent > 0 ? `${c.label} (Tax ${c.gstPercent}%)` : c.label;
+        const labelMaxWidth = pageWidth - marginX - totalLabelX - 100;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        const chargeLabelLines = doc.splitTextToSize(chargeLabel, labelMaxWidth);
+        const labelLineHeight = 11;
+        const labelBlockHeight = chargeLabelLines.length * labelLineHeight;
+        const hasTaxLine = c.taxable && c.gstPercent > 0;
+        ensureSpace(labelBlockHeight + (hasTaxLine ? 15 : 6));
+        doc.setTextColor('#64748B');
+        doc.text(chargeLabelLines, totalLabelX, y, { align: 'left' });
+        doc.setTextColor('#334155');
+        drawAmountText(doc, `₹${totalWithTax.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+        if (hasTaxLine) {
+          const taxY = y + labelBlockHeight - labelLineHeight + 9;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7.5);
+          doc.setTextColor('#94A3B8');
+          // The "(Tax X%)" annotation is already in the label above, so this amount is
+          // shown on its own without a redundant "Tax: " prefix.
+          drawAmountText(doc, `₹${taxAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, totalLabelX, taxY, { align: 'left' });
+          doc.setFontSize(9.5);
+          y = taxY + 13;
+        } else {
+          y += labelBlockHeight + 4;
+        }
+      });
       y -= 3;
 
       ensureSpace(28);
@@ -5361,68 +6193,136 @@ const handleAddTerm = async () => {
       doc.setTextColor('#0F172A');
       doc.text('Grand Total', totalLabelX, y, { align: 'left' });
       doc.setFontSize(12.5);
-      doc.text(`Rs.${model.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+      drawAmountText(doc, `₹${model.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
       y += 26;
 
-      // ---- Left column (closing text, QR, Payment Instructions) runs alongside the Signature
-      // column on the right - both start at the same Y, right after Grand Total.
-      const rowStartY = y;
-      let leftY = rowStartY;
-
+      // ---- Closing text - full width, above the Terms + Payment row
       if (model.closingText) {
         ensureSpace(15);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor('#64748B');
-        doc.text(model.closingText, marginX, leftY, { maxWidth: contentWidth * 0.55 });
-        leftY += 22;
+        const closingLines = doc.splitTextToSize(model.closingText, contentWidth);
+        doc.text(closingLines, marginX, y);
+        y += closingLines.length * 13 + 8;
       }
 
+      // ---- Terms & Conditions - full width, own row: label (no colon) followed by every
+      // term inline, bullet-separated, on the same line (wrapping naturally). Payment
+      // Instructions (left) + QR Code (right) are drawn below as their own full-width row,
+      // with Signature afterwards in its own row, so nothing ever gets squeezed.
       const hasBankFields = model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode;
       const hasUpiFields = model.upiId || model.qrCodeImg;
-      if (model.showUpi && hasUpiFields) {
-        ensureSpace(120);
-        const qrSize = 96; // enlarged so the code stays sharp and easy to scan
-        if (model.qrCodeImg) {
-          try {
-            doc.addImage(model.qrCodeImg, marginX, leftY, qrSize, qrSize);
-          } catch (e) { /* ignore */ }
-        }
-        let upiBottomY = leftY + qrSize;
-        if (model.upiId) {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8);
-          doc.setTextColor('#475569');
-          doc.text(model.upiId, marginX, upiBottomY + 10);
-          upiBottomY += 14;
-        }
-        leftY = upiBottomY + 12;
-      }
+      const showTerms = model.termsLines.length > 0;
+      const hasBank = !!(model.showBankInfo && hasBankFields);
+      const hasQr = !!(model.showUpi && hasUpiFields);
 
-      if (model.showBankInfo && hasBankFields) {
-        ensureSpace(60);
+      if (showTerms) {
+        // Header sits on its own row, with every term listed below it (one bullet per
+        // line) - matching the on-screen document preview layout, instead of running
+        // the first term inline next to the header.
+        const termsLabel = 'TERMS & CONDITIONS';
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        const bodyLines = [];
+        model.termsLines.forEach((term) => {
+          bodyLines.push(...doc.splitTextToSize(`\u2022 ${term}`, contentWidth));
+        });
+        ensureSpace(14 + bodyLines.length * 12 + 16);
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9.5);
         doc.setTextColor('#0F172A');
-        doc.text('PAYMENT INSTRUCTIONS', marginX, leftY);
-        leftY += 13;
+        doc.text(termsLabel, marginX, y);
+        y += 14;
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8.5);
+        doc.setFontSize(9);
         doc.setTextColor('#475569');
-        const bankLines = [
-          model.bankAccountName && `Account Holder Name: ${model.bankAccountName}`,
-          model.bankAccountNumber && `Account Number: ${model.bankAccountNumber}`,
-          model.bankName && `Bank Name: ${model.bankName}`,
-          model.ifscCode && `IFSC Code: ${model.ifscCode}`,
-        ].filter(Boolean);
-        bankLines.forEach((line) => { doc.text(line, marginX, leftY); leftY += 11; });
-        leftY += 10;
+        doc.text(bodyLines, marginX, y);
+        y += bodyLines.length * 12 + 16;
       }
 
-      // ---- Signature block (right column, only when enabled in Quotation Settings)
-      let sigY = rowStartY;
+      if (hasBank || hasQr) {
+        const estPayHeight = Math.max(hasBank ? 13 + 44 : 0, hasQr ? 90 : 0);
+        ensureSpace(estPayHeight);
+
+        const rowStartY = y;
+        const qrSize = 70;
+        const qrGap = 18;
+        // Payment Instructions wraps within a capped column width (so a long bank/account
+        // line can't run into the QR) but the QR itself is placed directly after the
+        // ACTUAL rendered width of the Payment Instructions text (measured below), not
+        // centered inside a large fixed-proportion column - this mirrors the on-screen
+        // "auto auto 1fr" grid, where the QR column sits snug against the Payment
+        // Instructions column instead of drifting toward the page's right margin.
+        const bankTextWidth = hasQr ? Math.min(contentWidth * 0.42, contentWidth - qrSize - qrGap) : contentWidth;
+
+        // Payment Instructions (bank info) - left side of the row. Its actual rendered
+        // content width is tracked as it's drawn, so the QR column can be placed snug
+        // against it afterwards.
+        let bankY = rowStartY;
+        let bankContentWidth = 0;
+        if (hasBank) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor('#0F172A');
+          doc.text('PAYMENT INSTRUCTIONS', marginX, bankY);
+          bankContentWidth = Math.max(bankContentWidth, doc.getTextWidth('PAYMENT INSTRUCTIONS'));
+          bankY += 13;
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8.5);
+          doc.setTextColor('#475569');
+          const bankLines = [
+            model.bankAccountName && `Account Holder Name: ${model.bankAccountName}`,
+            model.bankAccountNumber && `Account Number: ${model.bankAccountNumber}`,
+            model.bankName && `Bank Name: ${model.bankName}`,
+            model.ifscCode && `IFSC Code: ${model.ifscCode}`,
+          ].filter(Boolean);
+          bankLines.forEach((line) => {
+            const wrapped = doc.splitTextToSize(line, bankTextWidth);
+            wrapped.forEach((wl) => { bankContentWidth = Math.max(bankContentWidth, doc.getTextWidth(wl)); });
+            doc.text(wrapped, marginX, bankY);
+            bankY += wrapped.length * 11;
+          });
+        }
+
+        // QR Code - placed directly after the Payment Instructions content (auto-width
+        // column + gap), capped so it never runs past the page's right margin, and
+        // pinned to the left margin when there's no Payment Instructions block at all.
+        // Shifted up slightly (qrTopAdjust) because doc.text()'s y is the text BASELINE
+        // while doc.addImage()'s y is the image's TOP edge - without the adjustment the
+        // QR's top edge lines up with the bottom of the "PAYMENT INSTRUCTIONS" header
+        // text instead of its top, making the QR look like it starts lower than the label.
+        const qrTopAdjust = hasBank ? 7 : 0;
+        const qrX = hasQr
+          ? Math.min(marginX + bankContentWidth + (hasBank ? qrGap : 0), pageWidth - marginX - qrSize)
+          : marginX;
+        let qrY = rowStartY - qrTopAdjust;
+        if (hasQr) {
+          if (model.qrCodeImg) {
+            try {
+              doc.addImage(model.qrCodeImg, qrX, qrY, qrSize, qrSize);
+            } catch (e) { /* ignore */ }
+          }
+          let qrBottomY = qrY + qrSize;
+          if (model.upiId) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(7.5);
+            doc.setTextColor('#475569');
+            doc.text(model.upiId, qrX + qrSize / 2, qrBottomY + 9, { align: 'center' });
+            qrBottomY += 12;
+          }
+          qrY = qrBottomY;
+        }
+
+        y = Math.max(bankY, qrY) + 18;
+      }
+
+      // ---- Signature block - standalone row, aligned to the bottom right. A clear gap is
+      // left between the signature image and the "AUTHORIZED SIGNATURE" caption below it so
+      // the two never overlap in the exported PDF, even for tall/busy signature images.
       if (model.showSignature) {
-        ensureSpace(46);
+        ensureSpace(54);
+        let sigY = y;
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
         doc.setTextColor('#0F172A');
@@ -5433,75 +6333,18 @@ const handleAddTerm = async () => {
             doc.addImage(model.signatureImg, pageWidth - marginX - sigW, sigY + 4, sigW, sigH);
           } catch (e) { /* ignore */ }
         }
-        sigY += 34;
+        sigY += 44;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor('#94A3B8');
         doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, sigY, { align: 'right' });
         sigY += 8;
-      }
-
-      y = Math.max(leftY, sigY) + 8;
-
-      // ---- Terms & Conditions (Quotation-specific only) - full width, below the row above
-      if (model.termsLines.length > 0) {
-        ensureSpace(16);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor('#0F172A');
-        doc.text('TERMS & CONDITIONS:', marginX, y);
-        y += 13;
-        model.termsLines.forEach((term) => {
-          const lines = doc.splitTextToSize(`\u2022 ${term}`, contentWidth);
-          ensureSpace(lines.length * 12 + 2);
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          doc.setTextColor('#475569');
-          doc.text(lines, marginX, y);
-          y += lines.length * 12 + 2;
-        });
-        y += 10;
+        y = sigY + 8;
       }
 
       drawBrandFooter();
 
-      const dataUrl = doc.output('datauristring');
-      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-
-      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
-        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
-        return;
-      }
-      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
-        const { Filesystem, Share } = window.Capacitor.Plugins;
-        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
-        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
-        return;
-      }
-      if (navigator.share) {
-        try {
-          const blob = doc.output('blob');
-          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
-          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file], title: sanitizedFileName });
-            return;
-          }
-        } catch (shareErr) {
-          // User cancelled the share sheet, or the browser refused - fall through to download.
-        }
-      }
-      const ua = navigator.userAgent || '';
-      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
-      if (isBareAndroidWebView) {
-        const link = document.createElement('a');
-        link.href = `data:application/pdf;base64,${pdfBase64}`;
-        link.download = sanitizedFileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        doc.save(sanitizedFileName);
-      }
+      await deliverGeneratedPdf(doc, sanitizedFileName);
     } catch (err) {
       console.error('Quotation PDF share failed:', err);
       showAlert('Could not prepare the document for sharing. Please try again.');
@@ -5513,284 +6356,378 @@ const handleAddTerm = async () => {
   // closing text, terms, and signature/signature-image layout as shareQuotationPdf, driven
   // entirely by a model built from buildDocModel, so every document's Share PDF always
   // matches its in-app preview.
-  const shareStandardDocumentPdf = async (model, fileNameBase) => {
-    const sanitizedFileName = `${(fileNameBase || model.docTitle || 'Document').toString().trim().replace(/\s+/g, '_')}.pdf`;
-    try {
-      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
-      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-      const marginX = 44;
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const contentWidth = pageWidth - marginX * 2;
-      const bottomLimit = pageHeight - 60;
-      let y = 50;
-      const logoDataUrl = await getAppLogoDataUrl();
+  // Generic PDF renderer shared by Invoice / Purchase Order / Proforma Invoice / Delivery
+// Note — draws the exact same header/logo, To-Date, greeting, table, totals, other info,
+// closing text, terms, and signature/signature-image layout as shareQuotationPdf, driven
+// entirely by a model built from buildDocModel, so every document's Share PDF always
+// matches its in-app preview.
+const shareStandardDocumentPdf = async (model, fileNameBase) => {
+  const sanitizedFileName = `${(fileNameBase || model.docTitle || 'Document').toString().trim().replace(/\s+/g, '_')}.pdf`;
+  try {
+    await ensureJsPDF();
+    model.logoImg = await getPdfSafeImage(model.logoImg, { maxDim: 200 });
+    model.signatureImg = await getPdfSafeImage(model.signatureImg, { maxDim: 300, keepPng: true });
+    model.qrCodeImg = await getPdfSafeImage(model.qrCodeImg, { maxDim: 300, keepPng: true });
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    registerRupeeFont(doc);
+    const marginX = 44;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const contentWidth = pageWidth - marginX * 2;
+    const bottomLimit = pageHeight - 60;
+    let y = 50;
+    const logoDataUrl = await getAppLogoDataUrl();
 
-      const drawBrandFooter = () => {
-        const fy = pageHeight - 34;
-        doc.setDrawColor('#EDF0F4');
-        doc.setLineWidth(0.6);
-        doc.line(marginX, fy - 12, pageWidth - marginX, fy - 12);
-        let tx = marginX;
-        if (logoDataUrl) {
-          try { doc.addImage(logoDataUrl, 'PNG', marginX, fy - 8, 11, 11); tx = marginX + 15; } catch (e) { /* ignore */ }
-        }
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(7.5);
-        doc.setTextColor('#9CA3AF');
-        doc.text('Generated with SmartManage', tx, fy + 0.5);
-      };
-      const ensureSpace = (needed) => {
-        if (y + needed > bottomLimit) { drawBrandFooter(); doc.addPage(); y = 50; }
-      };
-
-      // ---- Header: Doc title (top, centered), then Business info + logo below
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(13);
-      doc.setTextColor('#0F172A');
-      doc.text(model.docTitle, pageWidth / 2, y, { align: 'center' });
-      y += 22;
-
-      if (model.logoImg) {
-        try { doc.addImage(model.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
+    const drawBrandFooter = () => {
+      const fy = pageHeight - 34;
+      doc.setDrawColor('#EDF0F4');
+      doc.setLineWidth(0.6);
+      doc.line(marginX, fy - 12, pageWidth - marginX, fy - 12);
+      let tx = marginX;
+      if (logoDataUrl) {
+        try { doc.addImage(logoDataUrl, 'PNG', marginX, fy - 8, 11, 11); tx = marginX + 15; } catch (e) { /* ignore */ }
       }
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor('#9CA3AF');
+      doc.text('Generated with SmartManage', tx, fy + 0.5);
+    };
+    const ensureSpace = (needed) => {
+      if (y + needed > bottomLimit) { drawBrandFooter(); doc.addPage(); y = 50; }
+    };
 
-      // Business name uses the same size/weight as the customer name below (10.5pt bold)
-      // so the two read as visually uniform, matching the in-app document preview.
+    // ---- Header: Doc title (top, centered), then Business info + logo below
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor('#0F172A');
+    doc.text(model.docTitle, pageWidth / 2, y, { align: 'center' });
+    y += 22;
+
+    if (model.logoImg) {
+      try { doc.addImage(model.logoImg, pageWidth - marginX - 34, y - 12, 34, 34); } catch (e) { /* ignore */ }
+    }
+
+    // Business name uses the same size/weight as the customer name below (10.5pt bold)
+    // so the two read as visually uniform, matching the in-app document preview.
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor('#0F172A');
+    doc.text(model.businessName, marginX, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor('#64748B');
+    let by = y + 14;
+    if (model.businessPhone) { doc.text(model.businessPhone, marginX, by); by += 11; }
+    if (model.businessEmail) { doc.text(model.businessEmail, marginX, by); by += 11; }
+
+    y = Math.max(by + 10, model.logoImg ? y + 34 : 0);
+    doc.setDrawColor('#E2E8F0');
+    doc.setLineWidth(0.75);
+    doc.line(marginX, y, pageWidth - marginX, y);
+    y += 20;
+
+    // ---- To, (left) | Date (right)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor('#64748B');
+    doc.text(model.toLabel || 'To,', marginX, y);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor('#0F172A');
+    doc.text(`Date: ${model.date || ''}`, pageWidth - marginX, y, { align: 'right' });
+    y += 13;
+
+    model.customerLines.forEach((line, idx) => {
+      doc.setFont('helvetica', idx === 0 ? 'bold' : 'normal');
+      doc.setFontSize(idx === 0 ? 10.5 : 8.5);
+      doc.setTextColor(idx === 0 ? '#0F172A' : '#64748B');
+      doc.text(String(line), marginX, y, { maxWidth: contentWidth - 160 });
+      y += idx === 0 ? 13 : 11;
+    });
+    y += 10;
+
+    // ---- Shipping Address (only when enabled in the document type's Settings) - the
+    // on-screen document preview shows it for every doc type via the same
+    // GeneratedDocumentPreview component, so it's drawn here too to keep the exported
+    // PDF in sync with what's on screen.
+    if (model.showShippingAddress && model.shippingAddress) {
+      ensureSpace(24);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10.5);
-      doc.setTextColor('#0F172A');
-      doc.text(model.businessName, marginX, y);
+      doc.setFontSize(9);
+      doc.setTextColor('#64748B');
+      doc.text('Shipping Address', marginX, y);
+      y += 12;
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor('#64748B');
-      let by = y + 14;
-      if (model.businessPhone) { doc.text(model.businessPhone, marginX, by); by += 11; }
-      if (model.businessEmail) { doc.text(model.businessEmail, marginX, by); by += 11; }
+      const shipLines = doc.splitTextToSize(model.shippingAddress, contentWidth);
+      doc.text(shipLines, marginX, y);
+      y += shipLines.length * 11 + 8;
+    }
 
-      y = Math.max(by + 10, model.logoImg ? y + 34 : 0);
-      doc.setDrawColor('#E2E8F0');
-      doc.setLineWidth(0.75);
-      doc.line(marginX, y, pageWidth - marginX, y);
-      y += 20;
-
-      // ---- To, (left) | Date (right)
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor('#64748B');
-      doc.text(model.toLabel || 'To,', marginX, y);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor('#0F172A');
-      doc.text(`Date: ${model.date || ''}`, pageWidth - marginX, y, { align: 'right' });
-      y += 13;
-
-      model.customerLines.forEach((line, idx) => {
-        doc.setFont('helvetica', idx === 0 ? 'bold' : 'normal');
-        doc.setFontSize(idx === 0 ? 10.5 : 8.5);
-        doc.setTextColor(idx === 0 ? '#0F172A' : '#64748B');
-        doc.text(String(line), marginX, y, { maxWidth: contentWidth - 160 });
-        y += idx === 0 ? 13 : 11;
-      });
-      y += 10;
-
-      // ---- Greeting / intro lines (type-specific, skipped when empty)
-      if (model.greetingLines.length > 0) {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9.5);
-        doc.setTextColor('#475569');
-        model.greetingLines.forEach((line) => {
-          doc.text(line, marginX, y);
-          y += 13;
-        });
-        y += 7;
-      }
-
-      // ---- Item table (pricing/HSN/GST columns only when this doc type/its Settings enable them).
-      // Column set is built dynamically so hidden columns (e.g. HSN or GST when a document's
-      // Settings screen has them off) free up their space rather than leaving a gap.
-      const showHsnCol = model.showHsn !== false;
-      const showGstCol = model.pricing && model.showGst !== false;
-      const cols = [
-        { key: 'index', label: '#', pct: model.pricing ? 0.06 : 0.10, align: 'left' },
-        { key: 'item', label: 'Item', pct: model.pricing ? 0.15 : 0.30, align: 'left' },
-        ...(showHsnCol ? [{ key: 'hsn', label: model.hsnLabel, pct: model.pricing ? 0.11 : 0.23, align: 'left' }] : []),
-        { key: 'qty', label: 'Qty', pct: model.pricing ? 0.13 : 0.25, align: 'center' },
-        ...(model.pricing ? [{ key: 'price', label: 'Price', pct: 0.18, align: 'right' }] : []),
-        ...(showGstCol ? [{ key: 'gst', label: 'GST', pct: 0.16, align: 'right' }] : []),
-        ...(model.pricing ? [{ key: 'total', label: 'Total', pct: 0.21, align: 'right' }] : []),
-      ];
-      const pctSum = cols.reduce((sum, c) => sum + c.pct, 0) || 1;
-      const colWidths = cols.map((c) => (c.pct / pctSum) * contentWidth);
-      const colX = [marginX];
-      for (let i = 0; i < colWidths.length - 1; i++) colX.push(colX[i] + colWidths[i]);
-      const colIndex = (key) => cols.findIndex((c) => c.key === key);
-      const itemColIdx = colIndex('item');
-
-      ensureSpace(24);
-      doc.setDrawColor('#0F172A');
-      doc.setLineWidth(1);
-      doc.line(marginX, y - 9, pageWidth - marginX, y - 9);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
+    // ---- Greeting / intro lines (type-specific, skipped when empty)
+    if (model.greetingLines.length > 0) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
       doc.setTextColor('#475569');
-      cols.forEach((c, i) => {
-        const tx = c.align === 'right' ? colX[i] + colWidths[i] : c.align === 'center' ? colX[i] + colWidths[i] / 2 : colX[i];
-        doc.text(String(c.label).toUpperCase(), tx, y, { align: c.align });
+      model.greetingLines.forEach((line) => {
+        doc.text(line, marginX, y);
+        y += 13;
       });
-      y += 4;
-      doc.line(marginX, y, pageWidth - marginX, y);
-      y += 13;
+      y += 7;
+    }
 
-      model.rows.forEach((r) => {
-        const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[itemColIdx] - 4);
-        // When the GST column is shown, each row draws a small sub-line (the GST amount,
-        // e.g. "Rs.33,600") 9pt below the main row baseline. rowH must account for that
-        // sub-line's full height, or the divider line below gets drawn too early and
-        // overlaps/"cuts" into the row's own text instead of sitting cleanly beneath it.
-        const mainRowH = Math.max(13, nameLines.length * 10 + 3);
-        const rowH = showGstCol ? Math.max(mainRowH, 9 + 10) : mainRowH;
-        ensureSpace(rowH + 6);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.setTextColor('#334155');
-        doc.text(String(r.index), colX[colIndex('index')], y);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor('#0F172A');
-        doc.text(nameLines, colX[itemColIdx], y);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor('#334155');
-        if (showHsnCol) doc.text(String(r.hsn), colX[colIndex('hsn')], y);
-        const qtyIdx = colIndex('qty');
-        doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[qtyIdx] + colWidths[qtyIdx] / 2, y, { align: 'center' });
-        if (model.pricing) {
-          const priceIdx = colIndex('price');
-          doc.text(`Rs.${Number(r.price).toFixed(2)}`, colX[priceIdx] + colWidths[priceIdx], y, { align: 'right' });
-          if (showGstCol) {
-            const gstIdx = colIndex('gst');
-            doc.text(`${r.gstPct}%`, colX[gstIdx] + colWidths[gstIdx], y, { align: 'right' });
-            doc.setFontSize(7.5);
-            doc.setTextColor('#94A3B8');
-            doc.text(`Rs.${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[gstIdx] + colWidths[gstIdx], y + 9, { align: 'right' });
-            doc.setFontSize(9);
-          }
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor('#0F172A');
-          const totalIdx = colIndex('total');
-          doc.text(`Rs.${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[totalIdx] + colWidths[totalIdx], y, { align: 'right' });
-        }
-        y += rowH + 6;
-        doc.setDrawColor('#EEF1F5');
-        doc.setLineWidth(0.5);
-        doc.line(marginX, y - 4, pageWidth - marginX, y - 4);
-      });
-      y += 8;
+    // ---- Item table (pricing/HSN/GST columns only when this doc type/its Settings enable them).
+    // Column set is built dynamically so hidden columns (e.g. HSN or GST when a document's
+    // Settings screen has them off) free up their space rather than leaving a gap.
+    const showHsnCol = model.showHsn !== false;
+    const showGstCol = model.pricing && model.showGst !== false;
+    const cols = [
+      { key: 'index', label: '#', pct: model.pricing ? 0.06 : 0.10, align: 'left' },
+      { key: 'item', label: 'Item', pct: model.pricing ? 0.15 : 0.30, align: 'left' },
+      ...(showHsnCol ? [{ key: 'hsn', label: model.hsnLabel, pct: model.pricing ? 0.11 : 0.23, align: 'left' }] : []),
+      { key: 'qty', label: 'Qty', pct: model.pricing ? 0.13 : 0.25, align: 'center' },
+      ...(model.pricing ? [{ key: 'price', label: 'Price', pct: 0.18, align: 'right' }] : []),
+      ...(showGstCol ? [{ key: 'gst', label: 'GST', pct: 0.16, align: 'right' }] : []),
+      ...(model.pricing ? [{ key: 'total', label: 'Total', pct: 0.21, align: 'right' }] : []),
+    ];
+    const pctSum = cols.reduce((sum, c) => sum + c.pct, 0) || 1;
+    const colWidths = cols.map((c) => (c.pct / pctSum) * contentWidth);
+    const colX = [marginX];
+    for (let i = 0; i < colWidths.length - 1; i++) colX.push(colX[i] + colWidths[i]);
+    const colIndex = (key) => cols.findIndex((c) => c.key === key);
+    const itemColIdx = colIndex('item');
 
-      // ---- Sub Total / Other Charges / Grand Total (+ Paid / Balance Due when applicable)
+    ensureSpace(24);
+    doc.setDrawColor('#0F172A');
+    doc.setLineWidth(1);
+    doc.line(marginX, y - 9, pageWidth - marginX, y - 9);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor('#475569');
+    cols.forEach((c, i) => {
+      const tx = c.align === 'right' ? colX[i] + colWidths[i] : c.align === 'center' ? colX[i] + colWidths[i] / 2 : colX[i];
+      doc.text(String(c.label).toUpperCase(), tx, y, { align: c.align });
+    });
+    y += 4;
+    doc.line(marginX, y, pageWidth - marginX, y);
+    y += 13;
+
+    model.rows.forEach((r) => {
+      const nameLines = doc.splitTextToSize(String(r.name || ''), colWidths[itemColIdx] - 4);
+      // When the GST column is shown, each row draws a small sub-line (the GST amount,
+      // e.g. "₹33,600") 9pt below the main row baseline. rowH must account for that
+      // sub-line's full height, or the divider line below gets drawn too early and
+      // overlaps/"cuts" into the row's own text instead of sitting cleanly beneath it.
+      const mainRowH = Math.max(13, nameLines.length * 10 + 3);
+      const rowH = showGstCol ? Math.max(mainRowH, 9 + 10) : mainRowH;
+      ensureSpace(rowH + 6);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor('#334155');
+      doc.text(String(r.index), colX[colIndex('index')], y);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor('#0F172A');
+      doc.text(nameLines, colX[itemColIdx], y);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor('#334155');
+      if (showHsnCol) doc.text(String(r.hsn), colX[colIndex('hsn')], y);
+      const qtyIdx = colIndex('qty');
+      doc.text(`${r.qty}${r.unit ? ' ' + r.unit : ''}`, colX[qtyIdx] + colWidths[qtyIdx] / 2, y, { align: 'center' });
       if (model.pricing) {
-        const totalLabelX = pageWidth - marginX - 190;
-        ensureSpace(18);
+        const priceIdx = colIndex('price');
+        drawAmountText(doc, `₹${Number(r.price).toFixed(2)}`, colX[priceIdx] + colWidths[priceIdx], y, { align: 'right' });
+        if (showGstCol) {
+          const gstIdx = colIndex('gst');
+          doc.text(`${r.gstPct}%`, colX[gstIdx] + colWidths[gstIdx], y, { align: 'right' });
+          doc.setFontSize(7.5);
+          doc.setTextColor('#94A3B8');
+          drawAmountText(doc, `₹${r.gstAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[gstIdx] + colWidths[gstIdx], y + 9, { align: 'right' });
+          doc.setFontSize(9);
+        }
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#0F172A');
+        const totalIdx = colIndex('total');
+        drawAmountText(doc, `₹${r.total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, colX[totalIdx] + colWidths[totalIdx], y, { align: 'right' });
+      }
+      y += rowH + 6;
+    });
+    doc.setDrawColor('#EEF1F5');
+    doc.setLineWidth(0.5);
+    doc.line(marginX, y - 4, pageWidth - marginX, y - 4);
+    y += 8;
+
+    // ---- Sub Total / Other Charges / Grand Total (+ Paid / Balance Due when applicable)
+    if (model.pricing) {
+      const totalLabelX = pageWidth - marginX - 190;
+      ensureSpace(18);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#64748B');
+      doc.text('Sub Total', totalLabelX, y, { align: 'left' });
+      doc.setTextColor('#334155');
+      drawAmountText(doc, `₹${(model.subTotal + model.gstTotal).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+      y += 15;
+      if (model.gstTotal > 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#94A3B8');
+        const subTaxLabel = 'GST: ';
+        doc.text(subTaxLabel, totalLabelX, y, { align: 'left' });
+        const subTaxLabelWidth = doc.getTextWidth(subTaxLabel);
+        drawAmountText(doc, `₹${model.gstTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, totalLabelX + subTaxLabelWidth, y, { align: 'left' });
+        doc.setFontSize(9.5);
+        y += 12;
+      }
+
+      // Updated Other Charges with tax breakdown - the charge label (e.g. "Handling and
+      // Transport (Tax 5%)") can wrap onto multiple lines when it's long, so its wrapped
+      // line count is measured up front and the "₹..." amount is placed below
+      // the LAST wrapped line, not a fixed offset - otherwise a wrapped label's second
+      // line collides with the amount drawn right underneath the first line.
+      (model.otherChargesRows || []).forEach((c) => {
+        const taxAmount = c.taxable ? (c.amount * c.gstPercent / 100) : 0;
+        const totalWithTax = c.amount + taxAmount;
+        const chargeLabel = c.taxable && c.gstPercent > 0 ? `${c.label} (Tax ${c.gstPercent}%)` : c.label;
+        const labelMaxWidth = pageWidth - marginX - totalLabelX - 100;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
+        const chargeLabelLines = doc.splitTextToSize(chargeLabel, labelMaxWidth);
+        const labelLineHeight = 11;
+        const labelBlockHeight = chargeLabelLines.length * labelLineHeight;
+        const hasTaxLine = c.taxable && c.gstPercent > 0;
+        ensureSpace(labelBlockHeight + (hasTaxLine ? 15 : 6));
         doc.setTextColor('#64748B');
-        doc.text('Sub Total', totalLabelX, y, { align: 'left' });
+        doc.text(chargeLabelLines, totalLabelX, y, { align: 'left' });
         doc.setTextColor('#334155');
-        doc.text(`Rs.${model.subTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
-        y += 15;
-
-        if (model.otherChargesTotal > 0) {
-          ensureSpace(18);
-          doc.setTextColor('#64748B');
-          doc.text('Other Charges', totalLabelX, y, { align: 'left' });
-          doc.setTextColor('#334155');
-          doc.text(`Rs.${model.otherChargesTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
-          y += 15;
-        }
-        y -= 3;
-
-        ensureSpace(28);
-        doc.setDrawColor('#0F172A');
-        doc.setLineWidth(0.75);
-        doc.line(totalLabelX, y, pageWidth - marginX, y);
-        y += 15;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor('#0F172A');
-        doc.text('Grand Total', totalLabelX, y, { align: 'left' });
-        doc.setFontSize(12.5);
-        doc.text(`Rs.${model.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
-        y += 26;
-
-        if (model.hasPayment && model.paidTotal > 0) {
-          ensureSpace(30);
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(9.5);
-          doc.setTextColor('#16A34A');
-          doc.text('Paid', totalLabelX, y, { align: 'left' });
-          doc.text(`Rs.${model.paidTotal.toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
-          y += 15;
-          doc.setTextColor('#0F172A');
-          doc.text('Balance Due', totalLabelX, y, { align: 'left' });
-          doc.setFontSize(11);
-          doc.text(`Rs.${model.balanceDue.toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
-          y += 22;
-        }
-      }
-
-      // ---- Left column (Other Info, Closing Text) runs alongside the Signature column on the
-      // right - both start at the same Y, right after Grand Total.
-      const rowStartY = y;
-      let leftY = rowStartY;
-
-      if (model.otherInfo) {
-        ensureSpace(15);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9.5);
-        doc.setTextColor('#64748B');
-        const lines = doc.splitTextToSize(model.otherInfo, contentWidth * 0.55);
-        doc.text(lines, marginX, leftY);
-        leftY += lines.length * 13 + 8;
-      }
-
-      if (model.closingText) {
-        ensureSpace(15);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9.5);
-        doc.setTextColor('#64748B');
-        doc.text(model.closingText, marginX, leftY, { maxWidth: contentWidth * 0.55 });
-        leftY += 22;
-      }
-
-      // ---- UPI / QR Code (only shown when enabled in this document type's Settings)
-      const hasBankFields = model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode;
-      const hasUpiFields = model.upiId || model.qrCodeImg;
-      if (model.showUpi && hasUpiFields) {
-        ensureSpace(120);
-        const qrSize = 96; // enlarged so the code stays sharp and easy to scan
-        if (model.qrCodeImg) {
-          try {
-            doc.addImage(model.qrCodeImg, marginX, leftY, qrSize, qrSize);
-          } catch (e) { /* ignore */ }
-        }
-        let upiBottomY = leftY + qrSize;
-        if (model.upiId) {
+        drawAmountText(doc, `₹${totalWithTax.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+        if (hasTaxLine) {
+          const taxY = y + labelBlockHeight - labelLineHeight + 9;
           doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8);
-          doc.setTextColor('#475569');
-          doc.text(model.upiId, marginX, upiBottomY + 10);
-          upiBottomY += 14;
+          doc.setFontSize(7.5);
+          doc.setTextColor('#94A3B8');
+          // The "(Tax X%)" annotation is already in the label above, so this amount is
+          // shown on its own without a redundant "Tax: " prefix.
+          drawAmountText(doc, `₹${taxAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, totalLabelX, taxY, { align: 'left' });
+          doc.setFontSize(9.5);
+          y = taxY + 13;
+        } else {
+          y += labelBlockHeight + 4;
         }
-        leftY = upiBottomY + 12;
-      }
+      });
+      y -= 3;
 
-      // ---- Payment Instructions (bank info, only shown when enabled in this document type's Settings)
-      if (model.showBankInfo && hasBankFields) {
-        ensureSpace(60);
+      ensureSpace(28);
+      doc.setDrawColor('#0F172A');
+      doc.setLineWidth(0.75);
+      doc.line(totalLabelX, y, pageWidth - marginX, y);
+      y += 15;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor('#0F172A');
+      doc.text('Grand Total', totalLabelX, y, { align: 'left' });
+      doc.setFontSize(12.5);
+      drawAmountText(doc, `₹${model.grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`, pageWidth - marginX, y, { align: 'right' });
+      y += 26;
+
+      if (model.hasPayment && model.paidTotal > 0) {
+        ensureSpace(30);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor('#16A34A');
+        doc.text('Paid', totalLabelX, y, { align: 'left' });
+        drawAmountText(doc, `₹${model.paidTotal.toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
+        y += 15;
+        doc.setTextColor('#0F172A');
+        doc.text('Balance Due', totalLabelX, y, { align: 'left' });
+        doc.setFontSize(11);
+        drawAmountText(doc, `₹${model.balanceDue.toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
+        y += 22;
+      }
+    }
+
+    // ---- Other Info / Closing Text - full width, above the Terms + Payment row
+    if (model.otherInfo) {
+      ensureSpace(15);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#64748B');
+      const lines = doc.splitTextToSize(model.otherInfo, contentWidth);
+      doc.text(lines, marginX, y);
+      y += lines.length * 13 + 8;
+    }
+
+    if (model.closingText) {
+      ensureSpace(15);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#64748B');
+      const closingLines = doc.splitTextToSize(model.closingText, contentWidth);
+      doc.text(closingLines, marginX, y);
+      y += closingLines.length * 13 + 8;
+    }
+
+    // ---- Terms & Conditions - full width, own row: label on its own line, followed by
+    // every term below it as its own bullet line. Payment Instructions (left) + QR Code
+    // (right) are drawn below as their own full-width row, with Signature afterwards (or
+    // alongside "Received By" for Delivery Note), so nothing ever gets squeezed.
+    const hasBankFields = model.bankAccountName || model.bankAccountNumber || model.bankName || model.ifscCode;
+    const hasUpiFields = model.upiId || model.qrCodeImg;
+    const showTerms = model.termsLines.length > 0;
+    const hasBank = !!(model.showBankInfo && hasBankFields);
+    const hasQr = !!(model.showUpi && hasUpiFields);
+
+    if (showTerms) {
+      // Header sits on its own row, with every term listed below it (one bullet per
+      // line) - matching the on-screen Purchase Order Detail layout, instead of running
+      // the first term inline next to the header.
+      const termsLabel = 'TERMS & CONDITIONS';
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      const bodyLines = [];
+      model.termsLines.forEach((term) => {
+        bodyLines.push(...doc.splitTextToSize(`\u2022 ${term}`, contentWidth));
+      });
+      ensureSpace(14 + bodyLines.length * 12 + 16);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#0F172A');
+      doc.text(termsLabel, marginX, y);
+      y += 14;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor('#475569');
+      doc.text(bodyLines, marginX, y);
+      y += bodyLines.length * 12 + 16;
+    }
+
+    if (hasBank || hasQr) {
+      const estPayHeight = Math.max(hasBank ? 13 + 44 : 0, hasQr ? 90 : 0);
+      ensureSpace(estPayHeight);
+
+      const rowStartY = y;
+      const qrSize = 70;
+      const qrGap = 18;
+      // Payment Instructions wraps within a capped column width (so a long bank/account
+      // line can't run into the QR) but the QR itself is placed directly after the
+      // ACTUAL rendered width of the Payment Instructions text (measured below), not
+      // centered inside a large fixed-proportion column - this mirrors the on-screen
+      // "auto auto 1fr" grid, where the QR column sits snug against the Payment
+      // Instructions column instead of drifting toward the page's right margin.
+      const bankTextWidth = hasQr ? Math.min(contentWidth * 0.42, contentWidth - qrSize - qrGap) : contentWidth;
+
+      // Payment Instructions (bank info) - left side of the row. Its actual rendered
+      // content width is tracked as it's drawn, so the QR column can be placed snug
+      // against it afterwards.
+      let bankY = rowStartY;
+      let bankContentWidth = 0;
+      if (hasBank) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9.5);
         doc.setTextColor('#0F172A');
-        doc.text('PAYMENT INSTRUCTIONS', marginX, leftY);
-        leftY += 13;
+        doc.text('PAYMENT INSTRUCTIONS', marginX, bankY);
+        bankContentWidth = Math.max(bankContentWidth, doc.getTextWidth('PAYMENT INSTRUCTIONS'));
+        bankY += 13;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8.5);
         doc.setTextColor('#475569');
@@ -5800,175 +6737,157 @@ const handleAddTerm = async () => {
           model.bankName && `Bank Name: ${model.bankName}`,
           model.ifscCode && `IFSC Code: ${model.ifscCode}`,
         ].filter(Boolean);
-        bankLines.forEach((line) => { doc.text(line, marginX, leftY); leftY += 11; });
-        leftY += 10;
+        bankLines.forEach((line) => {
+          const wrapped = doc.splitTextToSize(line, bankTextWidth);
+          wrapped.forEach((wl) => { bankContentWidth = Math.max(bankContentWidth, doc.getTextWidth(wl)); });
+          doc.text(wrapped, marginX, bankY);
+          bankY += wrapped.length * 11;
+        });
       }
 
-      // ---- Signature block (right column, only when enabled in this document type's Settings).
-      // Skipped here for Delivery Note (showReceivedBy) - drawn instead alongside the
-      // "Received By" acknowledgement block after Terms & Conditions, below.
-      let sigY = rowStartY;
-      if (model.showSignature && !model.showReceivedBy) {
-        ensureSpace(46);
+      // QR Code - placed directly after the Payment Instructions content (auto-width
+      // column + gap), capped so it never runs past the page's right margin, and
+      // pinned to the left margin when there's no Payment Instructions block at all.
+      // Shifted up slightly (qrTopAdjust) because doc.text()'s y is the text BASELINE
+      // while doc.addImage()'s y is the image's TOP edge - without the adjustment the
+      // QR's top edge lines up with the bottom of the "PAYMENT INSTRUCTIONS" header
+      // text instead of its top, making the QR look like it starts lower than the label.
+      const qrTopAdjust = hasBank ? 7 : 0;
+      const qrX = hasQr
+        ? Math.min(marginX + bankContentWidth + (hasBank ? qrGap : 0), pageWidth - marginX - qrSize)
+        : marginX;
+      let qrY = rowStartY - qrTopAdjust;
+      if (hasQr) {
+        if (model.qrCodeImg) {
+          try {
+            doc.addImage(model.qrCodeImg, qrX, qrY, qrSize, qrSize);
+          } catch (e) { /* ignore */ }
+        }
+        let qrBottomY = qrY + qrSize;
+        if (model.upiId) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7.5);
+          doc.setTextColor('#475569');
+          doc.text(model.upiId, qrX + qrSize / 2, qrBottomY + 9, { align: 'center' });
+          qrBottomY += 12;
+        }
+        qrY = qrBottomY;
+      }
+
+      y = Math.max(bankY, qrY) + 18;
+    }
+
+    // ---- Payment History - full width, below the Payment Instructions/QR row and above
+    // the Signature block, matching the on-screen document preview order.
+    if (model.hasPayment && model.paidInfo.length > 0) {
+      ensureSpace(16);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#0F172A');
+      doc.text('PAYMENT HISTORY:', marginX, y);
+      y += 13;
+      model.paidInfo.forEach((p) => {
+        ensureSpace(13);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor('#475569');
+        doc.text(`${p.date}${p.note ? ' — ' + p.note : ''}`, marginX, y);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#0F172A');
+        drawAmountText(doc, `₹${p.amount}`, pageWidth - marginX, y, { align: 'right' });
+        y += 13;
+      });
+      y += 8;
+    }
+
+    // ---- Signature block - standalone row, aligned to the bottom right. Skipped here for
+    // Delivery Note (showReceivedBy) - drawn instead alongside the "Received By"
+    // acknowledgement block after Payment History, below. A clear gap is left between the
+    // signature image and the "AUTHORIZED SIGNATURE" caption below it so the two never
+    // overlap in the exported PDF, even for tall/busy signature images.
+    if (model.showSignature && !model.showReceivedBy) {
+      ensureSpace(54);
+      let sigY = y;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor('#0F172A');
+      doc.text(`For, ${model.signatureName}`, pageWidth - marginX, sigY, { align: 'right' });
+      if (model.signatureImg) {
+        try {
+          const sigW = 90, sigH = 30;
+          doc.addImage(model.signatureImg, pageWidth - marginX - sigW, sigY + 4, sigW, sigH);
+        } catch (e) { /* ignore */ }
+      }
+      sigY += 44;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor('#94A3B8');
+      doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, sigY, { align: 'right' });
+      sigY += 8;
+      y = sigY + 8;
+    }
+
+    // ---- Received By (Delivery Note only) - Name/Date/Signature acknowledgement on the
+    // left, business's own Authorized Signature on the right, both at the very bottom,
+    // below Terms & Conditions / Payment Instructions / QR above.
+    if (model.showReceivedBy) {
+      ensureSpace(90);
+      const rbStartY = y;
+      let rbY = rbStartY;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor('#0F172A');
+      doc.text('Received By:', marginX, rbY);
+      rbY += 22;
+      const rbFieldWidth = contentWidth * 0.55;
+      const rbLabelGap = 10;
+      const drawBlankField = (label) => {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor('#475569');
+        doc.text(label, marginX, rbY);
+        const labelWidth = doc.getTextWidth(label);
+        doc.setDrawColor('#94A3B8');
+        doc.setLineWidth(0.6);
+        doc.line(marginX + labelWidth + rbLabelGap, rbY, marginX + rbFieldWidth, rbY);
+        rbY += 26;
+      };
+      drawBlankField('Name:');
+      drawBlankField('Date:');
+      drawBlankField('Signature:');
+
+      let rbSigY = rbStartY;
+      if (model.showSignature) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
         doc.setTextColor('#0F172A');
-        doc.text(`For, ${model.signatureName}`, pageWidth - marginX, sigY, { align: 'right' });
+        doc.text(`For, ${model.signatureName}`, pageWidth - marginX, rbSigY, { align: 'right' });
         if (model.signatureImg) {
           try {
             const sigW = 90, sigH = 30;
-            doc.addImage(model.signatureImg, pageWidth - marginX - sigW, sigY + 4, sigW, sigH);
+            doc.addImage(model.signatureImg, pageWidth - marginX - sigW, rbSigY + 4, sigW, sigH);
           } catch (e) { /* ignore */ }
         }
-        sigY += 34;
+        rbSigY += 44;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor('#94A3B8');
-        doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, sigY, { align: 'right' });
-        sigY += 8;
+        doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, rbSigY, { align: 'right' });
+        rbSigY += 8;
       }
-
-      y = Math.max(leftY, sigY) + 8;
-
-      // ---- Terms & Conditions - full width, below the row above
-      if (model.termsLines.length > 0) {
-        ensureSpace(16);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor('#0F172A');
-        doc.text('TERMS & CONDITIONS:', marginX, y);
-        y += 13;
-        model.termsLines.forEach((term) => {
-          const lines = doc.splitTextToSize(`\u2022 ${term}`, contentWidth);
-          ensureSpace(lines.length * 12 + 2);
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          doc.setTextColor('#475569');
-          doc.text(lines, marginX, y);
-          y += lines.length * 12 + 2;
-        });
-        y += 10;
-      }
-
-      // ---- Payment History - full width, below the row above
-      if (model.hasPayment && model.paidInfo.length > 0) {
-        ensureSpace(16);
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor('#0F172A');
-        doc.text('PAYMENT HISTORY:', marginX, y);
-        y += 13;
-        model.paidInfo.forEach((p) => {
-          ensureSpace(13);
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          doc.setTextColor('#475569');
-          doc.text(`${p.date}${p.note ? ' — ' + p.note : ''}`, marginX, y);
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor('#0F172A');
-          doc.text(`Rs.${p.amount}`, pageWidth - marginX, y, { align: 'right' });
-          y += 13;
-        });
-        y += 8;
-      }
-
-      // ---- Received By (Delivery Note only) - Name/Date/Signature acknowledgement on the
-      // left, business's own Authorized Signature on the right, both at the very bottom,
-      // below Terms & Conditions / Payment Instructions / QR above.
-      if (model.showReceivedBy) {
-        ensureSpace(90);
-        const rbStartY = y;
-        let rbY = rbStartY;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor('#0F172A');
-        doc.text('Received By:', marginX, rbY);
-        rbY += 22;
-        const rbFieldWidth = contentWidth * 0.55;
-        const rbLabelGap = 10;
-        const drawBlankField = (label) => {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          doc.setTextColor('#475569');
-          doc.text(label, marginX, rbY);
-          const labelWidth = doc.getTextWidth(label);
-          doc.setDrawColor('#94A3B8');
-          doc.setLineWidth(0.6);
-          doc.line(marginX + labelWidth + rbLabelGap, rbY, marginX + rbFieldWidth, rbY);
-          rbY += 26;
-        };
-        drawBlankField('Name:');
-        drawBlankField('Date:');
-        drawBlankField('Signature:');
-
-        let rbSigY = rbStartY;
-        if (model.showSignature) {
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(10);
-          doc.setTextColor('#0F172A');
-          doc.text(`For, ${model.signatureName}`, pageWidth - marginX, rbSigY, { align: 'right' });
-          if (model.signatureImg) {
-            try {
-              const sigW = 90, sigH = 30;
-              doc.addImage(model.signatureImg, pageWidth - marginX - sigW, rbSigY + 4, sigW, sigH);
-            } catch (e) { /* ignore */ }
-          }
-          rbSigY += 34;
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(7.5);
-          doc.setTextColor('#94A3B8');
-          doc.text('AUTHORIZED SIGNATURE', pageWidth - marginX, rbSigY, { align: 'right' });
-          rbSigY += 8;
-        }
-        y = Math.max(rbY, rbSigY) + 8;
-      }
-
-      drawBrandFooter();
-
-      const dataUrl = doc.output('datauristring');
-      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-
-      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
-        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
-        return;
-      }
-      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
-        const { Filesystem, Share } = window.Capacitor.Plugins;
-        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
-        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
-        return;
-      }
-      if (navigator.share) {
-        try {
-          const blob = doc.output('blob');
-          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
-          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file], title: sanitizedFileName });
-            return;
-          }
-        } catch (shareErr) {
-          // User cancelled the share sheet, or the browser refused - fall through to download.
-        }
-      }
-      const ua = navigator.userAgent || '';
-      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
-      if (isBareAndroidWebView) {
-        const link = document.createElement('a');
-        link.href = `data:application/pdf;base64,${pdfBase64}`;
-        link.download = sanitizedFileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        doc.save(sanitizedFileName);
-      }
-    } catch (err) {
-      console.error('Document PDF share failed:', err);
-      showAlert('Could not prepare the document for sharing. Please try again.');
+      y = Math.max(rbY, rbSigY) + 8;
     }
-  };
 
-  const productLineSummary = (p) => `${p.name} x${p.qty}${p.unit ? ' ' + p.unit : ''} - Rs.${Math.round((p.price || 0) * (p.qty || 0) * (1 + (p.gst || 0) / 100)).toLocaleString('en-IN')}`;
+    drawBrandFooter();
+
+    await deliverGeneratedPdf(doc, sanitizedFileName);
+  } catch (err) {
+    console.error('Document PDF share failed:', err);
+    showAlert('Could not prepare the document for sharing. Please try again.');
+  }
+};
+
+  const productLineSummary = (p) => `${p.name} x${p.qty}${p.unit ? ' ' + p.unit : ''} - ₹${Math.round((p.price || 0) * (p.qty || 0) * (1 + (p.gst || 0) / 100)).toLocaleString('en-IN')}`;
 
   // ----- Quotation: Duplicate / Edit / Status / Share -----
   const openEditQuotation = (q) => {
@@ -5988,7 +6907,7 @@ const handleAddTerm = async () => {
     // A duplicate is a brand-new document created right now, so it picks up current
     // Business Info / Quotation Settings at the moment of duplication (like any other new
     // document) rather than inheriting the original's frozen docSnapshot.
-    const payload = { ...rest, quotationNo: getNextQuotationNumber(), date: formatQuotationDate(new Date()), docSnapshot: buildDocSettingsSnapshot(quotationSettings) };
+    const payload = { ...rest, quotationNo: getNextQuotationNumber(), date: formatQuotationDate(new Date()), docSnapshot: JSON.stringify(buildDocSettingsSnapshot(quotationSettings)) };
     try {
       const created = await documentService.createQuotation(loggedInUser.userId, payload);
       persistQuotations([...quotations, created]);
@@ -6042,11 +6961,16 @@ const handleAddTerm = async () => {
     ...rest, 
     purchaseOrderNo: getNextPurchaseOrderNumber(), 
     date: formatQuotationDate(new Date()),
-    docSnapshot: buildDocSettingsSnapshot(purchaseOrderSettings),
+    docSnapshot: JSON.stringify(buildDocSettingsSnapshot(purchaseOrderSettings)),
   };
   try {
     const created = await purchaseOrdersService.createPurchaseOrder(loggedInUser.userId, payload);
-    persistPurchaseOrders([...purchaseOrders, created]);
+    // Parse docSnapshot into an object here too (matches handleGeneratePurchaseOrder above) -
+    // otherwise it's left as a raw JSON string in local state, which is inconsistent with
+    // every other purchase order in `purchaseOrders` and can cause double-encoding issues
+    // the next time this record is persisted to localStorage.
+    const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+    persistPurchaseOrders([...purchaseOrders, parsedCreated]);
     showSuccess('Purchase Order duplicated successfully.');
     setQuotationSubView('purchaseOrderList');
   } catch (error) {
@@ -6055,7 +6979,7 @@ const handleAddTerm = async () => {
   }
 };
   const handleSharePurchaseOrder = (o) => {
-    shareStandardDocumentPdf(buildPurchaseOrderDocModel(o), `PurchaseOrder_${o.purchaseOrderNo || ''}`);
+    shareStandardDocumentPdf(buildPurchaseOrderDocModel(o), buildUserDocFileName(purchaseOrders, o, 'PurchaseOrder'));
   };
 
   // ----- Proforma Invoice: Duplicate / Edit / Status / Share -----
@@ -6081,17 +7005,17 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = inv;
-  // A duplicate is a brand-new document created right now, so it picks up current
-  // Business Info / Proforma Invoice Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     proformaInvoiceNo: getNextProformaInvoiceNumber(), 
     date: formatQuotationDate(new Date()),
-    docSnapshot: buildDocSettingsSnapshot(proformaInvoiceSettings),
+    docSnapshot: JSON.stringify(buildDocSettingsSnapshot(proformaInvoiceSettings)),
   };
   try {
     const created = await proformaInvoicesService.createProformaInvoice(loggedInUser.userId, payload);
-    persistProformaInvoices([...proformaInvoices, created]);
+    // ✅ PARSE the docSnapshot before storing in localStorage
+    const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+    persistProformaInvoices([...proformaInvoices, parsedCreated]);
     showSuccess('Proforma Invoice duplicated successfully.');
     setQuotationSubView('proformaInvoiceList');
   } catch (error) {
@@ -6113,7 +7037,7 @@ const handleAddTerm = async () => {
   }
 };
   const handleShareProformaInvoice = (inv) => {
-    shareStandardDocumentPdf(buildProformaInvoiceDocModel(inv), `ProformaInvoice_${inv.proformaInvoiceNo || ''}`);
+    shareStandardDocumentPdf(buildProformaInvoiceDocModel(inv), buildUserDocFileName(proformaInvoices, inv, 'ProformaInvoice'));
   };
 
   // ----- Delivery Note: Duplicate / Edit / Status / Share -----
@@ -6136,17 +7060,17 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = dn;
-  // A duplicate is a brand-new document created right now, so it picks up current
-  // Business Info / Delivery Note Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     deliveryNoteNo: getNextDeliveryNoteNumber(), 
     date: formatQuotationDate(new Date()),
-    docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings),
+    docSnapshot: JSON.stringify(buildDocSettingsSnapshot(deliveryNoteSettings)),
   };
   try {
     const created = await deliveryNotesService.createDeliveryNote(loggedInUser.userId, payload);
-    persistDeliveryNotes([...deliveryNotes, created]);
+    // ✅ PARSE the docSnapshot before storing in localStorage
+    const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+    persistDeliveryNotes([...deliveryNotes, parsedCreated]);
     showSuccess('Delivery Note duplicated successfully.');
     setQuotationSubView('deliveryNoteList');
   } catch (error) {
@@ -6155,7 +7079,7 @@ const handleAddTerm = async () => {
   }
 };
   const handleShareDeliveryNote = (dn) => {
-    shareStandardDocumentPdf(buildDeliveryNoteDocModel(dn), `DeliveryNote_${dn.deliveryNoteNo || ''}`);
+    shareStandardDocumentPdf(buildDeliveryNoteDocModel(dn), buildUserDocFileName(deliveryNotes, dn, 'DeliveryNote'));
   };
 
   // ----- Invoice: Duplicate / Edit / Status / Share -----
@@ -6173,18 +7097,18 @@ const handleAddTerm = async () => {
     return;
   }
   const { id, createdAt, updatedAt, status, ...rest } = inv;
-  // A duplicate is a brand-new document created right now, so it picks up current
-  // Business Info / Invoice Settings rather than inheriting the original's frozen docSnapshot.
   const payload = { 
     ...rest, 
     invoiceNo: getNextInvoiceNumber(), 
     date: formatQuotationDate(new Date()),
-    status: 'Unpaid', // Duplicated invoices start fresh as Unpaid, regardless of the original's status.
-    docSnapshot: buildDocSettingsSnapshot(invoiceSettings),
+    status: 'Unpaid',
+    docSnapshot: JSON.stringify(buildDocSettingsSnapshot(invoiceSettings)),
   };
   try {
     const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
-    persistInvoices([...invoices, created]);
+    // ✅ PARSE the docSnapshot before storing in localStorage
+    const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+    persistInvoices([...invoices, parsedCreated]);
     showSuccess('Invoice duplicated successfully.');
     setQuotationSubView('invoiceList');
   } catch (error) {
@@ -6206,7 +7130,7 @@ const handleAddTerm = async () => {
   }
 };
   const handleShareInvoice = (inv) => {
-    shareStandardDocumentPdf(buildInvoiceDocModel(inv), `Invoice_${inv.invoiceNo || ''}`);
+    shareStandardDocumentPdf(buildInvoiceDocModel(inv), buildUserDocFileName(invoices, inv, 'Invoice'));
   };
 
   // ----- Receipt: Duplicate / Edit / Status / Share -----
@@ -6235,7 +7159,7 @@ const handleAddTerm = async () => {
     ...rest, 
     receiptNo: getNextReceiptNumber(), 
     date: formatQuotationDate(new Date()),
-    docSnapshot: buildDocSettingsSnapshot(receiptSettings),
+    docSnapshot: JSON.stringify(buildDocSettingsSnapshot(receiptSettings)),
   };
   try {
     const created = await receiptsService.createReceipt(loggedInUser.userId, payload);
@@ -6253,14 +7177,19 @@ const handleAddTerm = async () => {
   // replaced with a Payment Details block, and the signature is always the business
   // (not the customer), matching the in-app Receipt Detail preview.
   const shareReceiptPdf = async (r) => {
-    const sanitizedFileName = `${(`Receipt_${r.receiptNo || ''}`).toString().trim().replace(/\s+/g, '_')}.pdf`;
+    const sanitizedFileName = `${buildUserDocFileName(receipts, r, 'Receipt')}.pdf`;
     // Frozen Business Info / Receipt Settings from when this receipt was created or
     // last edited-and-updated; falls back to live values only for receipts saved
     // before this snapshot existed.
-    const snap = r.docSnapshot || buildDocSettingsSnapshot(receiptSettings);
+    // Shallow-copied so the downscaled images below never mutate the receipt's own stored
+    // docSnapshot (or the live Business Info) - only this share's local copy is resized.
+    const snap = { ...(r.docSnapshot || buildDocSettingsSnapshot(receiptSettings)) };
     try {
-      if (typeof jsPDF === 'undefined') throw new Error('jsPDF library not loaded');
+      await ensureJsPDF();
+      snap.logoImg = await getPdfSafeImage(snap.logoImg, { maxDim: 200 });
+      snap.signatureImg = await getPdfSafeImage(snap.signatureImg, { maxDim: 300, keepPng: true });
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      registerRupeeFont(doc);
       const marginX = 44;
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
@@ -6382,7 +7311,7 @@ const handleAddTerm = async () => {
       doc.setTextColor('#0F172A');
       doc.text('Total Paid', totalLabelX, y, { align: 'left' });
       doc.setFontSize(12.5);
-      doc.text(`Rs.${Number(r.paidAmount || 0).toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
+      drawAmountText(doc, `₹${Number(r.paidAmount || 0).toLocaleString('en-IN')}`, pageWidth - marginX, y, { align: 'right' });
       y += 34;
 
       // ---- Signature block (only when Receipt Settings has "Signature Display" set to Yes)
@@ -6398,7 +7327,9 @@ const handleAddTerm = async () => {
             doc.addImage(snap.signatureImg, pageWidth - marginX - sigW, y + 4, sigW, sigH);
           } catch (e) { /* ignore */ }
         }
-        y += 34;
+        // A clear gap (44 rather than the image's own 34pt footprint) keeps the caption
+        // below from overlapping the bottom of the signature image in the exported PDF.
+        y += 44;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
         doc.setTextColor('#94A3B8');
@@ -6407,43 +7338,7 @@ const handleAddTerm = async () => {
 
       drawBrandFooter();
 
-      const dataUrl = doc.output('datauristring');
-      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-
-      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
-        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
-        return;
-      }
-      if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
-        const { Filesystem, Share } = window.Capacitor.Plugins;
-        const writeResult = await Filesystem.writeFile({ path: sanitizedFileName, data: pdfBase64, directory: 'DOCUMENTS' });
-        if (Share?.share) await Share.share({ title: sanitizedFileName, url: writeResult.uri });
-        return;
-      }
-      if (navigator.share) {
-        try {
-          const blob = doc.output('blob');
-          const file = new File([blob], sanitizedFileName, { type: 'application/pdf' });
-          if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file], title: sanitizedFileName });
-            return;
-          }
-        } catch (shareErr) {
-          // User cancelled the share sheet, or the browser refused - fall through to download.
-        }
-      }
-      const ua = navigator.userAgent || '';
-      const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
-      if (isBareAndroidWebView) {
-        const link = document.createElement('a');
-        link.href = `data:application/pdf;base64,${pdfBase64}`;
-        link.download = sanitizedFileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        doc.save(sanitizedFileName);
-      }
+      await deliverGeneratedPdf(doc, sanitizedFileName);
     } catch (err) {
       console.error('Receipt PDF share failed:', err);
       showAlert('Could not prepare the document for sharing. Please try again.');
@@ -6555,9 +7450,20 @@ const handleAddTerm = async () => {
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
   const [selectedProjectDropdown, setSelectedProjectDropdown] = useState('');
   const [projectSortMode, setProjectSortMode] = useState('az');
+  // Active/Deactive switch on the "My Projects" home list. A "removed" project is never
+  // deleted from local state - it's kept (with isActive: false) so it shows up here
+  // instead of disappearing, same pattern as the employee Active/Deactive switch below.
+  const [projectStatusFilter, setProjectStatusFilter] = useState('active');
 
   const [employeeSearchQuery, setEmployeeSearchQuery] = useState('');
   const [workerSortMode, setWorkerSortMode] = useState('az');
+  // Active/Deactive switch on the Project Detail > Employees list. Deactivated employees
+  // are never deleted from local state - they're kept (with isActive: false) so their
+  // full history stays viewable when this filter is switched to 'inactive'.
+  const [employeeStatusFilter, setEmployeeStatusFilter] = useState('active');
+  // Which deactivated employee's read-only Details screen (Date of Joining / Last Day /
+  // Download Statement) is currently open, opened via the ">" arrow on the Deactive list.
+  const [selectedDeactiveWorkerId, setSelectedDeactiveWorkerId] = useState(null);
 
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
@@ -6579,6 +7485,12 @@ const handleAddTerm = async () => {
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
   const [pendingAttendanceByDate, setPendingAttendanceByDate] = useState({});
   const [pendingAdvanceByDate, setPendingAdvanceByDate] = useState({});
+  // Holds in-progress typing for the inline per-day wage field on the attendance
+  // row, keyed by dateStr -> workerId -> raw string. Only holds uncommitted edits;
+  // once a value is saved as a wageOverride it's cleared here and the row simply
+  // reads the fresh value back from getEffectiveWage.
+  const [pendingWageByDate, setPendingWageByDate] = useState({});
+  const [savingDayWageKey, setSavingDayWageKey] = useState(null);
   const [attendanceWorkerSearchQuery, setAttendanceWorkerSearchQuery] = useState('');
   const [isAttendanceSavedPopupOpen, setIsAttendanceSavedPopupOpen] = useState(false);
   const [currentAttendanceDateIndex, setCurrentAttendanceDateIndex] = useState(0);
@@ -6604,6 +7516,9 @@ const handleAddTerm = async () => {
   const EDIT_WAGE_PAST_DAYS_MAX = 15;
   const [editWageSpecificStart, setEditWageSpecificStart] = useState('');
   const [editWageSpecificEnd, setEditWageSpecificEnd] = useState('');
+  const [editWageSpecificCalendarMonth, setEditWageSpecificCalendarMonth] = useState(() => new Date());
+  const [editWageTodayCalendarMonth, setEditWageTodayCalendarMonth] = useState(() => new Date());
+  const [editWageFutureCalendarMonth, setEditWageFutureCalendarMonth] = useState(() => new Date());
   const [editWageFutureStart, setEditWageFutureStart] = useState('');
   const [editWageNewAmount, setEditWageNewAmount] = useState('');
   const [editWageNote, setEditWageNote] = useState('');
@@ -6655,7 +7570,85 @@ const handleAddTerm = async () => {
   const [projectPickerSearch, setProjectPickerSearch] = useState('');
   const [projectPickerDropdown, setProjectPickerDropdown] = useState('');
   const [isSubscribePageOpen, setIsSubscribePageOpen] = useState(false);
-  const [selectedSubscriptionPlan, setSelectedSubscriptionPlan] = useState('pro');
+  // ===== Subscription (trial / ₹99 UPI) =====
+  // The server is the single source of truth: it stores the trial start (first login), the
+  // subscription dates and verified payments, and it computes every date/remaining-days value
+  // using ITS clock. The device clock is never used for access decisions.
+  const [subStatus, setSubStatus] = useState(null);      // response of GET /subscription/status
+  const [subLoading, setSubLoading] = useState(false);
+  const [subError, setSubError] = useState('');
+  const [subOrder, setSubOrder] = useState(null);        // { orderId, qrImage, upiUri, amount, expiresAt }
+  const [subOrderState, setSubOrderState] = useState('idle'); // idle | creating | waiting | paid | failed | expired
+  const subLocked = !!(subStatus && subStatus.accessAllowed === false);
+
+  const formatSubDate = (iso) => {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '-';
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  };
+
+  const loadSubscriptionStatus = async () => {
+    if (!loggedInUser?.userId) return null;
+    try {
+      setSubLoading(true);
+      const s = await api.get(`/subscription/status?userId=${loggedInUser.userId}`);
+      setSubStatus(s);
+      setSubError('');
+      return s;
+    } catch (e) {
+      setSubError('Could not load subscription status. Check your connection and try again.');
+      return null;
+    } finally { setSubLoading(false); }
+  };
+
+  const startUpiPayment = async () => {
+    if (!loggedInUser?.userId) return;
+    try {
+      setSubOrderState('creating');
+      setSubError('');
+      const order = await api.post(`/subscription/orders?userId=${loggedInUser.userId}`, {});
+      setSubOrder(order);
+      setSubOrderState('waiting');
+    } catch (e) {
+      setSubOrderState('failed');
+      setSubError(e?.message || 'Could not start the payment. Please try again.');
+    }
+  };
+
+  // Load status after login and whenever the Subscribe page is opened (trial start is created by the backend on first login).
+  useEffect(() => {
+    if (isUserAuthenticated && loggedInUser?.userId) loadSubscriptionStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isUserAuthenticated, loggedInUser?.userId, isSubscribePageOpen]);
+
+  // Trial over / subscription over -> the Subscribe page is shown and cannot be dismissed.
+  useEffect(() => {
+    if (subLocked) setIsSubscribePageOpen(true);
+  }, [subLocked]);
+
+  // Poll the backend for payment confirmation. The backend flips the order to "paid" ONLY after the
+  // payment provider's signed webhook (or a server-to-server status check) confirms the money. The app never decides this itself.
+  useEffect(() => {
+    if (subOrderState !== 'waiting' || !subOrder?.orderId || !loggedInUser?.userId) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await api.get(`/subscription/orders/${subOrder.orderId}?userId=${loggedInUser.userId}`);
+        if (cancelled) return;
+        if (r.status === 'paid') {
+          setSubOrderState('paid');
+          await loadSubscriptionStatus();
+        } else if (r.status === 'failed' || r.status === 'expired') {
+          setSubOrderState(r.status);
+        }
+      } catch (e) { /* transient network error - keep polling */ }
+    };
+    const id = setInterval(tick, 3000);
+    tick();
+    return () => { cancelled = true; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subOrderState, subOrder?.orderId, loggedInUser?.userId]);
   const [isHelpPageOpen, setIsHelpPageOpen] = useState(false);
 
   const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
@@ -6702,6 +7695,10 @@ const handleAddTerm = async () => {
       setSelectedPaymentWorkerId(null);
       return true;
     }
+    if (selectedDeactiveWorkerId) {
+      setSelectedDeactiveWorkerId(null);
+      return true;
+    }
     if (isAttendanceModalOpen) {
       setIsAttendanceModalOpen(false);
       setAttendanceWorkerSearchQuery('');
@@ -6716,6 +7713,7 @@ const handleAddTerm = async () => {
       return true;
     }
     if (isSubscribePageOpen) {
+      if (subLocked) return true;
       setIsSubscribePageOpen(false);
       return true;
     }
@@ -6787,6 +7785,7 @@ const handleAddTerm = async () => {
                           isProjectPickerOpen || 
                           isAddProjectOpen || 
                           selectedPaymentWorkerId || 
+                          selectedDeactiveWorkerId ||
                           isAttendanceModalOpen || 
                           isPaymentsPageOpen || 
                           activeSiteViewId || 
@@ -6806,6 +7805,7 @@ const handleAddTerm = async () => {
       isProjectPickerOpen, 
       isAddProjectOpen, 
       selectedPaymentWorkerId, 
+      selectedDeactiveWorkerId,
       isAttendanceModalOpen, 
       isPaymentsPageOpen, 
       activeSiteViewId, 
@@ -6850,24 +7850,34 @@ const handleAddTerm = async () => {
       setIsRemoveBalancePendingPopupOpen(true);
       return;
     }
-    showConfirm("Are you sure you want to remove this employee from this worksite?", async () => {
-      // Optimistic update so the UI feels instant...
+    showConfirm("This Employee will be removed.", async () => {
+      // Optimistic update so the UI feels instant. The worker is kept in local
+      // state (never filtered out) and just flipped to inactive, so it now shows
+      // up under the Deactive tab instead of disappearing - full history (wage
+      // overrides, payments, advances, bonuses, attendance) stays intact.
       setProjects(prevProjects =>
         prevProjects.map(project => {
           if (project.id === projectId) {
-            const updatedEmployees = (project.employees || []).filter(emp => emp.id !== workerId);
-            return { ...project, workersCount: updatedEmployees.length, employees: updatedEmployees, lastModifiedAt: Date.now() };
+            const updatedEmployees = (project.employees || []).map(emp => emp.id === workerId ? { ...emp, isActive: false } : emp);
+            const activeCount = updatedEmployees.filter(emp => emp.isActive !== false).length;
+            return { ...project, workersCount: activeCount, employees: updatedEmployees, lastModifiedAt: Date.now() };
           }
           return project;
         })
       );
       try {
-        await workerService.deleteWorker(workerId);
+        // Deliberately the dedicated deactivate endpoint (PUT /workers/{id}/deactivate),
+        // not workerService.deleteWorker - that's a real soft-delete on the backend
+        // (flips the record's IsActive off), which would make this worker vanish
+        // entirely from GetWorkersByProject on the next refresh instead of showing up
+        // in the Deactive tab. Deactivate only flips IsCurrentlyActive, which is what
+        // this screen's "isActive" field actually reflects, and is permanent - there's
+        // no reactivate endpoint to call afterwards.
+        await workerService.deactivateWorker(workerId, { deactivationDate: new Date().toISOString() });
       } catch (error) {
-        console.error('Error deleting worker:', error);
-        showAlert('Could not delete employee on the server. Reloading latest data.');
+        console.error('Error deactivating worker:', error);
+        showAlert('Could not deactivate employee on the server. Reloading latest data.');
       } finally {
-        // ...then reconcile with the server either way (soft-delete flips IsActive).
         await refreshProject(projectId);
       }
     }, { confirmLabel: t('remove'), tone: 'warning' });
@@ -6886,7 +7896,9 @@ const handleAddTerm = async () => {
   const handleSaveEditedProjectName = async () => {
     if (!editProjectNameInput.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
     const trimmedName = editProjectNameInput.trim();
-    const isDuplicateProjectName = projects.some(p => p.id !== activeSiteViewId && p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    // Only active projects block a duplicate name - a name that's in the Removed
+    // list is free to reuse.
+    const isDuplicateProjectName = projects.some(p => p.isActive !== false && p.id !== activeSiteViewId && p.name.trim().toLowerCase() === trimmedName.toLowerCase());
     if (isDuplicateProjectName) {
       showAlert(t('projectAlreadyExists').replace('{name}', trimmedName));
       return;
@@ -6918,7 +7930,13 @@ const handleAddTerm = async () => {
       return;
     }
     showConfirm(t('deleteProject'), async () => {
-      setProjects(prevProjects => prevProjects.filter(p => p.id !== projectId));
+      // Optimistic update so the UI feels instant. The project is kept in local state
+      // (never filtered out) and just flipped to inactive, so it now shows up under the
+      // Deactive tab on the Projects home page instead of disappearing - same pattern as
+      // deactivating an employee. Full history (employees, payments, attendance) stays intact.
+      setProjects(prevProjects =>
+        prevProjects.map(p => p.id === projectId ? { ...p, isActive: false, lastModifiedAt: Date.now() } : p)
+      );
       setActiveSiteViewId(null);
       setIsAttendanceModalOpen(false);
       setIsPaymentsPageOpen(false);
@@ -6927,8 +7945,10 @@ const handleAddTerm = async () => {
       try {
         await projectService.deleteProject(projectId);
       } catch (error) {
-        console.error('Error deleting project:', error);
-        showAlert('Could not delete the project on the server. Reloading your projects.');
+        console.error('Error deactivating project:', error);
+        showAlert('Could not deactivate the project on the server. Reloading your projects.');
+      } finally {
+        // ...then reconcile with the server either way (soft-delete flips isActive).
         if (loggedInUser?.userId) await loadUserProjects(loggedInUser.userId);
       }
     }, { confirmLabel: t('remove'), tone: 'warning' });
@@ -6937,6 +7957,7 @@ const handleAddTerm = async () => {
   const handleOpenAttendanceScreen = (project) => {
     setPendingAttendanceByDate({});
     setPendingAdvanceByDate({});
+    setPendingWageByDate({});
     setSelectedAttendanceDates([]);
     setAttendanceWorkerSearchQuery('');
     setCurrentAttendanceDateIndex(0);
@@ -7135,10 +8156,11 @@ const handleAddTerm = async () => {
     }
     const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
     const dateStr = selectedAttendanceDates[safeIndex];
+    const activeEmployees = (currentProject.employees || []).filter(w => w.isActive !== false);
     const query = attendanceWorkerSearchQuery.trim().toLowerCase();
     const targets = query
-      ? currentProject.employees.filter(w => w.name.toLowerCase().includes(query))
-      : currentProject.employees;
+      ? activeEmployees.filter(w => w.name.toLowerCase().includes(query))
+      : activeEmployees;
     setPendingAttendanceByDate(prev => {
       const updatedMap = { ...(prev[dateStr] || {}) };
       targets.forEach(worker => {
@@ -7189,6 +8211,56 @@ const handleAddTerm = async () => {
     }
   };
 
+  // Inline per-day wage field on the attendance row. Typing just updates the
+  // uncommitted pendingWageByDate value; the actual wageOverride (scoped to this
+  // one date only, from === to) is written on blur via saveDayWageOverride below.
+  const handleDayWageInputChange = (workerId, rawValue) => {
+    const digitsOnly = rawValue.replace(/[^0-9]/g, '');
+    if (selectedAttendanceDates.length === 0) return;
+    const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
+    const dateStr = selectedAttendanceDates[safeIndex];
+    setPendingWageByDate(prev => ({
+      ...prev,
+      [dateStr]: { ...(prev[dateStr] || {}), [workerId]: digitsOnly }
+    }));
+  };
+
+  const handleDayWageInputBlur = (worker, status) => {
+    if (selectedAttendanceDates.length === 0) return;
+    const safeIndex = Math.min(currentAttendanceDateIndex, Math.max(0, selectedAttendanceDates.length - 1));
+    const dateStr = selectedAttendanceDates[safeIndex];
+    const rawValue = pendingWageByDate[dateStr]?.[worker.id];
+    if (rawValue === undefined) return;
+    const discardPending = () => {
+      setPendingWageByDate(prev => {
+        const next = { ...prev, [dateStr]: { ...(prev[dateStr] || {}) } };
+        delete next[dateStr][worker.id];
+        return next;
+      });
+    };
+    // Absent always pays ₹0 for the day, and typing into the field while Absent
+    // must not be treated as a wage edit at all - it should never be saved as a
+    // base wage override (that would silently change the wage used on other,
+    // non-absent days). Discard whatever was typed and leave the calculated
+    // wage at ₹0.
+    if (status === 'A') { discardPending(); return; }
+    const typedAmount = parseFloat(rawValue);
+    if (!typedAmount || typedAmount <= 0) { discardPending(); return; }
+    const currentEffectiveBase = getEffectiveWage(worker, dateStr);
+    const currentNet = calculateNetDaily(currentEffectiveBase, status);
+    // The field shows/edits the NET amount for the day (full wage on Present, half
+    // on Half day) - so what's typed has to be converted back to the underlying
+    // per-day base wage before it's saved as an override, since that's what
+    // wageOverrides/getEffectiveWage store everywhere else in the app.
+    // - Half day: back-solve the full-day base that produces this half-day net
+    //   (typing 400 -> base becomes 800).
+    // - Present (or unmarked): net === base already (multiplier 1), no conversion.
+    const newBaseWage = status === 'HD' ? typedAmount * 2 : typedAmount;
+    const unchanged = typedAmount === currentNet;
+    if (unchanged) { discardPending(); return; }
+    saveDayWageOverride(worker.id, dateStr, newBaseWage);
+  };
+
   const getEffectiveWage = (worker, dateStr) => {
     const base = worker.dailyWage || 400;
     if (!worker.wageOverrides || worker.wageOverrides.length === 0) return base;
@@ -7224,6 +8296,15 @@ const handleAddTerm = async () => {
   };
 
   const getPaymentStartDate = (worker) => worker.paymentStartDate || worker.joiningDate || '2026-07-01';
+
+  // Most recent date (YYYY-MM-DD) attendance was marked for this worker, or null if none
+  // has ever been recorded. Used for the Deactive list's "Last Date" column and for the
+  // "Last Day" card on the Deactive Employee Details screen.
+  const getLastAttendanceDate = (worker) => {
+    const dates = Object.keys(worker?.attendance || {});
+    if (dates.length === 0) return null;
+    return dates.reduce((latest, d) => (d > latest ? d : latest), dates[0]);
+  };
 
   const calcWageForDateRange = (worker, fromDate, toDate) => {
     const startBound = getPaymentStartDate(worker);
@@ -7285,6 +8366,18 @@ const handleAddTerm = async () => {
 
   const computeProjectTotalDue = (project) => (project.employees || []).reduce((sum, w) => sum + calcTotalDue(w), 0);
 
+  // Deactive project card metrics - deliberately built from the simple cumulative fields
+  // already kept per-employee (payments list + running advance/bonus totals) rather than
+  // re-deriving from attendance, since those are what "Amount Paid", "Advance Paid" and
+  // "Bonus Paid" already mean everywhere else in the app.
+  const computeProjectTotalWages = (project) => (project.employees || []).reduce((sum, w) => {
+    const amountPaid = (w.payments || []).reduce((s, p) => s + (p.amount || 0), 0);
+    const advancePaid = w.advance || 0;
+    return sum + amountPaid + advancePaid;
+  }, 0);
+
+  const computeProjectTotalBonus = (project) => (project.employees || []).reduce((sum, w) => sum + (w.bonus || 0), 0);
+
   const computeProjectLastAttendanceDate = (project) => {
     let latest = null;
     (project.employees || []).forEach(w => {
@@ -7339,9 +8432,10 @@ const handleAddTerm = async () => {
     }
 
     const chronologicalSelectedDates = [...selectedAttendanceDates].sort();
+    const activeEmployees = (currentProject.employees || []).filter(emp => emp.isActive !== false);
     const firstMissingDate = chronologicalSelectedDates.find(dateStr => {
       const dateRecord = pendingAttendanceByDate[dateStr] || {};
-      return (currentProject.employees || [])
+      return activeEmployees
         .filter(emp => dateStr >= (emp.joiningDate || '2026-07-01'))
         .some(emp => {
           const record = dateRecord[emp.id];
@@ -7359,13 +8453,17 @@ const handleAddTerm = async () => {
     // attendanceService.markAttendance. This was previously missing entirely
     // -- the old version of this function only updated local React state, so
     // nothing ever reached POST /api/attendance/mark and the DB stayed empty.
+    // projectId is included on every record now that a worker can be sent to
+    // a different project (see the Employees tab / "Send to Project") - the
+    // backend needs to know which project this attendance was actually
+    // marked under, not infer it from wherever the worker currently is.
     const recordsToSave = [];
     chronologicalSelectedDates.forEach(dateStr => {
       const recordsForDate = pendingAttendanceByDate[dateStr] || {};
-      (currentProject.employees || []).forEach(emp => {
+      activeEmployees.forEach(emp => {
         const rec = recordsForDate[emp.id];
         if (rec && rec.status) {
-          recordsToSave.push({ workerId: emp.id, attendanceDate: dateStr, status: rec.status });
+          recordsToSave.push({ workerId: emp.id, projectId: currentProject.id, attendanceDate: dateStr, status: rec.status });
         }
       });
     });
@@ -7380,7 +8478,7 @@ const handleAddTerm = async () => {
     // duplicated.
     const advancesToSave = [];
     Object.entries(pendingAdvanceByDate).forEach(([dateStr, advanceForDate]) => {
-      (currentProject.employees || []).forEach(emp => {
+      activeEmployees.forEach(emp => {
         const amount = parseFloat(advanceForDate[emp.id]);
         if (!amount || amount <= 0) return;
         const existingAdvance = (emp.advancePayments || []).find(
@@ -7489,12 +8587,18 @@ const handleAddTerm = async () => {
 
   const handleOpenEditWage = (worker) => {
     setEditWageTargetWorkerId(worker.id);
-    setEditWageApplyTo('');
+    // Onwards This Day is now the only option (Past days / Specific duration / Today
+    // are handled from the main attendance page's date picker and inline wage field),
+    // so pre-select it instead of showing a tab picker with one live option.
+    setEditWageApplyTo('future');
     setEditWageTodayDate(toLocalISODate(new Date()));
     setEditWagePastDates([]);
     setEditWagePastCalendarMonth(new Date());
     setEditWageSpecificStart('');
     setEditWageSpecificEnd('');
+    setEditWageSpecificCalendarMonth(new Date());
+    setEditWageTodayCalendarMonth(new Date());
+    setEditWageFutureCalendarMonth(new Date());
     setEditWageFutureStart('');
     setEditWageNewAmount('');
     setEditWageNote('');
@@ -7504,6 +8608,48 @@ const handleAddTerm = async () => {
   const handleCloseEditWage = () => {
     setIsEditWageModalOpen(false);
     setEditWageTargetWorkerId(null);
+  };
+
+  // Saves a wage override scoped to exactly one date (from === to) - used by the
+  // inline wage field on the attendance row, so changing "700" to "1000" for a
+  // single day affects only that day's calculation, same as the old "Today" option
+  // used to, just without opening a modal.
+  const saveDayWageOverride = async (workerId, dateStr, amount) => {
+    const dayWageKey = `${workerId}|${dateStr}`;
+    setSavingDayWageKey(dayWageKey);
+    try {
+      await workerService.updateWage(workerId, {
+        effectiveFrom: dateStr,
+        effectiveTo: dateStr,
+        dailyWageAmount: amount,
+        note: '',
+      });
+    } catch (err) {
+      console.error('Failed to save day wage override', err);
+      setSavingDayWageKey(null);
+      showAlert(err.message || 'Failed to save wage change. Please try again.');
+      return;
+    }
+    setSavingDayWageKey(null);
+    setProjects(prevProjects =>
+      prevProjects.map(project => {
+        if (project.id !== activeSiteViewId) return project;
+        return {
+          ...project,
+          lastModifiedAt: Date.now(),
+          employees: project.employees.map(emp => {
+            if (emp.id !== workerId) return emp;
+            const newOverride = { from: dateStr, to: dateStr, amount, note: '' };
+            return { ...emp, wageOverrides: [...(emp.wageOverrides || []), newOverride], lastUpdatedAt: Date.now() };
+          })
+        };
+      })
+    );
+    setPendingWageByDate(prev => {
+      const next = { ...prev, [dateStr]: { ...(prev[dateStr] || {}) } };
+      delete next[dateStr][workerId];
+      return next;
+    });
   };
 
   const handleSaveEditWage = async () => {
@@ -7880,7 +9026,7 @@ const handleAddTerm = async () => {
       return str.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
     };
 
-    const inr = (n) => `Rs. ${Math.abs(n).toLocaleString('en-IN')}`;
+    const inr = (n) => `₹${Math.abs(n).toLocaleString('en-IN')}`;
 
     if (!worker) {
       showAlert('Worker data is missing. Please try again.');
@@ -7916,7 +9062,7 @@ const handleAddTerm = async () => {
     }
 
     if (advanceRows.length === 0) {
-      advanceRows = [{ date: '-', mode: 'No advances recorded', amount: 'Rs. 0', color: '#94A3B8' }];
+      advanceRows = [{ date: '-', mode: 'No advances recorded', amount: '₹0', color: '#94A3B8' }];
     }
 
     const paymentRows = (paymentsInRange || []).length
@@ -7926,7 +9072,7 @@ const handleAddTerm = async () => {
           amount: inr(p.amount || 0), 
           color: '#1E293B' 
         }))
-      : [{ date: '-', mode: 'No wage payments recorded', amount: 'Rs. 0', color: '#94A3B8' }];
+      : [{ date: '-', mode: 'No wage payments recorded', amount: '₹0', color: '#94A3B8' }];
 
     const allBonusTransactionsTotal = (worker.bonusPayments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
     const initialBonusOnly = Math.max(0, (worker.bonus || 0) - allBonusTransactionsTotal);
@@ -7954,13 +9100,13 @@ const handleAddTerm = async () => {
     }
 
     if (bonusRows.length === 0) {
-      bonusRows = [{ date: '-', mode: 'No bonus recorded', amount: 'Rs. 0', color: '#94A3B8' }];
+      bonusRows = [{ date: '-', mode: 'No bonus recorded', amount: '₹0', color: '#94A3B8' }];
     }
 
     const attendanceRows = (attendanceEntriesInRange || []).length
       ? attendanceEntriesInRange.map(([dateStr, record]) => {
       if (!dateStr || !record) {
-        return { date: '-', mode: 'N/A', amount: 'Rs. 0', color: '#94A3B8' };
+        return { date: '-', mode: 'N/A', amount: '₹0', color: '#94A3B8' };
       }
       const meta = (statusMeta && statusMeta[record.status]) || statusMeta?.P || { label: 'Present', sub: 'Full day' };
       let wage = 0;
@@ -7976,39 +9122,48 @@ const handleAddTerm = async () => {
       return { 
         date: displayDate, 
         mode: cleanForPDF(`${meta.label || 'Present'} (${meta.sub || 'Full day'})`), 
-        amount: isAbsent ? 'Rs. 0' : `+${inr(wage)}`, 
+        amount: isAbsent ? '₹0' : `+${inr(wage)}`, 
         color: '#1E293B' 
       };
     })
-    : [{ date: '-', mode: 'No attendance marked', amount: 'Rs. 0', color: '#94A3B8' }];
+    : [{ date: '-', mode: 'No attendance marked', amount: '₹0', color: '#94A3B8' }];
 
     const sanitizedFileName = `${(worker.name || 'Employee').trim().replace(/\s+/g, '_')}.pdf`;
 
     try {
-      if (typeof jsPDF === 'undefined') {
-        throw new Error('jsPDF library not loaded');
-      }
+      await ensureJsPDF();
 
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-      
-      // --- THE ROOT CAUSE FIX ---
-      // Load a Standard Unicode Font (Roboto) directly into jsPDF memory
-      const robotoRegular = "AAEAAAAUAQAQABABAA..."; 
-      // NOTE: In a real environment, you would base64 load a proper roboto font string here.
-      // Because I cannot provide 50KB+ of base64 string, let's implement a fallback cleaning approach:
-      
-      // Instead, we forcefully tell jsPDF to treat everything as normal text
-      // And we pass the `cleanForPDF` function over the values above.
-      
+      registerRupeeFont(doc);
+
       const marginX = 40;
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
       const contentWidth = pageWidth - marginX * 2;
-      const bottomLimit = pageHeight - 44;
+      const bottomLimit = pageHeight - 60;
       let y = 54;
+      const logoDataUrl = await getAppLogoDataUrl();
+
+      // "Generated with SmartManage" brand footer - same treatment as the
+      // Quotation/Invoice PDFs, stamped on every page (including mid-document
+      // page breaks triggered by ensureSpace below).
+      const drawBrandFooter = () => {
+        const fy = pageHeight - 34;
+        doc.setDrawColor('#EDF0F4');
+        doc.setLineWidth(0.6);
+        doc.line(marginX, fy - 12, pageWidth - marginX, fy - 12);
+        let tx = marginX;
+        if (logoDataUrl) {
+          try { doc.addImage(logoDataUrl, 'PNG', marginX, fy - 8, 11, 11); tx = marginX + 15; } catch (e) { /* ignore */ }
+        }
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor('#9CA3AF');
+        doc.text('Generated with SmartManage', tx, fy + 0.5);
+      };
 
       const ensureSpace = (needed) => {
-        if (y + needed > bottomLimit) { doc.addPage(); y = 54; }
+        if (y + needed > bottomLimit) { drawBrandFooter(); doc.addPage(); y = 54; }
       };
 
       doc.setFont('helvetica', 'bold');
@@ -8036,14 +9191,14 @@ const handleAddTerm = async () => {
       y += 16;
       doc.setFontSize(14);
       doc.setTextColor('#0B3C9B');
-      doc.text(inr(Math.max(0, paymentDueForRange || 0)), marginX, y);
+      drawAmountText(doc, inr(Math.max(0, paymentDueForRange || 0)), marginX, y);
       doc.setTextColor('#10B981');
-      doc.text(inr(totalPaidWithAdvances || 0), marginX + colWidth, y);
+      drawAmountText(doc, inr(totalPaidWithAdvances || 0), marginX + colWidth, y);
       const balanceVal = (balanceValue !== undefined && balanceValue !== null) ? balanceValue : ((paymentDueForRange || 0) - totalPaidWithAdvances);
       const balanceColor = balanceVal > 0 ? '#DC2626' : balanceVal < 0 ? '#10B981' : '#1E293B';
       const balanceSuffix = balanceVal > 0 ? ' (due)' : balanceVal < 0 ? ' (credit)' : ' (settled)';
       doc.setTextColor(balanceColor);
-      doc.text(inr(balanceVal) + balanceSuffix, marginX + colWidth * 2, y);
+      drawAmountText(doc, inr(balanceVal) + balanceSuffix, marginX + colWidth * 2, y);
       y += 30;
 
       const addSection = (title, note, rows, emptyLabel) => {
@@ -8089,7 +9244,7 @@ const handleAddTerm = async () => {
             doc.text(cleanForPDF(String(row.date || '-')), marginX, y);
             doc.text(cleanForPDF(String(row.mode || '')), marginX + 110, y, { maxWidth: contentWidth - 190 });
             doc.setTextColor(row.color || '#1E293B');
-            doc.text(cleanForPDF(String(row.amount || 'Rs. 0')), marginX + contentWidth, y, { align: 'right' });
+            drawAmountText(doc, cleanForPDF(String(row.amount || '₹0')), marginX + contentWidth, y, { align: 'right' });
             y += 16;
           });
         }
@@ -8101,61 +9256,42 @@ const handleAddTerm = async () => {
       addSection('Bonus History', 'Extra payments - not part of the wage calculation above.', bonusRows, 'No bonus recorded.');
       addSection('Attendance Records', null, attendanceRows, 'No attendance marked.');
 
-      const dataUrl = doc.output('datauristring');
-      const pdfBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+      drawBrandFooter();
 
-      if (window.AndroidFileSaver && typeof window.AndroidFileSaver.saveBase64Pdf === 'function') {
-        window.AndroidFileSaver.saveBase64Pdf(pdfBase64, sanitizedFileName);
-      } else if (window.Capacitor?.isNativePlatform?.() && window.Capacitor?.Plugins?.Filesystem) {
-        const { Filesystem, Share } = window.Capacitor.Plugins;
-        const writeResult = await Filesystem.writeFile({
-          path: sanitizedFileName,
-          data: pdfBase64,
-          directory: 'DOCUMENTS',
-        });
-        if (Share?.share) {
-          await Share.share({ title: sanitizedFileName, url: writeResult.uri });
-        }
-      } else {
-        const ua = navigator.userAgent || '';
-        const isBareAndroidWebView = /Android/.test(ua) && /; wv\)/.test(ua);
-        if (isBareAndroidWebView) {
-          try {
-            const link = document.createElement('a');
-            link.href = `data:application/pdf;base64,${pdfBase64}`;
-            link.download = sanitizedFileName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-          } catch (e) {
-            console.error('Download failed:', e);
-            showAlert('Could not download the PDF. Please try again.');
-          }
-        } else {
-          doc.save(sanitizedFileName);
-        }
-      }
+      // Delegate to the same shared "deliver this PDF" step every other document type
+      // (Quotation, Invoice, etc.) uses, instead of this function's own separate copy of
+      // that logic - keeps the fix for the native write/share path in one place.
+      await deliverGeneratedPdf(doc, sanitizedFileName);
 
       setPaymentFormValidationMsg('');
 
     } catch (err) {
       console.error('PDF generation failed:', err);
-      
+
       let errorMsg = 'Could not generate the PDF statement. ';
       if (err.message === 'jsPDF library not loaded') {
         errorMsg += 'The PDF library is not available. Please try refreshing the app.';
       } else if (err.message && err.message.includes('undefined')) {
         errorMsg += 'Some data is missing. Please check that the worker has attendance and payment records.';
       } else {
-        errorMsg += 'Please try again or contact support if the issue persists.';
+        // Surface the real error text instead of a generic message - this is what's
+        // failing silently on native builds (Filesystem/Share bridge) while working
+        // fine in the browser, so we need to actually see it to diagnose it.
+        errorMsg += `Please try again or contact support if the issue persists.${err?.message ? ` (${err.message})` : ''}`;
       }
-      
+
       showAlert(errorMsg);
       setPaymentFormValidationMsg('');
     }
   };
   
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState(() => {
+    try {
+      const raw = persistedUser?.userId ? localStorage.getItem(PROJECTS_CACHE_KEY_PREFIX + persistedUser.userId) : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) ? parsed.map(mapProjectFromApi) : [];
+    } catch { return []; }
+  });
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [selectedDate, setSelectedDate] = useState(toLocalISODate(new Date()));
   const [activePage, setActivePage] = useState('dashboard');
@@ -8167,6 +9303,18 @@ const handleAddTerm = async () => {
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const otpInputRefs = useRef([]);
   const [resendSeconds, setResendSeconds] = useState(0);
+
+  // Android Firebase Phone Auth can auto-verify the SMS (instant verification / SMS auto-retrieval)
+  // when the SIM is in the same phone that runs the app. Firebase then signs the user in and the
+  // verification session is consumed - typing the same code afterwards fails with "sms code has
+  // expired". These refs let us finish the login from the auto-verified session instead.
+  //  - submitRef:     always points at the latest submitToBackend (native listeners are registered
+  //                   once, so they must not capture stale state)
+  //  - submittingRef: guards against double submission (auto-verify event + manual tap)
+  const submitRef = useRef(null);
+  const submittingRef = useRef(false);
+  const mobileNumberRef = useRef('');
+  mobileNumberRef.current = mobileNumber;
 
   // ✅ Azure SQL Serverless auto-pauses after inactivity, so the very first request
   // of the day can take 30-60s to "wake up" the DB instead of failing instantly.
@@ -8211,11 +9359,51 @@ const handleAddTerm = async () => {
       showAlert(event?.message || 'Could not send verification code. Please try again.');
       setSendingOtp(false);
     });
+    // Fires on Android when Firebase verified the number automatically (instant verification or
+    // SMS auto-retrieval). The user is already signed in natively at this point, so there is no
+    // code left to type - complete the login straight away.
+    const verificationCompletedListener = FirebaseAuthentication.addListener('phoneVerificationCompleted', () => {
+      setSendingOtp(false);
+      setOtpSent(true);
+      completeLoginFromFirebaseSession();
+    });
     return () => {
       codeSentListener.then((l) => l.remove());
       verificationFailedListener.then((l) => l.remove());
+      verificationCompletedListener.then((l) => l.remove());
     };
   }, []);
+
+  // Returns an ID token if Firebase already has a signed-in user for the number being logged in
+  // (native only). This is the auto-verified case. Returns null otherwise.
+  const getAutoVerifiedIdToken = async () => {
+    try {
+      const { user } = await FirebaseAuthentication.getCurrentUser();
+      if (user && user.phoneNumber === `+91${mobileNumberRef.current.trim()}`) {
+        const idToken = (await FirebaseAuthentication.getIdToken({ forceRefresh: true }))?.token;
+        return idToken || null;
+      }
+    } catch (err) {
+      console.warn('getAutoVerifiedIdToken failed:', err);
+    }
+    return null;
+  };
+
+  // Finishes login/registration using the already-verified native Firebase session.
+  const completeLoginFromFirebaseSession = async () => {
+    if (submittingRef.current) return;
+    try {
+      const idToken = await getAutoVerifiedIdToken();
+      if (idToken) {
+        await submitRef.current?.(idToken);
+      } else {
+        showAlert('Could not complete automatic verification. Please enter the code manually or tap Resend.');
+      }
+    } catch (err) {
+      console.error('Auto-verification login failed:', err);
+      showAlert(err?.message || 'Automatic verification failed. Please try again.');
+    }
+  };
 
   // Registration-status ("already registered" / "not registered") is now enforced
   // by the backend's register/login endpoints themselves after OTP verification,
@@ -8243,8 +9431,21 @@ const handleAddTerm = async () => {
         setOtpSent(true);
         setSendingOtp(false);
       } else {
-        await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
-        // otpSent / firebaseVerificationId are set by the 'phoneCodeSent' listener above once Firebase dispatches the SMS.
+        // Clear any leftover native Firebase session first, so a stale or auto-verified session
+        // from an earlier attempt can never be mistaken for the one we are about to create.
+        try { await FirebaseAuthentication.signOut(); } catch { /* nothing to sign out */ }
+        setFirebaseVerificationId(null);
+        submittingRef.current = false;
+
+        const sendResult = await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: `+91${mobileNumber}` });
+        // otpSent / firebaseVerificationId are normally set by the 'phoneCodeSent' listener above.
+        // On Android, if Firebase auto-verified the number, the call resolves with the signed-in
+        // user (and/or 'phoneVerificationCompleted' fires) - in that case finish the login now.
+        if (sendResult?.user) {
+          setSendingOtp(false);
+          setOtpSent(true);
+          completeLoginFromFirebaseSession();
+        }
       }
     } catch (error) {
       console.error('Firebase OTP Error:', error);
@@ -8258,38 +9459,19 @@ const handleAddTerm = async () => {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const isWeb = Capacitor.getPlatform() === 'web';
-    if (!otpSent || (isWeb ? !window.confirmationResult : !firebaseVerificationId)) {
-      showAlert('Please generate and input your verification OTP first.');
-      return;
-    }
+  // Sends the verified Firebase ID token to our backend and applies the login / registration result.
+  // Shared by manual OTP entry (handleSubmit) and Firebase auto-verification.
+  const submitToBackend = async (idToken) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     try {
-      // 1. Confirm the code with Firebase - this is what actually verifies the phone number now.
-      let idToken;
-      if (isWeb) {
-        const result = await window.confirmationResult.confirm(otp);
-        if (!result?.user) { throw new Error('Verification did not return a signed-in user.'); }
-        idToken = await result.user.getIdToken();
-      } else {
-        const confirmResult = await FirebaseAuthentication.confirmVerificationCode({
-          verificationId: firebaseVerificationId,
-          verificationCode: otp,
-        });
-        if (!confirmResult?.user) { throw new Error('Verification did not return a signed-in user.'); }
-        idToken = (await FirebaseAuthentication.getIdToken())?.token;
-      }
-      if (!idToken) { throw new Error('Could not obtain a verified session from Firebase.'); }
-
-      // 2. Send the verified Firebase ID token to our backend instead of a raw OTP code.
       const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
       const payload = isLoginView
         ? { mobileNumber: mobileNumber.trim(), idToken }
         : { mobileNumber: mobileNumber.trim(), idToken, fullName, industry };
 
-      const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
+      const response = await fetchWithTimeout(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
       const responseText = await response.text();
       let data = {};
       if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
@@ -8319,9 +9501,78 @@ const handleAddTerm = async () => {
         }
       } else { showAlert(data.message || 'Validation failed down at backend services.'); }
     } catch (error) {
+      console.error('Backend submit error:', error);
+      showAlert(error?.message || 'Something went wrong. Please try again.');
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
+    }
+  };
+  // Keep the ref pointing at the latest closure (isLoginView, mobileNumber, fullName... may change).
+  submitRef.current = submitToBackend;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submittingRef.current) return; // login already in progress (e.g. auto-verification)
+    const isWeb = Capacitor.getPlatform() === 'web';
+
+    // Native: if Firebase already auto-verified this number, the SMS code is spent - do NOT try to
+    // confirm it again (that is what produced "The sms code has expired"). Use the live session.
+    if (!isWeb) {
+      const autoToken = await getAutoVerifiedIdToken();
+      if (autoToken) { await submitToBackend(autoToken); return; }
+    }
+
+    if (!otpSent || (isWeb ? !window.confirmationResult : !firebaseVerificationId)) {
+      showAlert('Please generate and input your verification OTP first.');
+      return;
+    }
+    if (!otp || otp.length < 6) {
+      showAlert('Please enter the 6-digit verification code.');
+      return;
+    }
+    setLoading(true);
+    let idToken;
+    try {
+      // 1. Confirm the code with Firebase - this is what actually verifies the phone number.
+      if (isWeb) {
+        const result = await window.confirmationResult.confirm(otp);
+        if (!result?.user) { throw new Error('Verification did not return a signed-in user.'); }
+        idToken = await result.user.getIdToken();
+      } else {
+        const confirmResult = await FirebaseAuthentication.confirmVerificationCode({
+          verificationId: firebaseVerificationId,
+          verificationCode: otp,
+        });
+        if (!confirmResult?.user) { throw new Error('Verification did not return a signed-in user.'); }
+        idToken = (await FirebaseAuthentication.getIdToken())?.token;
+      }
+    } catch (error) {
+      // Safety net: the code may have been consumed by auto-verification a moment ago (race with
+      // the 'phoneVerificationCompleted' event). If a verified session exists for this number, use it.
+      if (!isWeb) {
+        const fallbackToken = await getAutoVerifiedIdToken();
+        if (fallbackToken) { setLoading(false); await submitToBackend(fallbackToken); return; }
+      }
       console.error('Verification Error:', error);
-      showAlert(error?.message || 'Invalid or expired OTP. Please try again.');
-    } finally { setLoading(false); }
+      const code = String(error?.code || error?.message || '');
+      if (/code-expired|session-expired|expired/i.test(code)) {
+        showAlert('This verification code has expired. Please tap Resend to get a new code.');
+        setOtpDigits(['', '', '', '', '', '']);
+      } else if (/invalid-verification-code|invalid/i.test(code)) {
+        showAlert('The code you entered is incorrect. Please check and try again.');
+      } else {
+        showAlert(error?.message || 'Invalid or expired OTP. Please try again.');
+      }
+      setLoading(false);
+      return;
+    }
+    setLoading(false);
+
+    if (!idToken) { showAlert('Could not obtain a verified session from Firebase. Please try again.'); return; }
+
+    // 2. Send the verified Firebase ID token to our backend instead of a raw OTP code.
+    await submitToBackend(idToken);
   };
 
   // Keep the 6 OTP boxes in sync with the existing `otp` string used by handleSubmit
@@ -8355,6 +9606,10 @@ const handleAddTerm = async () => {
     setFirebaseVerificationId(null);
     window.confirmationResult = null;
     setResendSeconds(0);
+    submittingRef.current = false;
+    if (Capacitor.getPlatform() !== 'web') {
+      FirebaseAuthentication.signOut().catch(() => {});
+    }
   };
 
 useEffect(() => {
@@ -8373,7 +9628,188 @@ useEffect(() => {
     loadUserSettings(userId);
     loadUserTerms(userId);
   }
-}, [isUserAuthenticated, loggedInUser]);
+}, [isUserAuthenticated, loggedInUser?.userId]);
+
+  // ===== Global Pull-to-Refresh (Facebook-style) =====
+  // The app renders dozens of independent screens (module home, quotation list, settings,
+  // etc.) as separate early `return (...)` statements further down this same component, so
+  // a normal React element placed in JSX would only ever appear on whichever single screen
+  // happens to be showing at the time. Rather than touching every one of those return
+  // blocks, this drives a small overlay indicator that's attached directly to
+  // document.body (outside React's render tree) and listens for the pull gesture on the
+  // whole document - so "pull down from the top of any screen" works everywhere,
+  // uniformly, the same way it does in the Facebook app.
+  const pullToRefreshUserRef = useRef(loggedInUser);
+  useEffect(() => { pullToRefreshUserRef.current = loggedInUser; }, [loggedInUser]);
+
+  const refreshAllUserData = async (userId) => {
+    await Promise.all([
+      loadUserProjects(userId),
+      loadUserQuotations(userId),
+      loadUserCustomers(userId),
+      loadUserProducts(userId),
+      loadUserInvoices(userId),
+      loadUserPurchaseOrders(userId),
+      loadUserProformaInvoices(userId),
+      loadUserDeliveryNotes(userId),
+      loadUserReceipts(userId),
+      loadUserBusinessInfo(userId),
+      loadUserSettings(userId),
+      loadUserTerms(userId),
+    ]);
+  };
+
+  useEffect(() => {
+    const PULL_THRESHOLD = 72; // px of finger travel needed before a release triggers a refresh
+    const MAX_PULL = 120; // visual cap so the indicator can't be dragged off screen
+
+    const overlay = document.createElement('div');
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.style.cssText = [
+      'position: fixed', 'top: 0', 'left: 50%', 'transform: translate(-50%, -60px)',
+      'z-index: 9999', 'display: flex', 'align-items: center', 'justify-content: center',
+      'width: 42px', 'height: 42px', 'border-radius: 50%', 'background: #0F766E',
+      'box-shadow: 0 6px 16px rgba(15,23,42,0.25)', 'transition: transform 0.2s ease',
+      'pointer-events: none',
+    ].join(';');
+    const spinner = document.createElement('div');
+    spinner.style.cssText = [
+      'width: 20px', 'height: 20px', 'border-radius: 50%',
+      'border: 2.5px solid rgba(255,255,255,0.35)', 'border-top-color: #ffffff',
+    ].join(';');
+    overlay.appendChild(spinner);
+    document.body.appendChild(overlay);
+
+    // Full-screen blocker: while a refresh is actually in flight, this sits above the
+    // whole app (but below the spinner) and swallows every touch/click so the background
+    // screen can't be scrolled, tapped, or navigated until refreshAllUserData resolves -
+    // matching the "screen goes inactive during refresh" behavior of the Facebook app.
+    // It's inert (pointer-events: none, fully transparent) the rest of the time so it
+    // never interferes with normal use, including the pull gesture itself.
+    const blocker = document.createElement('div');
+    blocker.setAttribute('aria-hidden', 'true');
+    blocker.setAttribute('data-ptr-blocker', '1');
+    blocker.style.cssText = [
+      'position: fixed', 'inset: 0', 'z-index: 9998',
+      'background: rgba(15,23,42,0.08)', 'opacity: 0',
+      'transition: opacity 0.2s ease', 'pointer-events: none',
+    ].join(';');
+    document.body.appendChild(blocker);
+    const setBlocking = (isBlocking) => {
+      blocker.style.pointerEvents = isBlocking ? 'auto' : 'none';
+      blocker.style.opacity = isBlocking ? '1' : '0';
+    };
+
+    const styleTag = document.createElement('style');
+    styleTag.textContent = '@keyframes ptr-spin { to { transform: rotate(360deg); } }';
+    document.head.appendChild(styleTag);
+
+    let startY = 0;
+    let lastDistance = 0;
+    let pulling = false;
+    let dragging = false;
+    let refreshing = false;
+    let scrollableEl = null;
+
+    // Walks up from the touched element to find whichever internal `overflowY: auto`
+    // container (each screen has its own) actually owns the scroll, since this app is a
+    // fixed-position single-page shell rather than a document that scrolls as a whole.
+    const findScrollableAncestor = (node) => {
+      let el = node;
+      while (el && el !== document.body) {
+        if (el.scrollHeight > el.clientHeight) {
+          const overflowY = window.getComputedStyle(el).overflowY;
+          if (overflowY === 'auto' || overflowY === 'scroll') return el;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    };
+
+    const atTop = () => {
+      if (scrollableEl) return scrollableEl.scrollTop <= 0;
+      return (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+    };
+
+    const setOverlay = (distance, spinning) => {
+      const clamped = Math.min(distance, MAX_PULL);
+      overlay.style.transition = dragging ? 'none' : 'transform 0.2s ease';
+      overlay.style.transform = `translate(-50%, ${spinning ? 14 : clamped - 60}px)`;
+      spinner.style.animation = spinning ? 'ptr-spin 0.7s linear infinite' : 'none';
+      spinner.style.transform = spinning ? 'none' : `rotate(${Math.min((clamped / PULL_THRESHOLD) * 180, 180)}deg)`;
+    };
+
+    const onTouchStart = (e) => {
+      if (refreshing || e.touches.length !== 1) return;
+      scrollableEl = findScrollableAncestor(e.target);
+      if (!atTop()) { pulling = false; return; }
+      startY = e.touches[0].clientY;
+      lastDistance = 0;
+      pulling = true;
+      dragging = false;
+    };
+
+    const onTouchMove = (e) => {
+      if (!pulling || refreshing) return;
+      const rawDelta = e.touches[0].clientY - startY;
+      if (rawDelta <= 0 || !atTop()) {
+        pulling = rawDelta <= 0 ? pulling : false;
+        dragging = false;
+        lastDistance = 0;
+        setOverlay(0, false);
+        return;
+      }
+      dragging = true;
+      // Stop the native overscroll-bounce from fighting our own indicator mid-gesture.
+      e.preventDefault();
+      lastDistance = rawDelta * 0.5; // damping, so the indicator feels "heavier" than raw finger travel
+      setOverlay(lastDistance, false);
+    };
+
+    const onTouchEnd = async () => {
+      if (!pulling) return;
+      pulling = false;
+      const user = pullToRefreshUserRef.current;
+      const shouldRefresh = dragging && lastDistance >= PULL_THRESHOLD && user?.userId;
+      dragging = false;
+      if (shouldRefresh) {
+        refreshing = true;
+        setOverlay(0, true);
+        setBlocking(true);
+        try {
+          // Safety net: never keep the screen locked for more than 30s, even if a request stalls.
+          await Promise.race([
+            refreshAllUserData(user.userId),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Refresh timed out')), 30000)),
+          ]);
+        } catch (err) {
+          console.error('Pull-to-refresh failed:', err);
+        } finally {
+          refreshing = false;
+          setOverlay(0, false);
+          setBlocking(false);
+        }
+      } else {
+        setOverlay(0, false);
+      }
+      lastDistance = 0;
+    };
+
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', onTouchEnd, { passive: true });
+    document.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+      document.removeEventListener('touchcancel', onTouchEnd);
+      overlay.remove();
+      blocker.remove();
+      styleTag.remove();
+    };
+  }, []);
 
   // ===== Internet connectivity: full-screen "No Internet" / "Loading..." handling =====
   // hasConnectedOnceRef distinguishes "never had internet since launch" (No Internet Connection)
@@ -8416,23 +9852,260 @@ useEffect(() => {
     return () => { if (listenerHandle) listenerHandle.remove(); };
   }, []);
 
-  // Once back online after a drop, re-fetch the core session data before letting the user
-  // back into the app, then return them to whatever screen they were already on.
+  // Once back online after a drop, re-fetch the core session data in the BACKGROUND (in
+  // parallel) while the user keeps using the screen they were on. This used to show a
+  // full-screen "Loading..." gate until three sequential requests finished, which left the
+  // app stuck whenever one of them hung.
   useEffect(() => {
     if (!isReconnecting) return;
-    const refreshAfterReconnect = async () => {
-      try {
-        if (isUserAuthenticated && loggedInUser?.userId) {
-          await loadUserProjects(loggedInUser.userId);
-          await loadUserQuotations(loggedInUser.userId);
-          await loadUserCustomers(loggedInUser.userId);
-        }
-      } finally {
-        setIsReconnecting(false);
-      }
-    };
-    refreshAfterReconnect();
+    setIsReconnecting(false);
+    if (isUserAuthenticated && loggedInUser?.userId) {
+      const userId = loggedInUser.userId;
+      Promise.allSettled([
+        loadUserProjects(userId),
+        loadUserQuotations(userId),
+        loadUserCustomers(userId),
+      ]);
+    }
   }, [isReconnecting]);
+
+  // ===== App resume handling (Android background -> foreground) =====
+  // While the app is in the background Android freezes the WebView and kills idle network
+  // connections. On resume we (1) clear any full-screen gate/blocker that was left up by a
+  // request that never finished, and (2) if the app was away for over a minute, quietly
+  // refresh the data in the background without blocking the screen.
+  const refreshAllUserDataRef = useRef(refreshAllUserData);
+  refreshAllUserDataRef.current = refreshAllUserData;
+  useEffect(() => {
+    if (!isUserAuthenticated || !loggedInUser?.userId) return;
+    const userId = loggedInUser.userId;
+    const REFRESH_AFTER_AWAY_MS = 60 * 1000;
+    let backgroundedAt = 0;
+    let resumeRefreshing = false;
+    let removed = false;
+    let handle = null;
+
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) {
+        backgroundedAt = Date.now();
+        return;
+      }
+      setIsReconnecting(false);
+      document.querySelectorAll('[data-ptr-blocker]').forEach((el) => {
+        el.style.pointerEvents = 'none';
+        el.style.opacity = '0';
+      });
+      if (!backgroundedAt || Date.now() - backgroundedAt < REFRESH_AFTER_AWAY_MS || resumeRefreshing) return;
+      resumeRefreshing = true;
+      refreshAllUserDataRef.current(userId)
+        .catch((err) => console.error('Refresh on resume failed:', err))
+        .finally(() => { resumeRefreshing = false; });
+    }).then((h) => { if (removed) h.remove(); else handle = h; });
+
+    return () => { removed = true; if (handle) handle.remove(); };
+  }, [isUserAuthenticated, loggedInUser?.userId]);
+
+  // Hide the native splash screen once React has mounted its first frame.
+  // (Looked up via Capacitor.Plugins so the build doesn't break if the plugin isn't installed.)
+  useEffect(() => {
+    try {
+      if (Capacitor.isPluginAvailable('SplashScreen')) Capacitor.Plugins.SplashScreen.hide();
+    } catch { /* ignore */ }
+  }, []);
+
+  // GetQuotations (the list load in loadUserQuotations) intentionally omits docSnapshot
+  // for payload-size reasons - see backend DocumentsController.GetQuotations - so a
+  // quotation loaded from the list only has docSnapshot: null until this hydrates it.
+  // buildQuotationDocModel silently falls back to *current* business settings when
+  // docSnapshot is missing, which would be wrong for an old quotation whose logo/
+  // signature/bank info has since changed, so the detail/preview/share/PDF/edit screen
+  // fetches the single quotation (which still returns the real snapshot) on open.
+  // hydratedQuotationSnapshotIdsRef avoids re-fetching on every re-render for
+  // legacy quotations that genuinely have no stored snapshot.
+  const hydratedQuotationSnapshotIdsRef = useRef(new Set());
+  useEffect(() => {
+    if (quotationSubView !== 'quotationDetail' || !selectedQuotationId) return;
+    const current = quotations.find(q => q.id === selectedQuotationId);
+    if (!current || current.docSnapshot || hydratedQuotationSnapshotIdsRef.current.has(selectedQuotationId)) return;
+    hydratedQuotationSnapshotIdsRef.current.add(selectedQuotationId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const full = await documentService.getQuotation(selectedQuotationId);
+        if (cancelled || !full?.docSnapshot) return;
+        let parsedSnapshot = null;
+        try {
+          parsedSnapshot = JSON.parse(full.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing hydrated docSnapshot for quotation', selectedQuotationId, e);
+          return;
+        }
+        setQuotations(prev => {
+          const next = prev.map(q => (q.id === selectedQuotationId ? { ...q, docSnapshot: parsedSnapshot } : q));
+          try { localStorage.setItem(QUOTATIONS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+          return next;
+        });
+      } catch (error) {
+        console.error('Error hydrating quotation snapshot', selectedQuotationId, error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [quotationSubView, selectedQuotationId, quotations]);
+
+  // Same docSnapshot-hydration-on-open fix as Quotation above, applied to the other 5
+  // document types (Invoice, Purchase Order, Proforma Invoice, Delivery Note, Receipt) so
+  // that changing a document type's Settings after a document was created never alters
+  // that already-created document's preview/PDF - only documents created after the change
+  // pick up the new settings, exactly like Quotation.
+  const hydratedInvoiceSnapshotIdsRef = useRef(new Set());
+  useEffect(() => {
+    if (quotationSubView !== 'invoiceDetail' || !selectedInvoiceId) return;
+    const current = invoices.find(inv => inv.id === selectedInvoiceId);
+    if (!current || current.docSnapshot || hydratedInvoiceSnapshotIdsRef.current.has(selectedInvoiceId)) return;
+    hydratedInvoiceSnapshotIdsRef.current.add(selectedInvoiceId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const full = await invoicesService.getInvoice(selectedInvoiceId);
+        if (cancelled || !full?.docSnapshot) return;
+        let parsedSnapshot = null;
+        try {
+          parsedSnapshot = JSON.parse(full.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing hydrated docSnapshot for invoice', selectedInvoiceId, e);
+          return;
+        }
+        setInvoices(prev => {
+          const next = prev.map(inv => (inv.id === selectedInvoiceId ? { ...inv, docSnapshot: parsedSnapshot } : inv));
+          try { localStorage.setItem(INVOICES_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+          return next;
+        });
+      } catch (error) {
+        console.error('Error hydrating invoice snapshot', selectedInvoiceId, error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [quotationSubView, selectedInvoiceId, invoices]);
+
+  const hydratedPurchaseOrderSnapshotIdsRef = useRef(new Set());
+  useEffect(() => {
+    if (quotationSubView !== 'purchaseOrderDetail' || !selectedPurchaseOrderId) return;
+    const current = purchaseOrders.find(o => o.id === selectedPurchaseOrderId);
+    if (!current || current.docSnapshot || hydratedPurchaseOrderSnapshotIdsRef.current.has(selectedPurchaseOrderId)) return;
+    hydratedPurchaseOrderSnapshotIdsRef.current.add(selectedPurchaseOrderId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const full = await purchaseOrdersService.getPurchaseOrder(selectedPurchaseOrderId);
+        if (cancelled || !full?.docSnapshot) return;
+        let parsedSnapshot = null;
+        try {
+          parsedSnapshot = JSON.parse(full.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing hydrated docSnapshot for purchase order', selectedPurchaseOrderId, e);
+          return;
+        }
+        setPurchaseOrders(prev => {
+          const next = prev.map(o => (o.id === selectedPurchaseOrderId ? { ...o, docSnapshot: parsedSnapshot } : o));
+          try { localStorage.setItem(PURCHASE_ORDERS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+          return next;
+        });
+      } catch (error) {
+        console.error('Error hydrating purchase order snapshot', selectedPurchaseOrderId, error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [quotationSubView, selectedPurchaseOrderId, purchaseOrders]);
+
+  const hydratedProformaInvoiceSnapshotIdsRef = useRef(new Set());
+  useEffect(() => {
+    if (quotationSubView !== 'proformaInvoiceDetail' || !selectedProformaInvoiceId) return;
+    const current = proformaInvoices.find(pi => pi.id === selectedProformaInvoiceId);
+    if (!current || current.docSnapshot || hydratedProformaInvoiceSnapshotIdsRef.current.has(selectedProformaInvoiceId)) return;
+    hydratedProformaInvoiceSnapshotIdsRef.current.add(selectedProformaInvoiceId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const full = await proformaInvoicesService.getProformaInvoice(selectedProformaInvoiceId);
+        if (cancelled || !full?.docSnapshot) return;
+        let parsedSnapshot = null;
+        try {
+          parsedSnapshot = JSON.parse(full.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing hydrated docSnapshot for proforma invoice', selectedProformaInvoiceId, e);
+          return;
+        }
+        setProformaInvoices(prev => {
+          const next = prev.map(pi => (pi.id === selectedProformaInvoiceId ? { ...pi, docSnapshot: parsedSnapshot } : pi));
+          try { localStorage.setItem(PROFORMA_INVOICES_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+          return next;
+        });
+      } catch (error) {
+        console.error('Error hydrating proforma invoice snapshot', selectedProformaInvoiceId, error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [quotationSubView, selectedProformaInvoiceId, proformaInvoices]);
+
+  const hydratedDeliveryNoteSnapshotIdsRef = useRef(new Set());
+  useEffect(() => {
+    if (quotationSubView !== 'deliveryNoteDetail' || !selectedDeliveryNoteId) return;
+    const current = deliveryNotes.find(dn => dn.id === selectedDeliveryNoteId);
+    if (!current || current.docSnapshot || hydratedDeliveryNoteSnapshotIdsRef.current.has(selectedDeliveryNoteId)) return;
+    hydratedDeliveryNoteSnapshotIdsRef.current.add(selectedDeliveryNoteId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const full = await deliveryNotesService.getDeliveryNote(selectedDeliveryNoteId);
+        if (cancelled || !full?.docSnapshot) return;
+        let parsedSnapshot = null;
+        try {
+          parsedSnapshot = JSON.parse(full.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing hydrated docSnapshot for delivery note', selectedDeliveryNoteId, e);
+          return;
+        }
+        setDeliveryNotes(prev => {
+          const next = prev.map(dn => (dn.id === selectedDeliveryNoteId ? { ...dn, docSnapshot: parsedSnapshot } : dn));
+          try { localStorage.setItem(DELIVERY_NOTES_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+          return next;
+        });
+      } catch (error) {
+        console.error('Error hydrating delivery note snapshot', selectedDeliveryNoteId, error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [quotationSubView, selectedDeliveryNoteId, deliveryNotes]);
+
+  const hydratedReceiptSnapshotIdsRef = useRef(new Set());
+  useEffect(() => {
+    if (quotationSubView !== 'receiptDetail' || !selectedReceiptId) return;
+    const current = receipts.find(r => r.id === selectedReceiptId);
+    if (!current || current.docSnapshot || hydratedReceiptSnapshotIdsRef.current.has(selectedReceiptId)) return;
+    hydratedReceiptSnapshotIdsRef.current.add(selectedReceiptId);
+    let cancelled = false;
+    (async () => {
+      try {
+        const full = await receiptsService.getReceipt(selectedReceiptId);
+        if (cancelled || !full?.docSnapshot) return;
+        let parsedSnapshot = null;
+        try {
+          parsedSnapshot = JSON.parse(full.docSnapshot);
+        } catch (e) {
+          console.error('Error parsing hydrated docSnapshot for receipt', selectedReceiptId, e);
+          return;
+        }
+        setReceipts(prev => {
+          const next = prev.map(r => (r.id === selectedReceiptId ? { ...r, docSnapshot: parsedSnapshot } : r));
+          try { localStorage.setItem(RECEIPTS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+          return next;
+        });
+      } catch (error) {
+        console.error('Error hydrating receipt snapshot', selectedReceiptId, error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [quotationSubView, selectedReceiptId, receipts]);
 
   const handleRetryConnection = async () => {
     try {
@@ -8481,7 +10154,7 @@ useEffect(() => {
     );
   }
 
-  if (isReconnecting || (isUserAuthenticated && loadingProjects && projects.length === 0)) {
+  if (isUserAuthenticated && loadingProjects && projects.length === 0) {
     return (
       <div style={connectivityStyles.container}>
         <style>{'@keyframes smartmanage-spin { to { transform: rotate(360deg); } }'}</style>
@@ -8508,13 +10181,17 @@ useEffect(() => {
     }, { confirmLabel: t('yes'), tone: 'warning' });
   };
 
-  const TUTORIAL_VIDEO_URL = 'https://www.youtube.com/shorts/RtzdRnXkfX4';
-  const handleWatchTutorialVideo = async () => {
+  // Per-module tutorial videos shown from the "play" badge on each tile of the module
+  // picker screen below - Attendance and Documents (Quotation/Invoice/Business Docs)
+  // each link to their own dedicated walkthrough instead of sharing one video.
+  const ATTENDANCE_TUTORIAL_VIDEO_URL = 'https://youtube.com/shorts/33T9PnvVqwk?feature=share';
+  const DOCUMENTS_TUTORIAL_VIDEO_URL = 'https://youtube.com/shorts/EJQeXj9IU1Q?feature=share';
+  const handleWatchTutorialVideo = async (videoUrl) => {
     try {
-      await Browser.open({ url: TUTORIAL_VIDEO_URL });
+      await Browser.open({ url: videoUrl });
     } catch (error) {
       console.error('Unable to open tutorial video via Browser plugin:', error);
-      window.open(TUTORIAL_VIDEO_URL, '_blank');
+      window.open(videoUrl, '_blank');
     }
   };
 
@@ -8522,6 +10199,10 @@ useEffect(() => {
   // Quotations, Attendance/Payments) so it always opens exactly where it was triggered from.
   const renderProfileModal = () => {
     if (!isProfileModalOpen) return null;
+    // What the modal should preview: the pending edit if there is one, otherwise whatever
+    // photo is currently saved. This is intentionally NOT written back to `profileImg`
+    // (the Main Page's source of truth) until Save Changes succeeds.
+    const displayedProfileImg = draftProfileImg !== undefined ? draftProfileImg : profileImg;
     return (
       <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: 'rgba(15, 23, 42, 0.55)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px', boxSizing: 'border-box' }}>
         <div style={{ backgroundColor: '#ffffff', padding: '28px 24px 24px 24px', borderRadius: '24px', width: '100%', maxWidth: '360px', boxSizing: 'border-box', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.3)' }}>
@@ -8533,7 +10214,7 @@ useEffect(() => {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '22px' }}>
             <label htmlFor="user-avatar-file-input" style={{ position: 'relative', cursor: 'pointer' }}>
               <div style={{ width: '96px', height: '96px', borderRadius: '50%', backgroundColor: '#F8FAFC', border: '3px solid #EFF4FF', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.12)' }}>
-                {profileImg ? (<img src={profileImg} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : (
+                {displayedProfileImg ? (<img src={displayedProfileImg} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />) : (
                   loggedInUser?.fullName
                     ? <span style={{ fontSize: '30px', fontWeight: '700', color: '#0B3C9B' }}>{getInitials(loggedInUser.fullName)}</span>
                     : <span style={{ fontSize: '30px' }}>&#128100;</span>
@@ -8550,10 +10231,10 @@ useEffect(() => {
               e.target.value = '';
             }} />
             <span style={{ fontSize: '12px', color: '#64748B', marginTop: '10px', fontWeight: '500' }}>{t('tapToChangePhoto')}</span>
-            {profileImg && (
+            {displayedProfileImg && (
               <button
                 type="button"
-                onClick={() => setProfileImg(null)}
+                onClick={() => setDraftProfileImg(null)}
                 style={{ background: 'none', border: 'none', padding: 0, marginTop: '6px', fontSize: '12px', color: '#DC2626', fontWeight: '700', cursor: 'pointer', textDecoration: 'underline' }}
               >
                 Remove Photo
@@ -8574,25 +10255,34 @@ useEffect(() => {
             onClick={async () => {
               const trimmedName = (userName ?? loggedInUser?.fullName ?? '').trim();
               if (!trimmedName) { showAlert(t('yourName') + ' is required.'); return; }
+              // `draftProfileImg === null` means the user explicitly tapped "Remove Photo" -
+              // as opposed to `undefined` (never touched this session), which must NOT clear
+              // an already-saved photo. The server can't tell these apart from the image
+              // value alone, so this flag is sent alongside it.
+              const isRemovingPhoto = draftProfileImg === null;
 
               // No server-side user (e.g. dev/mock session) - fall back to local-only save.
               if (!loggedInUser?.userId) {
                 setLoggedInUser(prev => {
-                  const updatedUser = { ...prev, fullName: trimmedName, profileImg };
+                  const updatedUser = { ...prev, fullName: trimmedName, profileImg: displayedProfileImg };
                   try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
                   return updatedUser;
                 });
+                // Commit the draft photo into the saved state (what the Main Page reads)
+                // now that the save has gone through, then clear the pending draft.
+                setProfileImg(displayedProfileImg);
+                setDraftProfileImg(undefined);
                 setIsProfileModalOpen(false);
                 return;
               }
 
               setIsSavingProfile(true);
               try {
-                const response = await fetch(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
+                const response = await fetchWithTimeout(`${API_BASE_URL}/profile/${loggedInUser.userId}`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
                   credentials: 'include',
-                  body: JSON.stringify({ fullName: trimmedName, profileImage: profileImg }),
+                  body: JSON.stringify({ fullName: trimmedName, profileImage: displayedProfileImg, removeProfileImage: isRemovingPhoto }),
                 });
                 const responseText = await response.text();
                 let data = {};
@@ -8607,7 +10297,9 @@ useEffect(() => {
                 try { localStorage.setItem('workforce_user', JSON.stringify(updatedUser)); } catch {}
                 setLoggedInUser(updatedUser);
                 setUserName(data.fullName);
+                // Only now - after a successful save - does the Main Page's photo update.
                 setProfileImg(data.profileImage || null);
+                setDraftProfileImg(undefined);
                 setIsProfileModalOpen(false);
               } catch (err) {
                 showAlert('Could not reach the server. Please check your connection and try again.');
@@ -8691,8 +10383,10 @@ useEffect(() => {
     }
     if ((editingWorkerId === null || editingWorkerId === undefined) && !isAddProjectOpen) {
       const currentProject = projects.find(p => p.id === selectedProjectId);
+      // Only active employees block a duplicate name - a name that's in the Removed
+      // list is free to reuse.
       const isDuplicate = currentProject?.employees?.some(
-        emp => emp.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
+        emp => emp.isActive !== false && emp.name.trim().toLowerCase() === tempWorkerName.trim().toLowerCase()
       );
       if (isDuplicate) {
         showAlert(t('employeeAlreadyExists').replace('{name}', tempWorkerName.trim()));
@@ -8783,7 +10477,9 @@ useEffect(() => {
   const handleProjectNameBlur = () => {
     const trimmedName = newSiteName.trim();
     if (!trimmedName) { setIsNewProjectNameDuplicate(false); return; }
-    const isDuplicate = projects.some(p => p.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    // Only active projects block a duplicate name - a name that's in the Removed
+    // list is free to reuse.
+    const isDuplicate = projects.some(p => p.isActive !== false && p.name.trim().toLowerCase() === trimmedName.toLowerCase());
     setIsNewProjectNameDuplicate(isDuplicate);
     if (isDuplicate) {
       showAlert(t('projectNameDuplicateInline'));
@@ -8796,7 +10492,9 @@ useEffect(() => {
   if (!newSiteName.trim()) { showAlert(t('pleaseProvideValidProject')); return; }
   if (tempWorkersList.length === 0) { showAlert(t('validationError')); return; }
   const trimmedNewProjectName = newSiteName.trim();
-  const isDuplicateProjectName = projects.some(p => p.name.trim().toLowerCase() === trimmedNewProjectName.toLowerCase());
+  // Only active projects block a duplicate name - a name that's in the Removed
+  // list is free to reuse.
+  const isDuplicateProjectName = projects.some(p => p.isActive !== false && p.name.trim().toLowerCase() === trimmedNewProjectName.toLowerCase());
   if (isDuplicateProjectName) {
     showAlert(t('projectAlreadyExists').replace('{name}', trimmedNewProjectName));
     return;
@@ -8887,7 +10585,10 @@ useEffect(() => {
     !isNameDuplicateUI &&
     !isSavingWorker;
 
-  const projectsMatchingQuery = projects.filter(p => p.name.toLowerCase().includes(siteSearchQuery.toLowerCase()));
+  const projectsMatchingQuery = projects
+    .filter(p => (projectStatusFilter === 'inactive' ? p.isActive === false : p.isActive !== false))
+    .filter(p => p.name.toLowerCase().includes(siteSearchQuery.toLowerCase()));
+
   const sortedProjects = [...projectsMatchingQuery].sort((a, b) => {
     if (projectSortMode === 'az') return a.name.localeCompare(b.name);
     if (projectSortMode === 'za') return b.name.localeCompare(a.name);
@@ -8907,7 +10608,7 @@ useEffect(() => {
             <div style={moduleHomeStyles.headerRow}>
               <button
                 type="button"
-                onClick={() => setIsProfileModalOpen(true)}
+                onClick={() => { setDraftProfileImg(undefined); setIsProfileModalOpen(true); }}
                 style={moduleHomeStyles.avatarButton}
                 aria-label="Profile and settings"
               >
@@ -8939,7 +10640,7 @@ useEffect(() => {
                 >
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
+                    onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(ATTENDANCE_TUTORIAL_VIDEO_URL); }}
                     aria-label="Watch Manage Employee video"
                     style={moduleHomeStyles.tilePlayBadge}
                   >
@@ -8959,7 +10660,7 @@ useEffect(() => {
                 >
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(); }}
+                    onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(DOCUMENTS_TUTORIAL_VIDEO_URL); }}
                     aria-label="Watch Create Quotation, Invoice & Business Docs video"
                     style={moduleHomeStyles.tilePlayBadge}
                   >
@@ -9004,85 +10705,184 @@ useEffect(() => {
           </div>
 
           {isSubscribePageOpen && (() => {
-            const plans = [
-              {
-                key: 'free', name: 'Free', price: 0, tagline: 'Try it out',
-                features: ['1 active project', 'Up to 5 workers', 'Manual attendance marking', 'Basic payment tracking']
-              },
-              {
-                key: 'pro', name: 'Pro', price: 299, tagline: 'For growing supervisors', popular: true,
-                features: ['Unlimited projects', 'Unlimited workers', 'Wage history & wage edits', 'Payment tracking + PDF statements', 'Priority email support']
-              },
-              {
-                key: 'business', name: 'Business', price: 799, tagline: 'For multi-site teams',
-                features: ['Everything in Pro', 'Multiple supervisor logins', 'Data export (CSV/Excel)', 'Dedicated priority support', 'Early access to new features']
-              }
-            ];
+            const s = subStatus;
+            const state = s?.state; // 'trial' | 'trial_expired' | 'active' | 'expired'
+            const needsPayment = state === 'trial_expired' || state === 'expired';
+            const card = { backgroundColor: '#ffffff', borderRadius: '16px', padding: '18px', border: '1px solid #F1F5F9', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' };
+            const row = (label, value) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid #F1F5F9' }}>
+                <span style={{ fontSize: '13px', color: '#64748B' }}>{label}</span>
+                <span style={{ fontSize: '13px', fontWeight: '600', color: '#1E293B' }}>{value}</span>
+              </div>
+            );
+            const daysBadge = (n) => (
+              <div style={{ textAlign: 'right' }}>
+                <p style={{ margin: 0, fontSize: '26px', fontWeight: '700', color: '#0B3C9B', lineHeight: 1 }}>{n}</p>
+                <span style={{ fontSize: '11px', color: '#94A3B8' }}>{n === 1 ? 'day left' : 'days left'}</span>
+              </div>
+            );
             return (
               <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100vh', backgroundColor: '#f4f6f9', zIndex: 1500, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
                 <div style={{ padding: '18px 16px 14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <button type="button" onClick={() => setIsSubscribePageOpen(false)} aria-label="Back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}>
-                    <FiArrowLeft size={19} color="#1E293B" />
-                  </button>
+                  {!subLocked && (
+                    <button type="button" onClick={() => setIsSubscribePageOpen(false)} aria-label="Back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}>
+                      <FiArrowLeft size={19} color="#1E293B" />
+                    </button>
+                  )}
                   <div>
-                    <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscribe now</h2>
-                    <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>Pick a plan that fits how many projects and employees you manage</p>
+                    <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscription</h2>
+                    <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>30-day free trial, then ₹99 for 30 days</p>
                   </div>
                 </div>
 
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    {plans.map(plan => {
-                      const isSelected = selectedSubscriptionPlan === plan.key;
-                      return (
-                        <div key={plan.key} style={{
-                          backgroundColor: '#ffffff', borderRadius: '16px', padding: '18px',
-                          border: isSelected ? '2px solid #0B3C9B' : '1px solid #F1F5F9',
-                          boxShadow: plan.popular ? '0 4px 16px rgba(11,60,155,0.12)' : '0 2px 4px rgba(0,0,0,0.02)',
-                          position: 'relative'
-                        }}>
-                          {plan.popular && (
-                            <span style={{ position: 'absolute', top: '-10px', right: '18px', backgroundColor: '#0B3C9B', color: '#ffffff', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '20px' }}>MOST POPULAR</span>
-                          )}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{plan.name}</h3>
-                              <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>{plan.tagline}</p>
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0B3C9B' }}>{plan.price === 0 ? 'Free' : `\u20B9${plan.price}`}</p>
-                              {plan.price > 0 && <span style={{ fontSize: '11px', color: '#94A3B8' }}>per month</span>}
-                            </div>
-                          </div>
 
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', margin: '14px 0' }}>
-                            {plan.features.map((feature, idx) => (
-                              <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                                <span style={{ color: '#10B981', fontSize: '13px', marginTop: '1px' }}>&#10003;</span>
-                                <span style={{ fontSize: '13px', color: '#475569' }}>{feature}</span>
-                              </div>
-                            ))}
-                          </div>
+                    {!s && (
+                      <div style={{ ...card, textAlign: 'center' }}>
+                        <p style={{ margin: 0, fontSize: '14px', color: '#64748B' }}>{subLoading ? 'Loading your subscription...' : (subError || 'Subscription status unavailable.')}</p>
+                        {!subLoading && (
+                          <button onClick={loadSubscriptionStatus} style={{ marginTop: '12px', padding: '10px 18px', borderRadius: '12px', border: '1px solid #0B3C9B', backgroundColor: '#ffffff', color: '#0B3C9B', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Retry</button>
+                        )}
+                      </div>
+                    )}
 
-                          <button
-                            onClick={() => {
-                              setSelectedSubscriptionPlan(plan.key);
-                              showAlert(plan.price === 0 ? "You're on the Free plan." : `This is a preview \u2014 payment isn't wired up yet, but you've selected the ${plan.name} plan (\u20B9${plan.price}/month).`, 'info');
-                            }}
-                            style={{
-                              width: '100%', padding: '13px', borderRadius: '12px', fontWeight: '600', fontSize: '14px', cursor: 'pointer',
-                              border: isSelected ? 'none' : '1px solid #0B3C9B',
-                              backgroundColor: isSelected ? '#0B3C9B' : '#ffffff',
-                              color: isSelected ? '#ffffff' : '#0B3C9B'
-                            }}
-                          >
-                            {isSelected ? 'Current plan' : plan.price === 0 ? 'Use Free plan' : `Choose ${plan.name}`}
-                          </button>
+                    {/* ---- FREE TRIAL ---- */}
+                    {s && (state === 'trial' || state === 'trial_expired') && (
+                      <div style={{ ...card, border: state === 'trial' ? '2px solid #0B3C9B' : '1px solid #F1F5F9', opacity: state === 'trial' ? 1 : 0.85 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>30-Day Free Trial</h3>
+                            <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>Free for the first 30 days</p>
+                          </div>
+                          {state === 'trial'
+                            ? daysBadge(s.daysRemaining)
+                            : <span style={{ backgroundColor: '#FEE2E2', color: '#B91C1C', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '20px' }}>ENDED</span>}
                         </div>
-                      );
-                    })}
+                        <div style={{ margin: '12px 0 4px 0' }}>
+                          {['Full access to every feature', 'Trial starts automatically on your first login', 'Tied to your account, not your device'].map((f) => (
+                            <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '6px' }}>
+                              <span style={{ color: '#10B981', fontSize: '13px', marginTop: '1px' }}>&#10003;</span>
+                              <span style={{ fontSize: '13px', color: '#475569' }}>{f}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {row('Trial started on', formatSubDate(s.trialStartAt))}
+                        {row(state === 'trial' ? 'Trial ends on' : 'Trial ended on', formatSubDate(s.trialEndsAt))}
+                        {state === 'trial' && row('Remaining', `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'}`)}
+                      </div>
+                    )}
+
+                    {/* ---- ACTIVE SUBSCRIPTION ---- */}
+                    {s && state === 'active' && (
+                      <div style={{ ...card, border: '2px solid #0B3C9B' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <span style={{ backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '11px', fontWeight: '700', padding: '4px 10px', borderRadius: '20px' }}>&#10003; SUBSCRIPTION ACTIVE</span>
+                            <h3 style={{ margin: '10px 0 0 0', fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>Monthly Subscription</h3>
+                            <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>{'\u20B9'}{s.paidAmount || 99} paid &middot; Valid for 30 days</p>
+                          </div>
+                          {daysBadge(s.daysRemaining)}
+                        </div>
+                        <div style={{ marginTop: '10px' }}>
+                          {row('Payment date', formatSubDate(s.paymentDate))}
+                          {row('Subscription start date', formatSubDate(s.subscriptionStartAt))}
+                          {row('Subscription expiry date', formatSubDate(s.subscriptionEndsAt))}
+                          {row('Remaining days', `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'}`)}
+                          {s.paymentReference && row('Payment reference', s.paymentReference)}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ---- MONTHLY SUBSCRIPTION / UPI PAYMENT ---- */}
+                    {s && (
+                      <div style={{ ...card, border: needsPayment ? '2px solid #0B3C9B' : '1px solid #F1F5F9', boxShadow: needsPayment ? '0 4px 16px rgba(11,60,155,0.12)' : card.boxShadow }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{state === 'active' ? 'Renew early' : 'Monthly Subscription'}</h3>
+                            <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>UPI payment only</p>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0B3C9B' }}>{'\u20B9'}99</p>
+                            <span style={{ fontSize: '11px', color: '#94A3B8' }}>/ 30 days</span>
+                          </div>
+                        </div>
+
+                        {state === 'trial' && (
+                          <p style={{ fontSize: '12.5px', color: '#64748B', margin: '12px 0 0 0' }}>
+                            Your free trial gives you full access until {formatSubDate(s.trialEndsAt)}. You'll be asked to subscribe after that.
+                          </p>
+                        )}
+
+                        {(needsPayment || state === 'active') && subOrderState === 'idle' && (
+                          <button onClick={startUpiPayment} style={{ width: '100%', marginTop: '14px', padding: '13px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                            {state === 'active' ? 'Renew for \u20B999 via UPI' : 'Pay \u20B999 via UPI'}
+                          </button>
+                        )}
+
+                        {subOrderState === 'creating' && (
+                          <p style={{ textAlign: 'center', fontSize: '13px', color: '#64748B', margin: '16px 0 0 0' }}>Generating your payment QR...</p>
+                        )}
+
+                        {(subOrderState === 'waiting' || subOrderState === 'paid') && subOrder && (
+                          <div style={{ marginTop: '14px', textAlign: 'center' }}>
+                            {subOrderState === 'waiting' && (
+                              <Fragment>
+                                <div style={{ display: 'inline-block', padding: '10px', backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px' }}>
+                                  <img src={subOrder.qrImage} alt="UPI QR code to pay ₹99" style={{ width: '210px', height: '210px', display: 'block' }} />
+                                </div>
+                                <p style={{ margin: '10px 0 0 0', fontSize: '15px', fontWeight: '700', color: '#1E293B' }}>Scan &amp; pay exactly {'\u20B9'}{subOrder.amount}</p>
+                                {subOrder.upiUri && Capacitor.isNativePlatform() && (
+                                  <button onClick={() => { window.location.href = subOrder.upiUri; }} style={{ marginTop: '10px', padding: '10px 18px', borderRadius: '12px', border: '1px solid #0B3C9B', backgroundColor: '#ffffff', color: '#0B3C9B', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
+                                    Open UPI app on this phone
+                                  </button>
+                                )}
+                              </Fragment>
+                            )}
+
+                            <div style={{ textAlign: 'left', marginTop: '14px', backgroundColor: '#F8FAFC', borderRadius: '12px', padding: '12px 14px' }}>
+                              <p style={{ margin: '0 0 6px 0', fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>How to pay</p>
+                              {['Open any UPI app (Google Pay, PhonePe, Paytm, BHIM...)', `Scan this QR code and pay exactly \u20B9${subOrder.amount}`, 'Keep this screen open - your payment is verified automatically', 'Your subscription activates for 30 days as soon as the bank confirms it'].map((t, i) => (
+                                <p key={i} style={{ margin: '0 0 4px 0', fontSize: '12.5px', color: '#475569' }}>{i + 1}. {t}</p>
+                              ))}
+                            </div>
+
+                            <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                              {subOrderState === 'waiting' ? (
+                                <Fragment>
+                                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#F59E0B', display: 'inline-block' }} />
+                                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#92400E' }}>Waiting for payment confirmation...</span>
+                                </Fragment>
+                              ) : (
+                                <Fragment>
+                                  <span style={{ color: '#10B981', fontSize: '15px' }}>&#10003;</span>
+                                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#15803D' }}>Payment verified</span>
+                                </Fragment>
+                              )}
+                            </div>
+                            {subOrderState === 'waiting' && (
+                              <p style={{ fontSize: '11.5px', color: '#94A3B8', margin: '6px 0 0 0' }}>
+                                Only a bank-confirmed payment activates the plan. Screenshots are not accepted.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {(subOrderState === 'failed' || subOrderState === 'expired') && (
+                          <div style={{ marginTop: '14px', textAlign: 'center' }}>
+                            <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#B91C1C' }}>
+                              {subOrderState === 'expired' ? 'This payment QR expired.' : 'Payment was not completed.'}
+                            </p>
+                            {subError && <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#64748B' }}>{subError}</p>}
+                            <button onClick={() => { setSubOrder(null); setSubOrderState('idle'); setSubError(''); }} style={{ marginTop: '10px', padding: '11px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Try again</button>
+                          </div>
+                        )}
+                        <p style={{ fontSize: '11px', color: '#94A3B8', margin: '14px 0 0 0', textAlign: 'center' }}>
+                          If money was debited but access isn't active within a few minutes, it will be applied automatically once the bank confirms it. Contact Help with your UPI reference if not.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  <p style={{ fontSize: '11px', color: '#94A3B8', textAlign: 'center', margin: '16px 0 4px 0' }}>Prices shown are illustrative. You can change or cancel your plan anytime.</p>
                 </div>
               </div>
             );
@@ -9274,7 +11074,7 @@ useEffect(() => {
                   <FiChevronDown size={15} color="#94A3B8" />
                 </div>
               </div>
-              <FieldInput label="GSTIN/PAN/VAT/Business Number" value={businessInfo.taxNumber} onChange={(v) => updateBusinessField('taxNumber', v)} error={businessInfoErrors.taxNumber} />
+              <FieldInput label="GSTIN/PAN/VAT/Business Number" value={businessInfo.taxNumber} onChange={(v) => updateBusinessField('taxNumber', v)} error={businessInfoErrors.taxNumber} autoCapitalize="characters" />
 
               <div style={businessInfoStyles.sectionBar}>Payment Instructions - Bank Details</div>
               <div style={businessInfoStyles.bankCard}>
@@ -9501,6 +11301,7 @@ useEffect(() => {
                     type="button"
                     key={item.key}
                     onClick={() => {
+                      setSettingsReturnView('settingsMenu');
                       if (item.key === 'quotationSettings') setQuotationSubView('quotationSettingsDetail');
                       else if (item.key === 'invoiceSettings') setQuotationSubView('invoiceSettingsDetail');
                       else if (item.key === 'purchaseOrderSettings') setQuotationSubView('purchaseOrderSettingsDetail');
@@ -9544,7 +11345,7 @@ useEffect(() => {
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+              <button type="button" onClick={() => setQuotationSubView(settingsReturnView)} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Quotation Settings</h1>
@@ -9553,7 +11354,7 @@ useEffect(() => {
 
             <div style={businessInfoStyles.body}>
 
-              <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={quotationSettings.taxType} onChange={(v) => updateQuotationSettingField('taxType', v)} />
+              <ToggleSwitchRow icon={<FiPercent size={18} color="#1E293B" />} label="GST Display" value={quotationSettings.taxType} onChange={(v) => updateQuotationSettingField('taxType', v)} />
               <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={quotationSettings.showProductHSN} onChange={(v) => updateQuotationSettingField('showProductHSN', v)} />
               <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={quotationSettings.showShippingAddress} onChange={(v) => updateQuotationSettingField('showShippingAddress', v)} />
 
@@ -9639,7 +11440,7 @@ useEffect(() => {
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+              <button type="button" onClick={() => setQuotationSubView(settingsReturnView)} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Invoice Settings</h1>
@@ -9648,7 +11449,7 @@ useEffect(() => {
 
             <div style={businessInfoStyles.body}>
 
-              <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={invoiceSettings.taxType} onChange={(v) => updateInvoiceSettingField('taxType', v)} />
+              <ToggleSwitchRow icon={<FiPercent size={18} color="#1E293B" />} label="GST Display" value={invoiceSettings.taxType} onChange={(v) => updateInvoiceSettingField('taxType', v)} />
               <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={invoiceSettings.showProductHSN} onChange={(v) => updateInvoiceSettingField('showProductHSN', v)} />
               <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={invoiceSettings.showShippingAddress} onChange={(v) => updateInvoiceSettingField('showShippingAddress', v)} />
 
@@ -9734,7 +11535,7 @@ useEffect(() => {
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+              <button type="button" onClick={() => setQuotationSubView(settingsReturnView)} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Purchase Order Settings</h1>
@@ -9743,7 +11544,7 @@ useEffect(() => {
 
             <div style={businessInfoStyles.body}>
 
-              <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={purchaseOrderSettings.taxType} onChange={(v) => updatePurchaseOrderSettingField('taxType', v)} />
+              <ToggleSwitchRow icon={<FiPercent size={18} color="#1E293B" />} label="GST Display" value={purchaseOrderSettings.taxType} onChange={(v) => updatePurchaseOrderSettingField('taxType', v)} />
               <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={purchaseOrderSettings.showProductHSN} onChange={(v) => updatePurchaseOrderSettingField('showProductHSN', v)} />
               <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={purchaseOrderSettings.showShippingAddress} onChange={(v) => updatePurchaseOrderSettingField('showShippingAddress', v)} />
 
@@ -9830,7 +11631,7 @@ if (quotationSubView === 'proformaInvoiceSettingsDetail') {
   return (
     <div style={businessInfoStyles.screen}>
       <div style={businessInfoStyles.header}>
-        <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+        <button type="button" onClick={() => setQuotationSubView(settingsReturnView)} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
           <FiArrowLeft size={19} color="#ffffff" />
         </button>
         <h1 style={businessInfoStyles.headerTitle}>Proforma Invoice Settings</h1>
@@ -9839,7 +11640,7 @@ if (quotationSubView === 'proformaInvoiceSettingsDetail') {
 
       <div style={businessInfoStyles.body}>
 
-        <ToggleSwitchRow icon={<FiDollarSign size={18} color="#1E293B" />} label="GST Display" value={proformaInvoiceSettings.taxType} onChange={(v) => updateProformaInvoiceSettingField('taxType', v)} />
+        <ToggleSwitchRow icon={<FiPercent size={18} color="#1E293B" />} label="GST Display" value={proformaInvoiceSettings.taxType} onChange={(v) => updateProformaInvoiceSettingField('taxType', v)} />
         <ToggleSwitchRow icon={<FiTag size={18} color="#1E293B" />} label="Product HSN Display" value={proformaInvoiceSettings.showProductHSN} onChange={(v) => updateProformaInvoiceSettingField('showProductHSN', v)} />
         <ToggleSwitchRow icon={<FiTruck size={18} color="#1E293B" />} label="Shipping Address Display" value={proformaInvoiceSettings.showShippingAddress} onChange={(v) => updateProformaInvoiceSettingField('showShippingAddress', v)} />
 
@@ -9926,7 +11727,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
   return (
     <div style={businessInfoStyles.screen}>
       <div style={businessInfoStyles.header}>
-        <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+        <button type="button" onClick={() => setQuotationSubView(settingsReturnView)} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
           <FiArrowLeft size={19} color="#ffffff" />
         </button>
         <h1 style={businessInfoStyles.headerTitle}>Delivery Note Settings</h1>
@@ -9990,6 +11791,8 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
           </div>
         )}
 
+        <ToggleSwitchRow icon={<HiOutlineBuildingOffice2 size={18} color="#1E293B" />} label="Payment- Bank Info" value={deliveryNoteSettings.showBankInfo} onChange={(v) => updateDeliveryNoteSettingField('showBankInfo', v)} />
+        <ToggleSwitchRow icon={<span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1E293B', letterSpacing: '-0.3px' }}>UPI</span>} label="QR Code Display" value={deliveryNoteSettings.showUpiInfo} onChange={(v) => updateDeliveryNoteSettingField('showUpiInfo', v)} />
         <ToggleSwitchRow icon={<HiOutlinePencil size={18} color="#1E293B" />} label="Signature Display" value={deliveryNoteSettings.showSignature} onChange={(v) => updateDeliveryNoteSettingField('showSignature', v)} />
 
         <div style={businessInfoStyles.settingsFooterRow}>
@@ -10017,7 +11820,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
         return (
           <div style={businessInfoStyles.screen}>
             <div style={businessInfoStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView('settingsMenu')} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
+              <button type="button" onClick={() => setQuotationSubView(settingsReturnView)} aria-label="Back" style={businessInfoStyles.headerIconBtn}>
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={businessInfoStyles.headerTitle}>Receipt Settings</h1>
@@ -10186,11 +11989,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{customer.name}</span>
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <button type="button" onClick={() => openEditCustomer(customer)} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
-                        <HiOutlinePencil size={14} color="#ffffff" />
+                      <button type="button" onClick={() => openEditCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
                       </button>
-                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
-                        <FiTrash2 size={14} color="#ffffff" />
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -10328,6 +12133,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                   if (customerGstinError) setCustomerGstinError(false);
                 }}
                 error={customerGstinError ? 'Enter a valid GST number' : null}
+                autoCapitalize="characters"
               />
 
               <div style={customerModuleStyles.sectionBar}>Shipping Details</div>
@@ -10407,8 +12213,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 </>
               )}
 
-              <button type="button" onClick={handleSaveCustomer} style={customerModuleStyles.addBtn}>
-                {editingCustomerId ? 'Update' : 'Add'}
+              <button
+                type="button"
+                onClick={handleSaveCustomer}
+                disabled={isSavingCustomer}
+                style={{ ...customerModuleStyles.addBtn, cursor: isSavingCustomer ? 'default' : 'pointer', opacity: isSavingCustomer ? 0.7 : 1 }}
+              >
+                {isSavingCustomer ? 'Saving...' : (editingCustomerId ? 'Update' : 'Add')}
               </button>
             </div>
 
@@ -10507,31 +12318,34 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     key={product.id}
                     style={customerModuleStyles.productCard}
                   >
-                    <button type="button" onClick={() => openEditProduct(product)} style={{ ...customerModuleStyles.selectRowBtn, display: 'block' }}>
-                      <div style={customerModuleStyles.productCardTopRow}>
-                        <span style={customerModuleStyles.customerName}>{product.name}</span>
+                    <div style={customerModuleStyles.productCardTopRow}>
+                      <span style={customerModuleStyles.customerName}>{product.name}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+                        <button type="button" onClick={() => openEditProduct(product)} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit product">
+                          <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={15} color="#475569" /></span>
+                          <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                        </button>
+                        <button type="button" onClick={() => handleDeleteProduct(product)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete product">
+                          <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={15} color="#DC2626" /></span>
+                          <span style={customerModuleStyles.rowActionLabel}>Delete</span>
+                        </button>
                       </div>
-                      {product.price && (
-                        <div style={customerModuleStyles.productDetailRow}>
-                          <span style={customerModuleStyles.productDetailLabel}>Price</span>
-                          <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
-                        </div>
-                      )}
-                      {product.gst && (
-                        <div style={customerModuleStyles.productDetailRow}>
-                          <span style={customerModuleStyles.productDetailLabel}>GST</span>
-                          <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
-                        </div>
-                      )}
-                    </button>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
-                      <button type="button" onClick={() => openEditProduct(product)} style={customerModuleStyles.editBadgeBtn} aria-label="Edit product">
-                        <HiOutlinePencil size={14} color="#ffffff" />
-                      </button>
-                      <button type="button" onClick={() => handleDeleteProduct(product)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete product">
-                        <FiTrash2 size={14} color="#ffffff" />
-                      </button>
                     </div>
+                    {(product.price || product.gst) && (
+                      <button type="button" onClick={() => openEditProduct(product)} style={{ ...customerModuleStyles.selectRowBtn, display: 'block' }}>
+                        <div style={customerModuleStyles.productDetailRow}>
+                          {product.price && (
+                            <span style={customerModuleStyles.productDetailText}>Price: {'\u20B9'}{product.price}</span>
+                          )}
+                          {product.price && product.gst && (
+                            <span style={customerModuleStyles.productDetailDivider}>|</span>
+                          )}
+                          {product.gst && (
+                            <span style={customerModuleStyles.productDetailText}>GST: {product.gst}%</span>
+                          )}
+                        </div>
+                      </button>
+                    )}
                   </div>
                 ))
               )}
@@ -10614,6 +12428,8 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               />
               <input
                 type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={productForm.hsn}
                 onChange={(e) => { updateProductField('hsn', e.target.value.replace(/\D/g, '').slice(0, 8)); if (productHsnError) setProductHsnError(false); }}
                 placeholder="HSN"
@@ -10676,11 +12492,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{customer.name}</span>
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForQuotation')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
-                        <HiOutlinePencil size={14} color="#ffffff" />
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForQuotation')} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
                       </button>
-                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
-                        <FiTrash2 size={14} color="#ffffff" />
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -10820,18 +12638,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{product.name}</span>
                       <FiChevronRight size={18} color="#94A3B8" />
                     </div>
-                    {product.price !== undefined && product.price !== '' && (
+                    {(product.price !== undefined && product.price !== '') || (product.gst !== undefined && product.gst !== '') ? (
                       <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
-                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                        {product.price !== undefined && product.price !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>Price: {'\u20B9'}{product.price}</span>
+                        )}
+                        {product.price !== undefined && product.price !== '' && product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailDivider}>|</span>
+                        )}
+                        {product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>GST: {product.gst}%</span>
+                        )}
                       </div>
-                    )}
-                    {product.gst !== undefined && product.gst !== '' && (
-                      <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
-                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
-                      </div>
-                    )}
+                    ) : null}
                   </button>
                 ))
               )}
@@ -10867,7 +12686,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={{ ...customerModuleStyles.headerTitle, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Select Terms and…</h1>
-              <button type="button" onClick={openAddTermsModal} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
+              <button type="button" onClick={() => openAddTermsModal('quotation')} aria-label="Add" style={customerModuleStyles.headerAddBtn}>
                 <FiPlus size={18} color="#0F766E" />
               </button>
             </div>
@@ -10896,11 +12715,21 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       </button>
                       <button
                         type="button"
+                        onClick={() => openEditTermsModal(term, 'quotation')}
+                        aria-label="Edit term"
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#0F766E' }}
+                      >
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiEdit3 size={16} color="#0F766E" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteTerm(term, 'quotation')}
                         aria-label="Delete term"
-                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }}
                       >
-                        <FiTrash2 size={13} color="#ffffff" />
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={16} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   );
@@ -10916,7 +12745,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingTermId ? 'Edit Terms and condition' : 'Add Terms and condition'}</h3>
                   <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
                   <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Quotation</div>
                   <textarea
@@ -10925,7 +12754,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     placeholder="Terms and condition"
                     style={customerModuleStyles.descriptionTextarea}
                   />
-                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingTermId ? 'Update' : 'Add'}</button>
                 </div>
               </div>
             )}
@@ -10962,7 +12791,14 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingQuotationId ? 'Update Quotation' : 'Make Quotation'}</h1>
-              <span style={customerModuleStyles.headerIconBtn} />
+              <button
+                type="button"
+                onClick={() => { setSettingsReturnView('makeQuotation'); setQuotationSubView('quotationSettingsDetail'); }}
+                aria-label="Quotation Settings"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <HiOutlineCog6Tooth size={19} color="#ffffff" />
+              </button>
             </div>
 
             <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
@@ -10988,10 +12824,17 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 </div>
               </div>
 
-              <button type="button" onClick={openSelectCustomerForQuotation} style={makeQuotationStyles.sectionCard}>
+              <button
+                type="button"
+                onClick={editingQuotationId && selectedQuotationCustomer ? undefined : openSelectCustomerForQuotation}
+                disabled={!!(editingQuotationId && selectedQuotationCustomer)}
+                style={{ ...makeQuotationStyles.sectionCard, ...(editingQuotationId && selectedQuotationCustomer ? { cursor: 'default' } : {}) }}
+              >
                 <div style={makeQuotationStyles.sectionCardTopRow}>
                   <span style={makeQuotationStyles.sectionCardLabel}>TO (CUSTOMER)</span>
-                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  {!(editingQuotationId && selectedQuotationCustomer) && (
+                    <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  )}
                 </div>
                 {selectedQuotationCustomer && (
                   <div style={makeQuotationStyles.sectionCardBody}>
@@ -11027,14 +12870,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                             <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => { e.stopPropagation(); removeQuotationProductLine(p.productId); }}
-                              style={makeQuotationStyles.removeIconBtn}
-                              aria-label={`Remove ${p.name}`}
-                            >
-                              <FiTrash2 size={16} color="#DC2626" />
+                            <span style={{ display: 'flex', alignItems: 'center' }}>
+                              <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                                <FiEdit3 size={14} color="#0F766E" />
+                              </span>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => { e.stopPropagation(); removeQuotationProductLine(p.productId); }}
+                                style={makeQuotationStyles.removeIconBtn}
+                                aria-label={`Remove ${p.name}`}
+                              >
+                                <FiTrash2 size={16} color="#DC2626" />
+                              </span>
                             </span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
@@ -11060,10 +12908,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 {quotationForm.otherCharges.length > 0 && (
                   <div style={makeQuotationStyles.sectionCardBody}>
                     {quotationForm.otherCharges.map((c) => (
-                      <div key={c.id} style={makeQuotationStyles.lineRow}>
-                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                      <div
+                        key={c.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); openEditOtherChargeModal(c); }}
+                        style={{ ...makeQuotationStyles.lineRow, cursor: 'pointer' }}
+                      >
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}{c.taxable && c.gstPercent > 0 ? ` (GST ${c.gstPercent}%)` : ''}</span>
                         <span style={makeQuotationStyles.lineRowRight}>
                           <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
                           <span
                             role="button"
                             tabIndex={0}
@@ -11090,14 +12947,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     {selectedQuotationTerms.map((term) => (
                       <div key={term.id} style={makeQuotationStyles.lineRow}>
                         <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); removeQuotationSelectedTerm(term.id); }}
-                          style={makeQuotationStyles.removeIconBtn}
-                          aria-label="Remove term"
-                        >
-                          <FiTrash2 size={16} color="#DC2626" />
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeQuotationSelectedTerm(term.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label="Remove term"
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -11111,41 +12973,93 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
                 <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{quotationAmountDue}</div>
               </div>
-              <button type="button" onClick={handleGenerateQuotation} style={makeQuotationStyles.generateBtn}>{editingQuotationId ? 'Update' : 'Generate'}</button>
+              <button type="button" onClick={handleGenerateQuotation} disabled={isSavingQuotation} style={{ ...makeQuotationStyles.generateBtn, cursor: isSavingQuotation ? 'default' : 'pointer', opacity: isSavingQuotation ? 0.7 : 1 }}>{isSavingQuotation ? 'Saving...' : (editingQuotationId ? 'Update' : 'Generate')}</button>
             </div>
 
             {isOtherChargeModalOpen && (
-              <div style={customerModuleStyles.modalOverlay} onClick={() => setIsOtherChargeModalOpen(false)}>
-                <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
-                  <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
-                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
-                  <input
-                    type="text"
-                    value={otherChargeForm.label}
-                    onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
-                    style={customerModuleStyles.fieldInput}
-                  />
-                  <input
-                    type="number"
-                    value={otherChargeForm.amount}
-                    onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, amount: e.target.value }))}
-                    placeholder="Other Charge Amount"
-                    style={customerModuleStyles.fieldInput}
-                  />
-                  <div style={customerModuleStyles.taxableRow}>
-                    <span style={customerModuleStyles.sheetSmallLabelInline}>Is Taxable?</span>
-                    <input
-                      type="checkbox"
-                      checked={otherChargeForm.taxable}
-                      onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, taxable: e.target.checked }))}
-                      style={customerModuleStyles.checkbox}
-                    />
-                  </div>
-                  <button type="button" onClick={handleSaveOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
-                </div>
-              </div>
-            )}
+  <div style={customerModuleStyles.modalOverlay} onClick={() => setIsOtherChargeModalOpen(false)}>
+    <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
+      <div style={customerModuleStyles.sheetHandle} />
+      <h3 style={customerModuleStyles.sheetTitle}>{editingOtherChargeId ? 'Edit Other Charge' : 'Other Charge Info'}</h3>
+      <span style={customerModuleStyles.sheetSmallLabel}>Charge Name</span>
+      <input
+        type="text"
+        value={otherChargeForm.label}
+        onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+        placeholder="Other Charges"
+        style={customerModuleStyles.fieldInput}
+      />
+      <input
+        type="number"
+        value={otherChargeForm.amount}
+        onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, amount: e.target.value }))}
+        placeholder="Other Charge Amount"
+        style={customerModuleStyles.fieldInput}
+      />
+      <div style={customerModuleStyles.taxableRow}>
+        <span style={customerModuleStyles.sheetSmallLabelInline}>Is Taxable?</span>
+        <input
+          type="checkbox"
+          checked={otherChargeForm.taxable}
+          onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, taxable: e.target.checked }))}
+          style={customerModuleStyles.checkbox}
+        />
+      </div>
+      {otherChargeForm.taxable && (
+        <>
+          <span style={customerModuleStyles.sheetSmallLabel}>Tax %</span>
+          <input
+            type="number"
+            value={otherChargeForm.gstPercent}
+            onChange={(e) => setOtherChargeForm((prev) => ({ ...prev, gstPercent: e.target.value }))}
+            placeholder="Tax Percentage"
+            style={customerModuleStyles.fieldInput}
+          />
+          {/* Tax preview */}
+          {otherChargeForm.amount && Number(otherChargeForm.amount) > 0 && 
+           otherChargeForm.gstPercent && Number(otherChargeForm.gstPercent) > 0 && (
+            <div style={{ 
+              background: '#F1F5F9', 
+              borderRadius: '10px', 
+              padding: '12px', 
+              marginTop: '8px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontSize: '13px', color: '#475569' }}>
+                Tax Amount ({otherChargeForm.gstPercent}%)
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: '700', color: '#0F172A' }}>
+                ₹{(Number(otherChargeForm.amount) * Number(otherChargeForm.gstPercent) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
+          {otherChargeForm.amount && Number(otherChargeForm.amount) > 0 && 
+           otherChargeForm.gstPercent && Number(otherChargeForm.gstPercent) > 0 && (
+            <div style={{ 
+              background: '#ECFDF5', 
+              borderRadius: '10px', 
+              padding: '12px', 
+              marginTop: '4px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontSize: '13px', color: '#065F46' }}>
+                Total (including tax)
+              </span>
+              <span style={{ fontSize: '14px', fontWeight: '700', color: '#065F46' }}>
+                ₹{(Number(otherChargeForm.amount) * (1 + Number(otherChargeForm.gstPercent) / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+      <button type="button" onClick={handleSaveOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingOtherChargeId ? 'Update' : 'Save'}</button>
+    </div>
+  </div>
+)}
 
             <AppPopup
               open={!!appPopup?.open}
@@ -11325,11 +13239,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                   <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>Do you want to convert this Quotation to...</h3>
                   
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setShowConvertSheet(false);
-                      const newId = genId();
-                      const newProformaInvoice = {
-                        id: newId,
+                      if (!loggedInUser?.userId) {
+                        showAlert('You need to be signed in to convert this quotation.');
+                        return;
+                      }
+                      const payload = {
                         proformaInvoiceNo: getNextProformaInvoiceNumber(),
                         date: formatQuotationDate(new Date()),
                         dueDate: '', poNo: '', otherInfo: currentQuotation.otherInfo || '',
@@ -11338,29 +13254,43 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         otherCharges: currentQuotation.otherCharges || [],
                         termsIds: currentQuotation.termsIds || [],
                         paidInfo: [],
-                        grandTotal: currentQuotation.grandTotal,
-                        paidTotal: 0,
-                        balanceDue: currentQuotation.grandTotal,
-                        createdAt: new Date().toISOString(),
                         customerName: currentQuotation.customerName,
                         customerCompany: currentQuotation.customerCompany,
-                        docSnapshot: buildDocSettingsSnapshot(proformaInvoiceSettings),
+                        customerMobile: currentQuotation.customerMobile,
+                        customerEmail: currentQuotation.customerEmail,
+                        customerAddressLine1: currentQuotation.customerAddressLine1,
+                        customerAddressLine2: currentQuotation.customerAddressLine2,
+                        customerAddressLine3: currentQuotation.customerAddressLine3,
+                        customerBillingAddress: currentQuotation.customerBillingAddress,
+                        customerShippingAddress: currentQuotation.customerShippingAddress,
+                        docSnapshot: JSON.stringify(buildDocSettingsSnapshot(proformaInvoiceSettings)),
                       };
-                      persistProformaInvoices([...proformaInvoices, newProformaInvoice]);
-                      showSuccess('Converted to Proforma Invoice successfully.');
-                      setSelectedProformaInvoiceId(newId);
-                      setQuotationSubView('proformaInvoiceDetail');
+                      try {
+                        // Convert always creates a brand-new, independently deletable Proforma
+                        // Invoice on the server; the source Quotation is left untouched.
+                        const created = await proformaInvoicesService.createProformaInvoice(loggedInUser.userId, payload);
+                        const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+                        persistProformaInvoices([...proformaInvoices, parsedCreated]);
+                        showSuccess('Converted to Proforma Invoice successfully.');
+                        setSelectedProformaInvoiceId(created.id);
+                        setQuotationSubView('proformaInvoiceDetail');
+                      } catch (error) {
+                        console.error('Error converting quotation to proforma invoice:', error);
+                        showAlert('Could not convert to Proforma Invoice. Please try again.');
+                      }
                     }}
                     style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
                   >
                     Convert To Proforma Invoice
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setShowConvertSheet(false);
-                      const newId = genId();
-                      const newInvoice = {
-                        id: newId,
+                      if (!loggedInUser?.userId) {
+                        showAlert('You need to be signed in to convert this quotation.');
+                        return;
+                      }
+                      const payload = {
                         invoiceNo: getNextInvoiceNumber(),
                         date: formatQuotationDate(new Date()),
                         dueDate: '', poNo: '', otherInfo: currentQuotation.otherInfo || '',
@@ -11369,19 +13299,30 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         otherCharges: currentQuotation.otherCharges || [],
                         termsIds: currentQuotation.termsIds || [],
                         paidInfo: [],
-                        grandTotal: currentQuotation.grandTotal,
-                        paidTotal: 0,
-                        balanceDue: currentQuotation.grandTotal,
-                        status: 'Unpaid',
-                        createdAt: new Date().toISOString(),
                         customerName: currentQuotation.customerName,
                         customerCompany: currentQuotation.customerCompany,
-                        docSnapshot: buildDocSettingsSnapshot(invoiceSettings),
+                        customerMobile: currentQuotation.customerMobile,
+                        customerEmail: currentQuotation.customerEmail,
+                        customerAddressLine1: currentQuotation.customerAddressLine1,
+                        customerAddressLine2: currentQuotation.customerAddressLine2,
+                        customerAddressLine3: currentQuotation.customerAddressLine3,
+                        customerBillingAddress: currentQuotation.customerBillingAddress,
+                        customerShippingAddress: currentQuotation.customerShippingAddress,
+                        docSnapshot: JSON.stringify(buildDocSettingsSnapshot(invoiceSettings)),
                       };
-                      persistInvoices([...invoices, newInvoice]);
-                      showSuccess('Converted to Invoice successfully.');
-                      setSelectedInvoiceId(newId);
-                      setQuotationSubView('invoiceDetail');
+                      try {
+                        // Convert always creates a brand-new, independently deletable Invoice
+                        // on the server; the source Quotation is left untouched.
+                        const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
+                        const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+                        persistInvoices([...invoices, parsedCreated]);
+                        showSuccess('Converted to Invoice successfully.');
+                        setSelectedInvoiceId(created.id);
+                        setQuotationSubView('invoiceDetail');
+                      } catch (error) {
+                        console.error('Error converting quotation to invoice:', error);
+                        showAlert('Could not convert to Invoice. Please try again.');
+                      }
                     }}
                     style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
                   >
@@ -11443,11 +13384,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{customer.name}</span>
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForPurchaseOrder')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
-                        <HiOutlinePencil size={14} color="#ffffff" />
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForPurchaseOrder')} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
                       </button>
-                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
-                        <FiTrash2 size={14} color="#ffffff" />
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -11587,18 +13530,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{product.name}</span>
                       <FiChevronRight size={18} color="#94A3B8" />
                     </div>
-                    {product.price !== undefined && product.price !== '' && (
+                    {(product.price !== undefined && product.price !== '') || (product.gst !== undefined && product.gst !== '') ? (
                       <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
-                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                        {product.price !== undefined && product.price !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>Price: {'\u20B9'}{product.price}</span>
+                        )}
+                        {product.price !== undefined && product.price !== '' && product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailDivider}>|</span>
+                        )}
+                        {product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>GST: {product.gst}%</span>
+                        )}
                       </div>
-                    )}
-                    {product.gst !== undefined && product.gst !== '' && (
-                      <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
-                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
-                      </div>
-                    )}
+                    ) : null}
                   </button>
                 ))
               )}
@@ -11662,11 +13606,21 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       </button>
                       <button
                         type="button"
+                        onClick={() => openEditTermsModal(term, 'purchaseOrder')}
+                        aria-label="Edit term"
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#0F766E' }}
+                      >
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiEdit3 size={16} color="#0F766E" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteTerm(term, 'purchaseOrder')}
                         aria-label="Delete term"
-                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }}
                       >
-                        <FiTrash2 size={13} color="#ffffff" />
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={16} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   );
@@ -11682,7 +13636,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingTermId ? 'Edit Terms and condition' : 'Add Terms and condition'}</h3>
                   <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
                   <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Purchase Order</div>
                   <textarea
@@ -11691,7 +13645,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     placeholder="Terms and condition"
                     style={customerModuleStyles.descriptionTextarea}
                   />
-                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingTermId ? 'Update' : 'Add'}</button>
                 </div>
               </div>
             )}
@@ -11728,7 +13682,14 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingPurchaseOrderId ? 'Update Purchase Order' : 'Make Purchase Order'}</h1>
-              <span style={customerModuleStyles.headerIconBtn} />
+              <button
+                type="button"
+                onClick={() => { setSettingsReturnView('makePurchaseOrder'); setQuotationSubView('purchaseOrderSettingsDetail'); }}
+                aria-label="Purchase Order Settings"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <HiOutlineCog6Tooth size={19} color="#ffffff" />
+              </button>
             </div>
 
             <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
@@ -11754,10 +13715,17 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 </div>
               </div>
 
-              <button type="button" onClick={openSelectCustomerForPurchaseOrder} style={makeQuotationStyles.sectionCard}>
+              <button
+                type="button"
+                onClick={editingPurchaseOrderId && selectedPurchaseOrderCustomer ? undefined : openSelectCustomerForPurchaseOrder}
+                disabled={!!(editingPurchaseOrderId && selectedPurchaseOrderCustomer)}
+                style={{ ...makeQuotationStyles.sectionCard, ...(editingPurchaseOrderId && selectedPurchaseOrderCustomer ? { cursor: 'default' } : {}) }}
+              >
                 <div style={makeQuotationStyles.sectionCardTopRow}>
                   <span style={makeQuotationStyles.sectionCardLabel}>TO (CUSTOMER)</span>
-                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  {!(editingPurchaseOrderId && selectedPurchaseOrderCustomer) && (
+                    <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  )}
                 </div>
                 {selectedPurchaseOrderCustomer && (
                   <div style={makeQuotationStyles.sectionCardBody}>
@@ -11793,14 +13761,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                             <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => { e.stopPropagation(); removePurchaseOrderProductLine(p.productId); }}
-                              style={makeQuotationStyles.removeIconBtn}
-                              aria-label={`Remove ${p.name}`}
-                            >
-                              <FiTrash2 size={16} color="#DC2626" />
+                            <span style={{ display: 'flex', alignItems: 'center' }}>
+                              <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                                <FiEdit3 size={14} color="#0F766E" />
+                              </span>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => { e.stopPropagation(); removePurchaseOrderProductLine(p.productId); }}
+                                style={makeQuotationStyles.removeIconBtn}
+                                aria-label={`Remove ${p.name}`}
+                              >
+                                <FiTrash2 size={16} color="#DC2626" />
+                              </span>
                             </span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
@@ -11826,10 +13799,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 {purchaseOrderForm.otherCharges.length > 0 && (
                   <div style={makeQuotationStyles.sectionCardBody}>
                     {purchaseOrderForm.otherCharges.map((c) => (
-                      <div key={c.id} style={makeQuotationStyles.lineRow}>
-                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                      <div
+                        key={c.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); openEditPurchaseOrderOtherChargeModal(c); }}
+                        style={{ ...makeQuotationStyles.lineRow, cursor: 'pointer' }}
+                      >
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}{c.taxable && c.gstPercent > 0 ? ` (GST ${c.gstPercent}%)` : ''}</span>
                         <span style={makeQuotationStyles.lineRowRight}>
                           <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
                           <span
                             role="button"
                             tabIndex={0}
@@ -11856,14 +13838,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     {selectedPurchaseOrderTerms.map((term) => (
                       <div key={term.id} style={makeQuotationStyles.lineRow}>
                         <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); removePurchaseOrderSelectedTerm(term.id); }}
-                          style={makeQuotationStyles.removeIconBtn}
-                          aria-label="Remove term"
-                        >
-                          <FiTrash2 size={16} color="#DC2626" />
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removePurchaseOrderSelectedTerm(term.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label="Remove term"
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -11877,19 +13864,20 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
                 <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{purchaseOrderAmountDue}</div>
               </div>
-              <button type="button" onClick={handleGeneratePurchaseOrder} style={makeQuotationStyles.generateBtn}>{editingPurchaseOrderId ? 'Update' : 'Generate'}</button>
+              <button type="button" onClick={handleGeneratePurchaseOrder} disabled={isSavingPurchaseOrder} style={{ ...makeQuotationStyles.generateBtn, cursor: isSavingPurchaseOrder ? 'default' : 'pointer', opacity: isSavingPurchaseOrder ? 0.7 : 1 }}>{isSavingPurchaseOrder ? 'Saving...' : (editingPurchaseOrderId ? 'Update' : 'Generate')}</button>
             </div>
 
             {isPurchaseOrderOtherChargeModalOpen && (
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsPurchaseOrderOtherChargeModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
-                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingPurchaseOrderOtherChargeId ? 'Edit Other Charge' : 'Other Charge Info'}</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>Charge Name</span>
                   <input
                     type="text"
                     value={purchaseOrderOtherChargeForm.label}
                     onChange={(e) => setPurchaseOrderOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+                    placeholder="Other Charges"
                     style={customerModuleStyles.fieldInput}
                   />
                   <input
@@ -11908,7 +13896,58 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       style={customerModuleStyles.checkbox}
                     />
                   </div>
-                  <button type="button" onClick={handleSavePurchaseOrderOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                  {purchaseOrderOtherChargeForm.taxable && (
+                    <>
+                      <span style={customerModuleStyles.sheetSmallLabel}>Tax %</span>
+                      <input
+                        type="number"
+                        value={purchaseOrderOtherChargeForm.gstPercent}
+                        onChange={(e) => setPurchaseOrderOtherChargeForm((prev) => ({ ...prev, gstPercent: e.target.value }))}
+                        placeholder="Tax Percentage"
+                        style={customerModuleStyles.fieldInput}
+                      />
+                      {/* Tax preview */}
+                      {purchaseOrderOtherChargeForm.amount && Number(purchaseOrderOtherChargeForm.amount) > 0 &&
+                       purchaseOrderOtherChargeForm.gstPercent && Number(purchaseOrderOtherChargeForm.gstPercent) > 0 && (
+                        <div style={{
+                          background: '#F1F5F9',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          marginTop: '8px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>
+                            Tax Amount ({purchaseOrderOtherChargeForm.gstPercent}%)
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#0F172A' }}>
+                            ₹{(Number(purchaseOrderOtherChargeForm.amount) * Number(purchaseOrderOtherChargeForm.gstPercent) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                      {purchaseOrderOtherChargeForm.amount && Number(purchaseOrderOtherChargeForm.amount) > 0 &&
+                       purchaseOrderOtherChargeForm.gstPercent && Number(purchaseOrderOtherChargeForm.gstPercent) > 0 && (
+                        <div style={{
+                          background: '#ECFDF5',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          marginTop: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span style={{ fontSize: '13px', color: '#065F46' }}>
+                            Total (including tax)
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#065F46' }}>
+                            ₹{(Number(purchaseOrderOtherChargeForm.amount) * (1 + Number(purchaseOrderOtherChargeForm.gstPercent) / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <button type="button" onClick={handleSavePurchaseOrderOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingPurchaseOrderOtherChargeId ? 'Update' : 'Save'}</button>
                 </div>
               </div>
             )}
@@ -12109,11 +14148,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{customer.name}</span>
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForProformaInvoice')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
-                        <HiOutlinePencil size={14} color="#ffffff" />
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForProformaInvoice')} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
                       </button>
-                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
-                        <FiTrash2 size={14} color="#ffffff" />
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -12253,18 +14294,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{product.name}</span>
                       <FiChevronRight size={18} color="#94A3B8" />
                     </div>
-                    {product.price !== undefined && product.price !== '' && (
+                    {(product.price !== undefined && product.price !== '') || (product.gst !== undefined && product.gst !== '') ? (
                       <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
-                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                        {product.price !== undefined && product.price !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>Price: {'\u20B9'}{product.price}</span>
+                        )}
+                        {product.price !== undefined && product.price !== '' && product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailDivider}>|</span>
+                        )}
+                        {product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>GST: {product.gst}%</span>
+                        )}
                       </div>
-                    )}
-                    {product.gst !== undefined && product.gst !== '' && (
-                      <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
-                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
-                      </div>
-                    )}
+                    ) : null}
                   </button>
                 ))
               )}
@@ -12328,11 +14370,21 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       </button>
                       <button
                         type="button"
+                        onClick={() => openEditTermsModal(term, 'proformaInvoice')}
+                        aria-label="Edit term"
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#0F766E' }}
+                      >
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiEdit3 size={16} color="#0F766E" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteTerm(term, 'proformaInvoice')}
                         aria-label="Delete term"
-                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }}
                       >
-                        <FiTrash2 size={13} color="#ffffff" />
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={16} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   );
@@ -12348,7 +14400,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingTermId ? 'Edit Terms and condition' : 'Add Terms and condition'}</h3>
                   <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
                   <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Proforma Invoice</div>
                   <textarea
@@ -12357,7 +14409,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     placeholder="Terms and condition"
                     style={customerModuleStyles.descriptionTextarea}
                   />
-                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingTermId ? 'Update' : 'Add'}</button>
                 </div>
               </div>
             )}
@@ -12394,7 +14446,14 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingProformaInvoiceId ? 'Update Proforma Invoice' : 'Make Proforma Invoice'}</h1>
-              <span style={customerModuleStyles.headerIconBtn} />
+              <button
+                type="button"
+                onClick={() => { setSettingsReturnView('makeProformaInvoice'); setQuotationSubView('proformaInvoiceSettingsDetail'); }}
+                aria-label="Proforma Invoice Settings"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <HiOutlineCog6Tooth size={19} color="#ffffff" />
+              </button>
             </div>
 
             <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
@@ -12442,10 +14501,17 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 </div>
               </div>
 
-              <button type="button" onClick={openSelectCustomerForProformaInvoice} style={makeQuotationStyles.sectionCard}>
+              <button
+                type="button"
+                onClick={editingProformaInvoiceId && selectedProformaInvoiceCustomer ? undefined : openSelectCustomerForProformaInvoice}
+                disabled={!!(editingProformaInvoiceId && selectedProformaInvoiceCustomer)}
+                style={{ ...makeQuotationStyles.sectionCard, ...(editingProformaInvoiceId && selectedProformaInvoiceCustomer ? { cursor: 'default' } : {}) }}
+              >
                 <div style={makeQuotationStyles.sectionCardTopRow}>
                   <span style={makeQuotationStyles.sectionCardLabel}>BILL TO (CUSTOMER)</span>
-                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  {!(editingProformaInvoiceId && selectedProformaInvoiceCustomer) && (
+                    <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  )}
                 </div>
                 {selectedProformaInvoiceCustomer && (
                   <div style={makeQuotationStyles.sectionCardBody}>
@@ -12481,14 +14547,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                             <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => { e.stopPropagation(); removeProformaInvoiceProductLine(p.productId); }}
-                              style={makeQuotationStyles.removeIconBtn}
-                              aria-label={`Remove ${p.name}`}
-                            >
-                              <FiTrash2 size={16} color="#DC2626" />
+                            <span style={{ display: 'flex', alignItems: 'center' }}>
+                              <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                                <FiEdit3 size={14} color="#0F766E" />
+                              </span>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => { e.stopPropagation(); removeProformaInvoiceProductLine(p.productId); }}
+                                style={makeQuotationStyles.removeIconBtn}
+                                aria-label={`Remove ${p.name}`}
+                              >
+                                <FiTrash2 size={16} color="#DC2626" />
+                              </span>
                             </span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
@@ -12514,10 +14585,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 {proformaInvoiceForm.otherCharges.length > 0 && (
                   <div style={makeQuotationStyles.sectionCardBody}>
                     {proformaInvoiceForm.otherCharges.map((c) => (
-                      <div key={c.id} style={makeQuotationStyles.lineRow}>
-                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                      <div
+                        key={c.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); openEditProformaInvoiceOtherChargeModal(c); }}
+                        style={{ ...makeQuotationStyles.lineRow, cursor: 'pointer' }}
+                      >
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}{c.taxable && c.gstPercent > 0 ? ` (GST ${c.gstPercent}%)` : ''}</span>
                         <span style={makeQuotationStyles.lineRowRight}>
                           <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
                           <span
                             role="button"
                             tabIndex={0}
@@ -12544,14 +14624,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     {selectedProformaInvoiceTerms.map((term) => (
                       <div key={term.id} style={makeQuotationStyles.lineRow}>
                         <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); removeProformaInvoiceSelectedTerm(term.id); }}
-                          style={makeQuotationStyles.removeIconBtn}
-                          aria-label="Remove term"
-                        >
-                          <FiTrash2 size={16} color="#DC2626" />
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeProformaInvoiceSelectedTerm(term.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label="Remove term"
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -12567,10 +14652,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 {proformaInvoiceForm.paidInfo.length > 0 && (
                   <div style={makeQuotationStyles.sectionCardBody}>
                     {proformaInvoiceForm.paidInfo.map((p) => (
-                      <div key={p.id} style={makeQuotationStyles.lineRow}>
+                      <div
+                        key={p.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); openEditProformaPaidInfoModal(p); setQuotationSubView('proformaPaidInfoList'); }}
+                        style={{ ...makeQuotationStyles.lineRow, cursor: 'pointer' }}
+                      >
                         <span style={makeQuotationStyles.sectionCardLine}>{p.date}{p.note ? ` — ${p.note}` : ''}</span>
                         <span style={makeQuotationStyles.lineRowRight}>
                           <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{p.amount}</span>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
                           <span
                             role="button"
                             tabIndex={0}
@@ -12593,19 +14687,20 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
                 <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{proformaInvoiceAmountDue}</div>
               </div>
-              <button type="button" onClick={handleGenerateProformaInvoice} style={makeQuotationStyles.generateBtn}>{editingProformaInvoiceId ? 'Update' : 'Generate'}</button>
+              <button type="button" onClick={handleGenerateProformaInvoice} disabled={isSavingProformaInvoice} style={{ ...makeQuotationStyles.generateBtn, cursor: isSavingProformaInvoice ? 'default' : 'pointer', opacity: isSavingProformaInvoice ? 0.7 : 1 }}>{isSavingProformaInvoice ? 'Saving...' : (editingProformaInvoiceId ? 'Update' : 'Generate')}</button>
             </div>
 
             {isProformaInvoiceOtherChargeModalOpen && (
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsProformaInvoiceOtherChargeModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
-                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingProformaInvoiceOtherChargeId ? 'Edit Other Charge' : 'Other Charge Info'}</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>Charge Name</span>
                   <input
                     type="text"
                     value={proformaInvoiceOtherChargeForm.label}
                     onChange={(e) => setProformaInvoiceOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+                    placeholder="Other Charges"
                     style={customerModuleStyles.fieldInput}
                   />
                   <input
@@ -12624,7 +14719,58 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       style={customerModuleStyles.checkbox}
                     />
                   </div>
-                  <button type="button" onClick={handleSaveProformaInvoiceOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                  {proformaInvoiceOtherChargeForm.taxable && (
+                    <>
+                      <span style={customerModuleStyles.sheetSmallLabel}>Tax %</span>
+                      <input
+                        type="number"
+                        value={proformaInvoiceOtherChargeForm.gstPercent}
+                        onChange={(e) => setProformaInvoiceOtherChargeForm((prev) => ({ ...prev, gstPercent: e.target.value }))}
+                        placeholder="Tax Percentage"
+                        style={customerModuleStyles.fieldInput}
+                      />
+                      {/* Tax preview */}
+                      {proformaInvoiceOtherChargeForm.amount && Number(proformaInvoiceOtherChargeForm.amount) > 0 &&
+                       proformaInvoiceOtherChargeForm.gstPercent && Number(proformaInvoiceOtherChargeForm.gstPercent) > 0 && (
+                        <div style={{
+                          background: '#F1F5F9',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          marginTop: '8px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>
+                            Tax Amount ({proformaInvoiceOtherChargeForm.gstPercent}%)
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#0F172A' }}>
+                            ₹{(Number(proformaInvoiceOtherChargeForm.amount) * Number(proformaInvoiceOtherChargeForm.gstPercent) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                      {proformaInvoiceOtherChargeForm.amount && Number(proformaInvoiceOtherChargeForm.amount) > 0 &&
+                       proformaInvoiceOtherChargeForm.gstPercent && Number(proformaInvoiceOtherChargeForm.gstPercent) > 0 && (
+                        <div style={{
+                          background: '#ECFDF5',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          marginTop: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span style={{ fontSize: '13px', color: '#065F46' }}>
+                            Total (including tax)
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#065F46' }}>
+                            ₹{(Number(proformaInvoiceOtherChargeForm.amount) * (1 + Number(proformaInvoiceOtherChargeForm.gstPercent) / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <button type="button" onClick={handleSaveProformaInvoiceOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingProformaInvoiceOtherChargeId ? 'Update' : 'Save'}</button>
                 </div>
               </div>
             )}
@@ -12679,11 +14825,21 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       </div>
                       <button
                         type="button"
+                        onClick={(e) => { e.stopPropagation(); openEditProformaPaidInfoModal(p); }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#475569', marginLeft: '10px' }}
+                        aria-label="Edit paid info"
+                      >
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); removeProformaPaidInfoLine(p.id); }}
-                        style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626', marginLeft: '10px' }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626', marginLeft: '10px' }}
                         aria-label="Delete paid info"
                       >
-                        <FiTrash2 size={14} color="#ffffff" />
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   );
@@ -12699,7 +14855,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsProformaPaidInfoModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Paid Info</h3>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingProformaPaidInfoId ? 'Edit Paid Info' : 'Paid Info'}</h3>
                   <button
                     type="button"
                     onClick={() => { setProformaPaidInfoCalendarMonth(parseQuotationDate(proformaPaidInfoForm.date) || new Date()); setIsProformaPaidInfoDatePickerOpen(true); }}
@@ -12721,7 +14877,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     placeholder="Note"
                     style={customerModuleStyles.descriptionTextarea}
                   />
-                  <button type="button" onClick={handleSaveProformaPaidInfo} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                  <button type="button" onClick={handleSaveProformaPaidInfo} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingProformaPaidInfoId ? 'Update' : 'Save'}</button>
                 </div>
               </div>
             )}
@@ -12951,11 +15107,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                   <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>Do you want to convert this Proforma Invoice to...</h3>
 
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setShowProformaInvoiceConvertSheet(false);
-                      const newId = genId();
-                      const newInvoice = {
-                        id: newId,
+                      if (!loggedInUser?.userId) {
+                        showAlert('You need to be signed in to convert this proforma invoice.');
+                        return;
+                      }
+                      const payload = {
                         invoiceNo: getNextInvoiceNumber(),
                         date: formatQuotationDate(new Date()),
                         dueDate: currentProformaInvoice.dueDate || '', poNo: currentProformaInvoice.poNo || '', otherInfo: currentProformaInvoice.otherInfo || '',
@@ -12964,77 +15122,79 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         otherCharges: currentProformaInvoice.otherCharges || [],
                         termsIds: currentProformaInvoice.termsIds || [],
                         paidInfo: [],
-                        grandTotal: currentProformaInvoice.grandTotal,
-                        paidTotal: 0,
-                        balanceDue: currentProformaInvoice.grandTotal,
-                        status: 'Unpaid',
-                        createdAt: new Date().toISOString(),
                         customerName: currentProformaInvoice.customerName,
                         customerCompany: currentProformaInvoice.customerCompany,
-                        docSnapshot: buildDocSettingsSnapshot(invoiceSettings),
+                        customerMobile: currentProformaInvoice.customerMobile,
+                        customerEmail: currentProformaInvoice.customerEmail,
+                        customerAddressLine1: currentProformaInvoice.customerAddressLine1,
+                        customerAddressLine2: currentProformaInvoice.customerAddressLine2,
+                        customerAddressLine3: currentProformaInvoice.customerAddressLine3,
+                        customerBillingAddress: currentProformaInvoice.customerBillingAddress,
+                        customerShippingAddress: currentProformaInvoice.customerShippingAddress,
+                        docSnapshot: JSON.stringify(buildDocSettingsSnapshot(invoiceSettings)),
                       };
-                      persistInvoices([...invoices, newInvoice]);
-                      showSuccess('Converted to Invoice successfully.');
-                      setSelectedInvoiceId(newId);
-                      setQuotationSubView('invoiceDetail');
+                      try {
+                        // Convert always creates a brand-new, independently deletable Invoice
+                        // on the server; the source Proforma Invoice is left untouched.
+                        const created = await invoicesService.createInvoice(loggedInUser.userId, payload);
+                        const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+                        persistInvoices([...invoices, parsedCreated]);
+                        showSuccess('Converted to Invoice successfully.');
+                        setSelectedInvoiceId(created.id);
+                        setQuotationSubView('invoiceDetail');
+                      } catch (error) {
+                        console.error('Error converting proforma invoice to invoice:', error);
+                        showAlert('Could not convert to Invoice. Please try again.');
+                      }
                     }}
                     style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
                   >
                     Convert To Invoice
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setShowProformaInvoiceConvertSheet(false);
-                      const newId = genId();
-                      const newDeliveryNote = {
-                        id: newId,
+                      if (!loggedInUser?.userId) {
+                        showAlert('You need to be signed in to convert this proforma invoice.');
+                        return;
+                      }
+                      const payload = {
                         deliveryNoteNo: getNextDeliveryNoteNumber(),
                         date: formatQuotationDate(new Date()),
                         refNo: currentProformaInvoice.proformaInvoiceNo || '',
                         otherInfo: currentProformaInvoice.otherInfo || '',
                         customerId: currentProformaInvoice.customerId,
                         products: currentProformaInvoice.products || [],
+                        otherCharges: [],
                         termsIds: [],
-                        createdAt: new Date().toISOString(),
                         customerName: currentProformaInvoice.customerName,
                         customerCompany: currentProformaInvoice.customerCompany,
-                        docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings),
+                        customerMobile: currentProformaInvoice.customerMobile,
+                        customerEmail: currentProformaInvoice.customerEmail,
+                        customerAddressLine1: currentProformaInvoice.customerAddressLine1,
+                        customerAddressLine2: currentProformaInvoice.customerAddressLine2,
+                        customerAddressLine3: currentProformaInvoice.customerAddressLine3,
+                        customerBillingAddress: currentProformaInvoice.customerBillingAddress,
+                        customerShippingAddress: currentProformaInvoice.customerShippingAddress,
+                        docSnapshot: JSON.stringify(buildDocSettingsSnapshot(deliveryNoteSettings)),
                       };
-                      persistDeliveryNotes([...deliveryNotes, newDeliveryNote]);
-                      showSuccess('Converted to Delivery Note successfully.');
-                      setSelectedDeliveryNoteId(newId);
-                      setQuotationSubView('deliveryNoteDetail');
+                      try {
+                        // Convert always creates a brand-new, independently deletable Delivery
+                        // Note on the server; the source Proforma Invoice is left untouched.
+                        const created = await deliveryNotesService.createDeliveryNote(loggedInUser.userId, payload);
+                        const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+                        persistDeliveryNotes([...deliveryNotes, parsedCreated]);
+                        showSuccess('Converted to Delivery Note successfully.');
+                        setSelectedDeliveryNoteId(created.id);
+                        setQuotationSubView('deliveryNoteDetail');
+                      } catch (error) {
+                        console.error('Error converting proforma invoice to delivery note:', error);
+                        showAlert('Could not convert to Delivery Note. Please try again.');
+                      }
                     }}
                     style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
                   >
                     Convert To Delivery Note
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowProformaInvoiceConvertSheet(false);
-                      const newId = genId();
-                      const newReceipt = {
-                        id: newId,
-                        receiptNo: getNextReceiptNumber(),
-                        date: formatQuotationDate(new Date()),
-                        customerId: currentProformaInvoice.customerId,
-                        paymentMode: '',
-                        referenceNo: currentProformaInvoice.proformaInvoiceNo || '',
-                        paidAmount: currentProformaInvoice.grandTotal,
-                        paymentFor: `Proforma Invoice ${currentProformaInvoice.proformaInvoiceNo || ''}`.trim(),
-                        createdAt: new Date().toISOString(),
-                        customerName: currentProformaInvoice.customerName,
-                        customerCompany: currentProformaInvoice.customerCompany,
-                        docSnapshot: buildDocSettingsSnapshot(receiptSettings),
-                      };
-                      persistReceipts([...receipts, newReceipt]);
-                      showSuccess('Converted to Receipt successfully.');
-                      setSelectedReceiptId(newId);
-                      setQuotationSubView('receiptDetail');
-                    }}
-                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
-                  >
-                    Convert To Receipt
                   </button>
                   <button onClick={() => setShowProformaInvoiceConvertSheet(false)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '16px 0 0', fontSize: '17px', color: '#64748B', cursor: 'pointer', marginTop: '8px' }}>
                     Cancel
@@ -13093,11 +15253,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{customer.name}</span>
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForDeliveryNote')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
-                        <HiOutlinePencil size={14} color="#ffffff" />
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForDeliveryNote')} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
                       </button>
-                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
-                        <FiTrash2 size={14} color="#ffffff" />
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -13237,18 +15399,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{product.name}</span>
                       <FiChevronRight size={18} color="#94A3B8" />
                     </div>
-                    {product.price !== undefined && product.price !== '' && (
+                    {(product.price !== undefined && product.price !== '') || (product.gst !== undefined && product.gst !== '') ? (
                       <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
-                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                        {product.price !== undefined && product.price !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>Price: {'\u20B9'}{product.price}</span>
+                        )}
+                        {product.price !== undefined && product.price !== '' && product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailDivider}>|</span>
+                        )}
+                        {product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>GST: {product.gst}%</span>
+                        )}
                       </div>
-                    )}
-                    {product.gst !== undefined && product.gst !== '' && (
-                      <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
-                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
-                      </div>
-                    )}
+                    ) : null}
                   </button>
                 ))
               )}
@@ -13312,11 +15475,21 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       </button>
                       <button
                         type="button"
+                        onClick={() => openEditTermsModal(term, 'deliveryNote')}
+                        aria-label="Edit term"
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#0F766E' }}
+                      >
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiEdit3 size={16} color="#0F766E" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteTerm(term, 'deliveryNote')}
                         aria-label="Delete term"
-                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }}
                       >
-                        <FiTrash2 size={13} color="#ffffff" />
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={16} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   );
@@ -13332,7 +15505,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingTermId ? 'Edit Terms and condition' : 'Add Terms and condition'}</h3>
                   <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
                   <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Delivery Note</div>
                   <textarea
@@ -13341,7 +15514,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     placeholder="Terms and condition"
                     style={customerModuleStyles.descriptionTextarea}
                   />
-                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingTermId ? 'Update' : 'Add'}</button>
                 </div>
               </div>
             )}
@@ -13378,7 +15551,14 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingDeliveryNoteId ? 'Update Delivery Note' : 'Make Delivery Note'}</h1>
-              <span style={customerModuleStyles.headerIconBtn} />
+              <button
+                type="button"
+                onClick={() => { setSettingsReturnView('makeDeliveryNote'); setQuotationSubView('deliveryNoteSettingsDetail'); }}
+                aria-label="Delivery Note Settings"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <HiOutlineCog6Tooth size={19} color="#ffffff" />
+              </button>
             </div>
 
             <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
@@ -13416,10 +15596,17 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 </div>
               </div>
 
-              <button type="button" onClick={openSelectCustomerForDeliveryNote} style={makeQuotationStyles.sectionCard}>
+              <button
+                type="button"
+                onClick={editingDeliveryNoteId && selectedDeliveryNoteCustomer ? undefined : openSelectCustomerForDeliveryNote}
+                disabled={!!(editingDeliveryNoteId && selectedDeliveryNoteCustomer)}
+                style={{ ...makeQuotationStyles.sectionCard, ...(editingDeliveryNoteId && selectedDeliveryNoteCustomer ? { cursor: 'default' } : {}) }}
+              >
                 <div style={makeQuotationStyles.sectionCardTopRow}>
                   <span style={makeQuotationStyles.sectionCardLabel}>TO (CUSTOMER)</span>
-                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  {!(editingDeliveryNoteId && selectedDeliveryNoteCustomer) && (
+                    <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  )}
                 </div>
                 {selectedDeliveryNoteCustomer && (
                   <div style={makeQuotationStyles.sectionCardBody}>
@@ -13450,14 +15637,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         style={{ background: '#ffffff', borderRadius: '14px', padding: '12px 14px', cursor: 'pointer', border: '1px solid #E9ECF2', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                       >
                         <span style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>{p.name} x{p.qty}{p.unit ? ` ${p.unit}` : ''}</span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); removeDeliveryNoteProductLine(p.productId); }}
-                          style={makeQuotationStyles.removeIconBtn}
-                          aria-label={`Remove ${p.name}`}
-                        >
-                          <FiTrash2 size={16} color="#DC2626" />
+                        <span style={{ display: 'flex', alignItems: 'center' }}>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeDeliveryNoteProductLine(p.productId); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label={`Remove ${p.name}`}
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -13475,14 +15667,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     {selectedDeliveryNoteTerms.map((term) => (
                       <div key={term.id} style={makeQuotationStyles.lineRow}>
                         <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); removeDeliveryNoteSelectedTerm(term.id); }}
-                          style={makeQuotationStyles.removeIconBtn}
-                          aria-label="Remove term"
-                        >
-                          <FiTrash2 size={16} color="#DC2626" />
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeDeliveryNoteSelectedTerm(term.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label="Remove term"
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -13492,7 +15689,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
             </div>
 
             <div style={{ ...makeQuotationStyles.bottomBar, justifyContent: 'flex-end' }}>
-              <button type="button" onClick={handleGenerateDeliveryNote} style={makeQuotationStyles.generateBtn}>{editingDeliveryNoteId ? 'Update' : 'Generate'}</button>
+              <button type="button" onClick={handleGenerateDeliveryNote} disabled={isSavingDeliveryNote} style={{ ...makeQuotationStyles.generateBtn, cursor: isSavingDeliveryNote ? 'default' : 'pointer', opacity: isSavingDeliveryNote ? 0.7 : 1 }}>{isSavingDeliveryNote ? 'Saving...' : (editingDeliveryNoteId ? 'Update' : 'Generate')}</button>
             </div>
 
             <AppPopup
@@ -13692,11 +15889,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{customer.name}</span>
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForInvoice')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
-                        <HiOutlinePencil size={14} color="#ffffff" />
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForInvoice')} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
                       </button>
-                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
-                        <FiTrash2 size={14} color="#ffffff" />
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -13836,18 +16035,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{product.name}</span>
                       <FiChevronRight size={18} color="#94A3B8" />
                     </div>
-                    {product.price !== undefined && product.price !== '' && (
+                    {(product.price !== undefined && product.price !== '') || (product.gst !== undefined && product.gst !== '') ? (
                       <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>Price</span>
-                        <span style={customerModuleStyles.productDetailValue}>{'\u20B9'}{product.price}</span>
+                        {product.price !== undefined && product.price !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>Price: {'\u20B9'}{product.price}</span>
+                        )}
+                        {product.price !== undefined && product.price !== '' && product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailDivider}>|</span>
+                        )}
+                        {product.gst !== undefined && product.gst !== '' && (
+                          <span style={customerModuleStyles.productDetailText}>GST: {product.gst}%</span>
+                        )}
                       </div>
-                    )}
-                    {product.gst !== undefined && product.gst !== '' && (
-                      <div style={customerModuleStyles.productDetailRow}>
-                        <span style={customerModuleStyles.productDetailLabel}>GST</span>
-                        <span style={customerModuleStyles.productDetailValue}>{product.gst}%</span>
-                      </div>
-                    )}
+                    ) : null}
                   </button>
                 ))
               )}
@@ -13911,11 +16111,21 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       </button>
                       <button
                         type="button"
+                        onClick={() => openEditTermsModal(term, 'invoice')}
+                        aria-label="Edit term"
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#0F766E' }}
+                      >
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiEdit3 size={16} color="#0F766E" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDeleteTerm(term, 'invoice')}
                         aria-label="Delete term"
-                        style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#DC2626', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }}
                       >
-                        <FiTrash2 size={13} color="#ffffff" />
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={16} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   );
@@ -13931,7 +16141,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsAddTermsModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Add Terms and condition</h3>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingTermId ? 'Edit Terms and condition' : 'Add Terms and condition'}</h3>
                   <span style={customerModuleStyles.sheetSmallLabel}>TYPE</span>
                   <div style={{ ...customerModuleStyles.fieldInput, color: '#0F172A' }}>Invoice</div>
                   <textarea
@@ -13940,7 +16150,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     placeholder="Terms and condition"
                     style={customerModuleStyles.descriptionTextarea}
                   />
-                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Add</button>
+                  <button type="button" onClick={handleAddTerm} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingTermId ? 'Update' : 'Add'}</button>
                 </div>
               </div>
             )}
@@ -13995,11 +16205,21 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       </div>
                       <button
                         type="button"
+                        onClick={(e) => { e.stopPropagation(); openEditPaidInfoModal(p); }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#475569', marginLeft: '10px' }}
+                        aria-label="Edit paid info"
+                      >
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); removePaidInfoLine(p.id); }}
-                        style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626', marginLeft: '10px' }}
+                        style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626', marginLeft: '10px' }}
                         aria-label="Delete paid info"
                       >
-                        <FiTrash2 size={14} color="#ffffff" />
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   );
@@ -14015,7 +16235,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsPaidInfoModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Paid Info</h3>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingPaidInfoId ? 'Edit Paid Info' : 'Paid Info'}</h3>
                   <button
                     type="button"
                     onClick={() => { setPaidInfoCalendarMonth(parseQuotationDate(paidInfoForm.date) || new Date()); setIsPaidInfoDatePickerOpen(true); }}
@@ -14037,7 +16257,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     placeholder="Note"
                     style={customerModuleStyles.descriptionTextarea}
                   />
-                  <button type="button" onClick={handleSavePaidInfo} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                  <button type="button" onClick={handleSavePaidInfo} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingPaidInfoId ? 'Update' : 'Save'}</button>
                 </div>
               </div>
             )}
@@ -14140,7 +16360,14 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingInvoiceId ? 'Update Invoice' : 'Make Invoice'}</h1>
-              <span style={customerModuleStyles.headerIconBtn} />
+              <button
+                type="button"
+                onClick={() => { setSettingsReturnView('makeInvoice'); setQuotationSubView('invoiceSettingsDetail'); }}
+                aria-label="Invoice Settings"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <HiOutlineCog6Tooth size={19} color="#ffffff" />
+              </button>
             </div>
 
             <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
@@ -14188,10 +16415,17 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 </div>
               </div>
 
-              <button type="button" onClick={openSelectCustomerForInvoice} style={makeQuotationStyles.sectionCard}>
+              <button
+                type="button"
+                onClick={editingInvoiceId && selectedInvoiceCustomer ? undefined : openSelectCustomerForInvoice}
+                disabled={!!(editingInvoiceId && selectedInvoiceCustomer)}
+                style={{ ...makeQuotationStyles.sectionCard, ...(editingInvoiceId && selectedInvoiceCustomer ? { cursor: 'default' } : {}) }}
+              >
                 <div style={makeQuotationStyles.sectionCardTopRow}>
                   <span style={makeQuotationStyles.sectionCardLabel}>BILL TO (CUSTOMER)</span>
-                  <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  {!(editingInvoiceId && selectedInvoiceCustomer) && (
+                    <span style={makeQuotationStyles.plusBadge}><FiPlus size={17} color="#ffffff" /></span>
+                  )}
                 </div>
                 {selectedInvoiceCustomer && (
                   <div style={makeQuotationStyles.sectionCardBody}>
@@ -14227,14 +16461,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                             <span style={{ fontSize: '15px', fontWeight: '700', color: '#0F172A' }}>{p.name}</span>
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              onClick={(e) => { e.stopPropagation(); removeInvoiceProductLine(p.productId); }}
-                              style={makeQuotationStyles.removeIconBtn}
-                              aria-label={`Remove ${p.name}`}
-                            >
-                              <FiTrash2 size={16} color="#DC2626" />
+                            <span style={{ display: 'flex', alignItems: 'center' }}>
+                              <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                                <FiEdit3 size={14} color="#0F766E" />
+                              </span>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => { e.stopPropagation(); removeInvoiceProductLine(p.productId); }}
+                                style={makeQuotationStyles.removeIconBtn}
+                                aria-label={`Remove ${p.name}`}
+                              >
+                                <FiTrash2 size={16} color="#DC2626" />
+                              </span>
                             </span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
@@ -14260,10 +16499,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 {invoiceForm.otherCharges.length > 0 && (
                   <div style={makeQuotationStyles.sectionCardBody}>
                     {invoiceForm.otherCharges.map((c) => (
-                      <div key={c.id} style={makeQuotationStyles.lineRow}>
-                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}</span>
+                      <div
+                        key={c.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); openEditInvoiceOtherChargeModal(c); }}
+                        style={{ ...makeQuotationStyles.lineRow, cursor: 'pointer' }}
+                      >
+                        <span style={makeQuotationStyles.sectionCardLine}>{c.label}{c.taxable && c.gstPercent > 0 ? ` (GST ${c.gstPercent}%)` : ''}</span>
                         <span style={makeQuotationStyles.lineRowRight}>
                           <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{c.amount}</span>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
                           <span
                             role="button"
                             tabIndex={0}
@@ -14290,14 +16538,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     {selectedInvoiceTerms.map((term) => (
                       <div key={term.id} style={makeQuotationStyles.lineRow}>
                         <p style={{ ...makeQuotationStyles.sectionCardSubLine, flex: 1, marginRight: '10px' }}>{term.text}</p>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => { e.stopPropagation(); removeInvoiceSelectedTerm(term.id); }}
-                          style={makeQuotationStyles.removeIconBtn}
-                          aria-label="Remove term"
-                        >
-                          <FiTrash2 size={16} color="#DC2626" />
+                        <span style={makeQuotationStyles.lineRowRight}>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(e) => { e.stopPropagation(); removeInvoiceSelectedTerm(term.id); }}
+                            style={makeQuotationStyles.removeIconBtn}
+                            aria-label="Remove term"
+                          >
+                            <FiTrash2 size={16} color="#DC2626" />
+                          </span>
                         </span>
                       </div>
                     ))}
@@ -14313,10 +16566,19 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 {invoiceForm.paidInfo.length > 0 && (
                   <div style={makeQuotationStyles.sectionCardBody}>
                     {invoiceForm.paidInfo.map((p) => (
-                      <div key={p.id} style={makeQuotationStyles.lineRow}>
+                      <div
+                        key={p.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); openEditPaidInfoModal(p); setQuotationSubView('paidInfoList'); }}
+                        style={{ ...makeQuotationStyles.lineRow, cursor: 'pointer' }}
+                      >
                         <span style={makeQuotationStyles.sectionCardLine}>{p.date}{p.note ? ` — ${p.note}` : ''}</span>
                         <span style={makeQuotationStyles.lineRowRight}>
                           <span style={makeQuotationStyles.sectionCardLine}>{'\u20B9'}{p.amount}</span>
+                          <span style={makeQuotationStyles.editIconBtn} aria-hidden="true">
+                            <FiEdit3 size={14} color="#0F766E" />
+                          </span>
                           <span
                             role="button"
                             tabIndex={0}
@@ -14339,19 +16601,20 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <span style={makeQuotationStyles.bottomBarLabel}>Amount Due</span>
                 <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{invoiceAmountDue}</div>
               </div>
-              <button type="button" onClick={handleGenerateInvoice} style={makeQuotationStyles.generateBtn}>{editingInvoiceId ? 'Update' : 'Generate'}</button>
+              <button type="button" onClick={handleGenerateInvoice} disabled={isSavingInvoice} style={{ ...makeQuotationStyles.generateBtn, cursor: isSavingInvoice ? 'default' : 'pointer', opacity: isSavingInvoice ? 0.7 : 1 }}>{isSavingInvoice ? 'Saving...' : (editingInvoiceId ? 'Update' : 'Generate')}</button>
             </div>
 
             {isInvoiceOtherChargeModalOpen && (
               <div style={customerModuleStyles.modalOverlay} onClick={() => setIsInvoiceOtherChargeModalOpen(false)}>
                 <div style={customerModuleStyles.bottomSheet} onClick={(e) => e.stopPropagation()}>
                   <div style={customerModuleStyles.sheetHandle} />
-                  <h3 style={customerModuleStyles.sheetTitle}>Other Charge Info</h3>
-                  <span style={customerModuleStyles.sheetSmallLabel}>Other Charge Label</span>
+                  <h3 style={customerModuleStyles.sheetTitle}>{editingInvoiceOtherChargeId ? 'Edit Other Charge' : 'Other Charge Info'}</h3>
+                  <span style={customerModuleStyles.sheetSmallLabel}>Charge Name</span>
                   <input
                     type="text"
                     value={invoiceOtherChargeForm.label}
                     onChange={(e) => setInvoiceOtherChargeForm((prev) => ({ ...prev, label: e.target.value }))}
+                    placeholder="Other Charges"
                     style={customerModuleStyles.fieldInput}
                   />
                   <input
@@ -14370,7 +16633,58 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       style={customerModuleStyles.checkbox}
                     />
                   </div>
-                  <button type="button" onClick={handleSaveInvoiceOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>Save</button>
+                  {invoiceOtherChargeForm.taxable && (
+                    <>
+                      <span style={customerModuleStyles.sheetSmallLabel}>Tax %</span>
+                      <input
+                        type="number"
+                        value={invoiceOtherChargeForm.gstPercent}
+                        onChange={(e) => setInvoiceOtherChargeForm((prev) => ({ ...prev, gstPercent: e.target.value }))}
+                        placeholder="Tax Percentage"
+                        style={customerModuleStyles.fieldInput}
+                      />
+                      {/* Tax preview */}
+                      {invoiceOtherChargeForm.amount && Number(invoiceOtherChargeForm.amount) > 0 &&
+                       invoiceOtherChargeForm.gstPercent && Number(invoiceOtherChargeForm.gstPercent) > 0 && (
+                        <div style={{
+                          background: '#F1F5F9',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          marginTop: '8px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span style={{ fontSize: '13px', color: '#475569' }}>
+                            Tax Amount ({invoiceOtherChargeForm.gstPercent}%)
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#0F172A' }}>
+                            ₹{(Number(invoiceOtherChargeForm.amount) * Number(invoiceOtherChargeForm.gstPercent) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                      {invoiceOtherChargeForm.amount && Number(invoiceOtherChargeForm.amount) > 0 &&
+                       invoiceOtherChargeForm.gstPercent && Number(invoiceOtherChargeForm.gstPercent) > 0 && (
+                        <div style={{
+                          background: '#ECFDF5',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          marginTop: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <span style={{ fontSize: '13px', color: '#065F46' }}>
+                            Total (including tax)
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '700', color: '#065F46' }}>
+                            ₹{(Number(invoiceOtherChargeForm.amount) * (1 + Number(invoiceOtherChargeForm.gstPercent) / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <button type="button" onClick={handleSaveInvoiceOtherCharge} style={{ ...customerModuleStyles.addBtn, marginTop: '14px' }}>{editingInvoiceOtherChargeId ? 'Update' : 'Save'}</button>
                 </div>
               </div>
             )}
@@ -14549,58 +16863,49 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                   <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#0F172A', margin: '0 0 20px' }}>Do you want to convert this Invoice to...</h3>
 
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setShowInvoiceConvertSheet(false);
-                      const newId = genId();
-                      const newDeliveryNote = {
-                        id: newId,
+                      if (!loggedInUser?.userId) {
+                        showAlert('You need to be signed in to convert this invoice.');
+                        return;
+                      }
+                      const payload = {
                         deliveryNoteNo: getNextDeliveryNoteNumber(),
                         date: formatQuotationDate(new Date()),
                         refNo: currentInvoice.invoiceNo || '',
                         otherInfo: currentInvoice.otherInfo || '',
                         customerId: currentInvoice.customerId,
                         products: currentInvoice.products || [],
+                        otherCharges: [],
                         termsIds: [],
-                        createdAt: new Date().toISOString(),
                         customerName: currentInvoice.customerName,
                         customerCompany: currentInvoice.customerCompany,
-                        docSnapshot: buildDocSettingsSnapshot(deliveryNoteSettings),
+                        customerMobile: currentInvoice.customerMobile,
+                        customerEmail: currentInvoice.customerEmail,
+                        customerAddressLine1: currentInvoice.customerAddressLine1,
+                        customerAddressLine2: currentInvoice.customerAddressLine2,
+                        customerAddressLine3: currentInvoice.customerAddressLine3,
+                        customerBillingAddress: currentInvoice.customerBillingAddress,
+                        customerShippingAddress: currentInvoice.customerShippingAddress,
+                        docSnapshot: JSON.stringify(buildDocSettingsSnapshot(deliveryNoteSettings)),
                       };
-                      persistDeliveryNotes([...deliveryNotes, newDeliveryNote]);
-                      showSuccess('Converted to Delivery Note successfully.');
-                      setSelectedDeliveryNoteId(newId);
-                      setQuotationSubView('deliveryNoteDetail');
+                      try {
+                        // Convert always creates a brand-new, independently deletable Delivery
+                        // Note on the server; the source Invoice is left untouched.
+                        const created = await deliveryNotesService.createDeliveryNote(loggedInUser.userId, payload);
+                        const parsedCreated = { ...created, docSnapshot: created.docSnapshot ? JSON.parse(created.docSnapshot) : null };
+                        persistDeliveryNotes([...deliveryNotes, parsedCreated]);
+                        showSuccess('Converted to Delivery Note successfully.');
+                        setSelectedDeliveryNoteId(created.id);
+                        setQuotationSubView('deliveryNoteDetail');
+                      } catch (error) {
+                        console.error('Error converting invoice to delivery note:', error);
+                        showAlert('Could not convert to Delivery Note. Please try again.');
+                      }
                     }}
                     style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
                   >
                     Convert To Delivery Note
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowInvoiceConvertSheet(false);
-                      const newId = genId();
-                      const newReceipt = {
-                        id: newId,
-                        receiptNo: getNextReceiptNumber(),
-                        date: formatQuotationDate(new Date()),
-                        customerId: currentInvoice.customerId,
-                        paymentMode: '',
-                        referenceNo: currentInvoice.invoiceNo || '',
-                        paidAmount: currentInvoice.grandTotal,
-                        paymentFor: `Invoice ${currentInvoice.invoiceNo || ''}`.trim(),
-                        createdAt: new Date().toISOString(),
-                        customerName: currentInvoice.customerName,
-                        customerCompany: currentInvoice.customerCompany,
-                        docSnapshot: buildDocSettingsSnapshot(receiptSettings),
-                      };
-                      persistReceipts([...receipts, newReceipt]);
-                      showSuccess('Converted to Receipt successfully.');
-                      setSelectedReceiptId(newId);
-                      setQuotationSubView('receiptDetail');
-                    }}
-                    style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
-                  >
-                    Convert To Receipt
                   </button>
                   <button onClick={() => setShowInvoiceConvertSheet(false)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '16px 0 0', fontSize: '17px', color: '#64748B', cursor: 'pointer', marginTop: '8px' }}>
                     Cancel
@@ -14659,11 +16964,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       <span style={customerModuleStyles.customerName}>{customer.name}</span>
                     </button>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForReceipt')} style={customerModuleStyles.editBadgeBtn} aria-label="Edit customer">
-                        <HiOutlinePencil size={14} color="#ffffff" />
+                      <button type="button" onClick={() => openEditCustomer(customer, 'selectCustomerForReceipt')} style={{ ...customerModuleStyles.rowActionBtn, color: '#475569' }} aria-label="Edit customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><HiOutlinePencil size={18} color="#475569" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Edit</span>
                       </button>
-                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.editBadgeBtn, background: '#DC2626' }} aria-label="Delete customer">
-                        <FiTrash2 size={14} color="#ffffff" />
+                      <button type="button" onClick={() => handleDeleteCustomer(customer)} style={{ ...customerModuleStyles.rowActionBtn, color: '#DC2626' }} aria-label="Delete customer">
+                        <span style={customerModuleStyles.rowActionIconWrap}><FiTrash2 size={18} color="#DC2626" /></span>
+                        <span style={customerModuleStyles.rowActionLabel}>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -14777,7 +17084,14 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingReceiptId ? 'Update Receipt' : 'Make Receipt'}</h1>
-              <span style={customerModuleStyles.headerIconBtn} />
+              <button
+                type="button"
+                onClick={() => { setSettingsReturnView('makeReceipt'); setQuotationSubView('receiptSettingsDetail'); }}
+                aria-label="Receipt Settings"
+                style={customerModuleStyles.headerIconBtn}
+              >
+                <HiOutlineCog6Tooth size={19} color="#ffffff" />
+              </button>
             </div>
 
             <div style={{ ...customerModuleStyles.body, paddingBottom: '110px' }}>
@@ -14845,7 +17159,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 <span style={makeQuotationStyles.bottomBarLabel}>Paid Amount</span>
                 <div style={makeQuotationStyles.bottomBarAmount}>{'\u20B9'}{receiptPaidAmount}</div>
               </div>
-              <button type="button" onClick={handleGenerateReceipt} style={makeQuotationStyles.generateBtn}>{editingReceiptId ? 'Update' : 'Generate'}</button>
+              <button type="button" onClick={handleGenerateReceipt} disabled={isSavingReceipt} style={{ ...makeQuotationStyles.generateBtn, cursor: isSavingReceipt ? 'default' : 'pointer', opacity: isSavingReceipt ? 0.7 : 1 }}>{isSavingReceipt ? 'Saving...' : (editingReceiptId ? 'Update' : 'Generate')}</button>
             </div>
 
             <AppPopup
@@ -15146,14 +17460,9 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                 {loggedInUser?.fullName ? loggedInUser.fullName.replace(/[^a-zA-Z0-9 ]/g, '') : 'Guest'}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => setQuotationSubView('settingsMenu')}
-              aria-label="Open settings"
-              style={{ background: 'rgba(255,255,255,0.16)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, padding: 0 }}
-            >
-              <HiOutlineCog6Tooth size={18} color="#ffffff" />
-            </button>
+            {/* Settings moved to each individual document's own header (Make Quotation, Make
+                Invoice, etc.) - this spacer just keeps the profile row centered/balanced. */}
+            <span style={{ width: '32px', height: '32px', flexShrink: 0 }} />
           </div>
 
           <div style={quotationModuleStyles.bodyRow}>
@@ -15211,7 +17520,13 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
           const currentProject = projects.find(p => p.id === activeSiteViewId);
           if (!currentProject) return null;
 
-          const workersMatchingQuery = (currentProject.employees || []).filter(w => w.name.toLowerCase().includes(employeeSearchQuery.toLowerCase()));
+          // Deactivated projects have no Active/Deactive toggle - every employee under a
+          // deactivated project is treated as deactivated along with it, regardless of
+          // their individual isActive flag, so the status filter is skipped entirely here.
+          const isCurrentProjectDeactivated = currentProject.isActive === false;
+          const workersMatchingQuery = (currentProject.employees || [])
+            .filter(w => (isCurrentProjectDeactivated ? true : (employeeStatusFilter === 'inactive' ? w.isActive === false : w.isActive !== false)))
+            .filter(w => w.name.toLowerCase().includes(employeeSearchQuery.toLowerCase()));
           const sortedWorkers = [...workersMatchingQuery].sort((a, b) => {
             if (workerSortMode === 'az') return a.name.localeCompare(b.name);
             if (workerSortMode === 'za') return b.name.localeCompare(a.name);
@@ -15227,11 +17542,18 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     <button onClick={() => setActiveSiteViewId(null)} style={{ background: 'none', border: 'none', fontSize: '22px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
                     <div>
                       <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{currentProject.name}</h2>
+                      {currentProject.isActive === false && (
+                        <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: '600' }}>{t('deactivated')}</span>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '14px', alignItems: 'center', color: '#64748B' }}>
-                    <span style={{ cursor: 'pointer', fontSize: '18px' }} onClick={() => handleOpenEditProjectModal(currentProject)}>&#9999;&#65039;</span>
-                    <span style={{ cursor: 'pointer', fontSize: '18px' }} onClick={() => handleDeleteProject(currentProject.id)}>&#128465;&#65039;</span>
+                    {currentProject.isActive !== false && (
+                      <span style={{ cursor: 'pointer', fontSize: '18px' }} onClick={() => handleOpenEditProjectModal(currentProject)}>&#9999;&#65039;</span>
+                    )}
+                    {currentProject.isActive !== false && (
+                      <span style={{ cursor: 'pointer', fontSize: '18px' }} onClick={() => handleDeleteProject(currentProject.id)}>&#128465;&#65039;</span>
+                    )}
                   </div>
                 </div>
                 {isEditProjectModalOpen && (
@@ -15269,7 +17591,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     : null;
 
                   const eligibilityFilterDate = currentDisplayedDate || latestSelectedDate;
-                  const sortedByName = [...(currentProject2.employees || [])].sort((a, b) => a.name.localeCompare(b.name));
+                  const sortedByName = [...(currentProject2.employees || [])].filter(w => w.isActive !== false).sort((a, b) => a.name.localeCompare(b.name));
                   const filteredAttendanceEmployees = sortedByName
                     .filter(worker => worker.name.toLowerCase().includes(attendanceWorkerSearchQuery.toLowerCase()))
                     .filter(worker => eligibilityFilterDate >= (worker.joiningDate || '2026-07-01'));
@@ -15369,28 +17691,29 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                       )}
 
                       <div style={{ padding: '10px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', flexShrink: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>{t('bulkMark')}</span>
-                          <button
-                            onClick={() => handleBulkAttendanceChange('P')}
-                            disabled={!currentDisplayedDate}
-                            style={{
-                              backgroundColor: currentDisplayedDate ? '#10B981' : '#E2E8F0',
-                              color: currentDisplayedDate ? '#ffffff' : '#94A3B8',
-                              border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
-                              cursor: currentDisplayedDate ? 'pointer' : 'not-allowed',
-                            }}
-                          >{t('allPresent')}</button>
-                          <button
-                            onClick={() => handleBulkAttendanceChange('A')}
-                            disabled={!currentDisplayedDate}
-                            style={{
-                              backgroundColor: currentDisplayedDate ? '#EF4444' : '#E2E8F0',
-                              color: currentDisplayedDate ? '#ffffff' : '#94A3B8',
-                              border: 'none', padding: '7px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
-                              cursor: currentDisplayedDate ? 'pointer' : 'not-allowed',
-                            }}
-                          >{t('allAbsent')}</button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' }}>
+                          <span style={{ fontSize: '12.5px', fontWeight: '600', color: '#475569', flexShrink: 0, whiteSpace: 'nowrap' }}>{t('bulkMark')}</span>
+                          {[
+                            { key: 'P', short: 'P', label: t('presentLabel'), color: '#16A34A' },
+                            { key: 'HD', short: '1/2', label: t('totalHalfDay'), color: '#64748B' },
+                            { key: 'A', short: 'A', label: t('totalAbsent'), color: '#DC2626' },
+                          ].map((opt) => (
+                            <button
+                              key={opt.key}
+                              onClick={() => handleBulkAttendanceChange(opt.key)}
+                              disabled={!currentDisplayedDate}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 1, minWidth: 0, whiteSpace: 'nowrap',
+                                backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '999px',
+                                padding: '4px 7px',
+                                cursor: currentDisplayedDate ? 'pointer' : 'not-allowed',
+                                opacity: currentDisplayedDate ? 1 : 0.5,
+                              }}
+                            >
+                              <span style={{ fontSize: '10.5px', fontWeight: '700', color: opt.color }}>{opt.short}</span>
+                              <span style={{ fontSize: '10.5px', fontWeight: '500', color: opt.color }}>{opt.label}</span>
+                            </button>
+                          ))}
                         </div>
                       </div>
 
@@ -15418,43 +17741,44 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                               const effectiveWage = getEffectiveWage(worker, currentDisplayedDate || latestSelectedDate);
                               const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
                               const avatarColors = getEmployeeAvatarColors(worker.name);
+                              const wageFieldValue = pendingWageByDate[currentDisplayedDate]?.[worker.id] ?? String(calculateNetDaily(effectiveWage, record.status));
+                              const isSavingThisDayWage = savingDayWageKey === `${worker.id}|${currentDisplayedDate}`;
 
                               return (
                                 <div key={worker.id} style={{ backgroundColor: '#ffffff', borderRadius: '12px', padding: '10px', border: '1px solid #F1F5F9' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', backgroundColor: avatarColors.bg, color: avatarColors.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '700', flexShrink: 0, boxShadow: 'none', cursor: 'default' }}>{initials}</div>
-                                      <div style={{ minWidth: 0 }}>
-                                        <h5 style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{worker.name}</h5>
-                                        <p style={{ margin: '1px 0 0 0', fontSize: '11px', color: '#64748B' }}>{`\u20B9${effectiveWage}/day`}</p>
-                                      </div>
-                                    </div>
-                                    <div style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                                      <button
-                                        onClick={() => handleOpenEditWage(worker)}
-                                        style={{ backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', padding: '6px 12px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap', boxShadow: '0 2px 6px rgba(11, 60, 155, 0.35)' }}
-                                      >
-                                        &#9998; {t('editWage')}
-                                      </button>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                                      <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: avatarColors.bg, color: avatarColors.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', flexShrink: 0, boxShadow: 'none', cursor: 'default' }}>{initials}</div>
+                                      <h5 style={{ margin: 0, fontSize: '12.5px', fontWeight: '600', color: '#1E293B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{worker.name}</h5>
                                     </div>
                                     <button
-                                      onClick={() => { setTrackerWorkerId(worker.id); setTrackerCalendarMonth(new Date()); }}
-                                      style={{ backgroundColor: '#FACC15', color: '#713F12', border: 'none', padding: '5px 10px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}
+                                      onClick={() => handleOpenEditWage(worker)}
+                                      style={{ backgroundColor: '#EEF2FF', color: '#4338CA', border: 'none', padding: '5px 8px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}
                                     >
-                                      {t('musterCard')} &rsaquo;
+                                      New Wages
+                                      <FaChevronRight size={9} style={{ flexShrink: 0 }} />
+                                    </button>
+                                    <button
+                                      onClick={() => { setTrackerWorkerId(worker.id); setTrackerCalendarMonth(new Date()); }}
+                                      style={{ backgroundColor: '#FACC15', color: '#713F12', border: 'none', padding: '5px 8px', borderRadius: '16px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                    >
+                                      Muster Card
+                                      <FaChevronRight size={9} style={{ flexShrink: 0 }} />
                                     </button>
                                   </div>
 
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '8px' }}>
-                                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                                      {[{ key: 'P', label: t('presentLabel'), color: '#10B981' }, { key: 'HD', label: t('attendanceHalfLabel'), color: '#F59E0B' }, { key: 'A', label: t('attendanceAbsentLabel'), color: '#EF4444' }].map((opt) => {
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px' }}>
+                                    <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                                      {[{ key: 'P', label: 'P', title: 'Present', color: '#16A34A' }, { key: 'HD', label: '1/2', title: 'Half Day', color: '#64748B' }, { key: 'A', label: 'A', title: 'Absent', color: '#DC2626' }].map((opt) => {
                                         const isActive = record.status === opt.key;
                                         return (
                                           <button
                                             key={opt.key}
+                                            title={opt.title}
+                                            aria-label={opt.title}
                                             onClick={() => handleIndividualAttendanceChange(worker.id, opt.key)}
                                             style={{
-                                              border: isActive ? `1.5px solid ${opt.color}` : '1px solid #E2E8F0', padding: '6px 10px', borderRadius: '7px', fontSize: '11px', fontWeight: '700',
+                                              border: isActive ? `1.5px solid ${opt.color}` : '1px solid #E2E8F0', padding: '5px 7px', borderRadius: '7px', fontSize: '11px', fontWeight: '700',
                                               backgroundColor: isActive ? `${opt.color}1A` : '#F8FAFC',
                                               color: isActive ? opt.color : '#94A3B8',
                                               cursor: 'pointer',
@@ -15467,7 +17791,29 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                                       })}
                                     </div>
                                     <div style={{
-                                      display: 'flex', alignItems: 'center', gap: '3px', flex: 1, minWidth: '64px', maxWidth: '92px',
+                                      display: 'flex', alignItems: 'center', gap: '3px', flex: 1, minWidth: 0,
+                                      border: currentDisplayedDate ? '1.5px solid #FBBF24' : '1.5px solid #E2E8F0',
+                                      borderRadius: '7px', padding: '0 6px',
+                                      backgroundColor: currentDisplayedDate ? '#FFFBEB' : '#F1F5F9',
+                                      boxShadow: currentDisplayedDate ? '0 0 0 1px rgba(251, 191, 36, 0.15)' : 'none',
+                                      boxSizing: 'border-box',
+                                    }}>
+                                      <span style={{ fontSize: '11px', color: currentDisplayedDate ? '#B45309' : '#94A3B8', fontWeight: '700', flexShrink: 0 }}>&#8377;</span>
+                                      <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        readOnly={!currentDisplayedDate || isSavingThisDayWage}
+                                        value={wageFieldValue}
+                                        onFocus={handleAdvanceInputFocus}
+                                        onClick={handleAdvanceInputFocus}
+                                        onChange={(e) => handleDayWageInputChange(worker.id, e.target.value)}
+                                        onBlur={() => handleDayWageInputBlur(worker, record.status)}
+                                        style={{ width: '100%', minWidth: 0, padding: '6px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontSize: '11px', fontWeight: '700', color: currentDisplayedDate ? '#92400E' : '#94A3B8', boxSizing: 'border-box', cursor: currentDisplayedDate ? 'text' : 'pointer' }}
+                                      />
+                                    </div>
+                                    <div style={{
+                                      display: 'flex', alignItems: 'center', gap: '3px', flex: 1, minWidth: 0,
                                       border: currentDisplayedDate ? '1.5px solid #FBBF24' : '1.5px solid #E2E8F0',
                                       borderRadius: '7px', padding: '0 6px',
                                       backgroundColor: currentDisplayedDate ? '#FFFBEB' : '#F1F5F9',
@@ -15807,6 +18153,27 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                         if (!targetWorker) return null;
                         const editWageJoinDateStr = targetWorker.joiningDate || '2026-07-01';
                         const laterOfDates = (a, b) => (a && b) ? (a > b ? a : b) : (a || b);
+                        // Muster-style status colors for the attendance-aware calendars below
+                        // (Past days / Specific duration / Today), so the user can see who was
+                        // Present/Half Day/Absent - and what they were paid - while picking dates
+                        // to correct. Deliberately not used for "Onwards This Day" since those are
+                        // future dates with no attendance recorded yet.
+                        const editWageStatusColors = {
+                          P: { bg: '#DCFCE7', text: '#15803D' },
+                          A: { bg: '#FEE2E2', text: '#DC2626' },
+                          HD: { bg: '#F1F5F9', text: '#475569' },
+                        };
+                        const getEditWageDayInfo = (dateStr, isDisabledDay) => {
+                          if (isDisabledDay) return { colors: null, dayWage: null, dayAdvance: 0 };
+                          const record = targetWorker.attendance?.[dateStr];
+                          const status = record?.status;
+                          const colors = status ? editWageStatusColors[status] : null;
+                          const dayWage = status ? calculateNetDaily(getEffectiveWage(targetWorker, dateStr), status) : null;
+                          const dayAdvance = status
+                            ? (targetWorker.advancePayments || []).filter(p => p.date === dateStr).reduce((sum, p) => sum + (p.amount || 0), 0)
+                            : 0;
+                          return { colors, dayWage, dayAdvance };
+                        };
                         const isEditWageAmountValid = !!editWageNewAmount && parseFloat(editWageNewAmount) > 0;
                         const isEditWageDateValid =
                           editWageApplyTo === 'only' ? !!editWageTodayDate :
@@ -15831,48 +18198,111 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                             <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '20px', boxSizing: 'border-box', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '20px 20px 0 20px', flexShrink: 0 }}>
                                 <div>
-                                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{t('editWage')} &middot; {targetWorker.name}</h3>
-                                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>{t('changeWageForEmployee')}</p>
+                                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{targetWorker.name}</h3>
                                 </div>
                                 <button onClick={handleCloseEditWage} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#94A3B8', padding: 0, lineHeight: 1 }}>&times;</button>
                               </div>
 
                               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 20px 20px 20px' }}>
-                                <label style={{ fontSize: '11px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>{t('applyTo')}</label>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
-                                  {[
-                                    { key: 'past', label: t('pastDays') },
-                                    { key: 'specific', label: t('specificDuration') },
-                                    { key: 'only', label: t('today') },
-                                    { key: 'future', label: t('onwardsThisDay') }
-                                  ].map(opt => (
-                                    <button
-                                      key={opt.key}
-                                      type="button"
-                                      onClick={() => {
-                                        setEditWageApplyTo(opt.key);
-                                        if (opt.key === 'only' && !editWageTodayDate) {
-                                          setEditWageTodayDate(toLocalISODate(new Date()));
-                                        }
-                                      }}
-                                      style={{
-                                        padding: '12px 10px', borderRadius: '10px', fontSize: '13px', fontWeight: '600', textAlign: 'center', cursor: 'pointer',
-                                        border: editWageApplyTo === opt.key ? '2px solid #0B3C9B' : '1px solid #CBD5E1',
-                                        backgroundColor: editWageApplyTo === opt.key ? '#EFF6FF' : '#ffffff',
-                                        color: editWageApplyTo === opt.key ? '#0B3C9B' : '#1E293B'
-                                      }}
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  ))}
-                                </div>
-                                {editWageApplyTo === 'only' && (
-                                  <div style={{ marginBottom: '16px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('appliesUpTo')}</label>
-                                    <input type="date" value={editWageTodayDate} min={laterOfDates(toLocalISODate(new Date()), editWageJoinDateStr)} max={selectedDate} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWageTodayDate(e.target.value)} style={themeStyles.textInput} />
-                                  </div>
-                                )}
-                                {editWageApplyTo === 'past' && (() => {
+                                {editWageApplyTo === 'only' && false && (() => {
+                                  const todayMinDateStr = laterOfDates(toLocalISODate(new Date()), editWageJoinDateStr);
+                                  const todayMaxDateStr = selectedDate;
+                                  const todayYear = editWageTodayCalendarMonth.getFullYear();
+                                  const todayMonth = editWageTodayCalendarMonth.getMonth();
+                                  const todayFirstWeekday = new Date(todayYear, todayMonth, 1).getDay();
+                                  const todayDaysInMonth = new Date(todayYear, todayMonth + 1, 0).getDate();
+                                  const todayCells = [];
+                                  for (let i = 0; i < todayFirstWeekday; i++) todayCells.push(null);
+                                  for (let d = 1; d <= todayDaysInMonth; d++) todayCells.push(d);
+                                  const todayRows = [];
+                                  for (let i = 0; i < todayCells.length; i += 7) todayRows.push(todayCells.slice(i, i + 7));
+
+                                  const minYear = parseInt(todayMinDateStr.slice(0, 4), 10);
+                                  const minMonth = parseInt(todayMinDateStr.slice(5, 7), 10) - 1;
+                                  const isAtEarliestMonth = todayYear === minYear && todayMonth === minMonth;
+                                  const maxYear = parseInt(todayMaxDateStr.slice(0, 4), 10);
+                                  const maxMonth = parseInt(todayMaxDateStr.slice(5, 7), 10) - 1;
+                                  const isAtLatestMonth = todayYear === maxYear && todayMonth === maxMonth;
+
+                                  return (
+                                    <div style={{ marginBottom: '16px' }}>
+                                      <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('appliesUpTo')}</label>
+                                      <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', padding: '10px', backgroundColor: '#F8FAFC' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWageTodayCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                                            disabled={isAtEarliestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtEarliestMonth ? 'default' : 'pointer', color: isAtEarliestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&lsaquo;</button>
+                                          <span style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>{editWageTodayCalendarMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWageTodayCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                                            disabled={isAtLatestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtLatestMonth ? 'default' : 'pointer', color: isAtLatestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&rsaquo;</button>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '2px' }}>
+                                          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                                            <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: '#94A3B8', fontWeight: '600', padding: '3px 0' }}>{d}</div>
+                                          ))}
+                                        </div>
+                                        {todayRows.map((row, ri) => (
+                                          <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                                            {row.map((dayNum, ci) => {
+                                              if (!dayNum) return <div key={ci} />;
+                                              const dateStr = `${todayYear}-${String(todayMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                              const isDisabled = dateStr < todayMinDateStr || dateStr > todayMaxDateStr;
+                                              const isSelected = dateStr === editWageTodayDate;
+                                              const { colors, dayWage, dayAdvance } = getEditWageDayInfo(dateStr, isDisabled);
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  key={ci}
+                                                  disabled={isDisabled}
+                                                  onClick={() => setEditWageTodayDate(dateStr)}
+                                                  style={{
+                                                    textAlign: 'center', padding: '5px 0', margin: '2px 0', borderRadius: '8px',
+                                                    fontSize: '12px', fontWeight: colors ? '700' : '500',
+                                                    cursor: isDisabled ? 'default' : 'pointer',
+                                                    color: isDisabled ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
+                                                    backgroundColor: colors ? colors.bg : 'transparent',
+                                                    border: isSelected ? '2px solid #0B3C9B' : '2px solid transparent',
+                                                    boxSizing: 'border-box',
+                                                  }}
+                                                >
+                                                  <div>{dayNum}</div>
+                                                  {dayWage !== null && (
+                                                    <div style={{ fontSize: '7.5px', fontWeight: '700', lineHeight: '1.3', marginTop: '1px', color: colors ? colors.text : '#64748B' }}>
+                                                      <div>{`W-${dayWage}`}</div>
+                                                      {dayAdvance > 0 && <div>{`A-${dayAdvance}`}</div>}
+                                                    </div>
+                                                  )}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ))}
+                                        <div style={{ display: 'flex', gap: '12px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#DCFCE7', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('presentLabel')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#F1F5F9', display: 'inline-block', border: '1px solid #E2E8F0' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalHalfDay')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#FEE2E2', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalAbsent')}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                                {editWageApplyTo === 'past' && false && (() => {
                                   const pastTodayStr = toLocalISODate(new Date());
                                   const pastYear = editWagePastCalendarMonth.getFullYear();
                                   const pastMonth = editWagePastCalendarMonth.getMonth();
@@ -15935,6 +18365,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                                               const dateStr = `${pastYear}-${String(pastMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
                                               const isDisabled = dateStr < editWageJoinDateStr || dateStr > pastTodayStr;
                                               const isSelected = editWagePastDates.includes(dateStr);
+                                              const { colors, dayWage, dayAdvance } = getEditWageDayInfo(dateStr, isDisabled);
                                               return (
                                                 <button
                                                   type="button"
@@ -15942,49 +18373,258 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                                                   disabled={isDisabled}
                                                   onClick={() => toggleDate(dateStr)}
                                                   style={{
-                                                    textAlign: 'center', padding: '6px 0', margin: '2px 0', borderRadius: '8px',
-                                                    fontSize: '12px', fontWeight: isSelected ? '700' : '500',
-                                                    border: 'none', cursor: isDisabled ? 'default' : 'pointer',
-                                                    color: isDisabled ? '#CBD5E1' : (isSelected ? '#ffffff' : '#1E293B'),
-                                                    backgroundColor: isSelected ? '#0B3C9B' : 'transparent',
+                                                    textAlign: 'center', padding: '5px 0', margin: '2px 0', borderRadius: '8px',
+                                                    fontSize: '12px', fontWeight: colors ? '700' : '500',
+                                                    cursor: isDisabled ? 'default' : 'pointer',
+                                                    color: isDisabled ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
+                                                    backgroundColor: colors ? colors.bg : 'transparent',
+                                                    border: isSelected ? '2px solid #0B3C9B' : '2px solid transparent',
+                                                    boxSizing: 'border-box',
                                                   }}
                                                 >
-                                                  {dayNum}
+                                                  <div>{dayNum}</div>
+                                                  {dayWage !== null && (
+                                                    <div style={{ fontSize: '7.5px', fontWeight: '700', lineHeight: '1.3', marginTop: '1px', color: colors ? colors.text : '#64748B' }}>
+                                                      <div>{`W-${dayWage}`}</div>
+                                                      {dayAdvance > 0 && <div>{`A-${dayAdvance}`}</div>}
+                                                    </div>
+                                                  )}
                                                 </button>
                                               );
                                             })}
                                           </div>
                                         ))}
+                                        <div style={{ display: 'flex', gap: '12px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#DCFCE7', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('presentLabel')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#F1F5F9', display: 'inline-block', border: '1px solid #E2E8F0' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalHalfDay')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#FEE2E2', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalAbsent')}</span>
+                                          </div>
+                                        </div>
                                       </div>
                                     </div>
                                   );
                                 })()}
-                                {editWageApplyTo === 'specific' && (
-                                  (() => {
-                                    const specificDateInputStyle = { ...themeStyles.textInput, width: '100%', boxSizing: 'border-box', fontSize: '12.5px', padding: '12px 8px' };
-                                    return (
-                                      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-                                        <div style={{ flex: '1 1 0', minWidth: 0 }}>
-                                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('from')}</label>
-                                          <input type="date" value={editWageSpecificStart} min={editWageJoinDateStr} max={toLocalISODate(new Date())} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWageSpecificStart(e.target.value)} style={specificDateInputStyle} />
+                                {editWageApplyTo === 'specific' && false && (() => {
+                                  const specTodayStr = toLocalISODate(new Date());
+                                  const specYear = editWageSpecificCalendarMonth.getFullYear();
+                                  const specMonth = editWageSpecificCalendarMonth.getMonth();
+                                  const specFirstWeekday = new Date(specYear, specMonth, 1).getDay();
+                                  const specDaysInMonth = new Date(specYear, specMonth + 1, 0).getDate();
+                                  const specCells = [];
+                                  for (let i = 0; i < specFirstWeekday; i++) specCells.push(null);
+                                  for (let d = 1; d <= specDaysInMonth; d++) specCells.push(d);
+                                  const specRows = [];
+                                  for (let i = 0; i < specCells.length; i += 7) specRows.push(specCells.slice(i, i + 7));
+
+                                  const joinYear = parseInt(editWageJoinDateStr.slice(0, 4), 10);
+                                  const joinMonth = parseInt(editWageJoinDateStr.slice(5, 7), 10) - 1;
+                                  const isAtEarliestMonth = specYear === joinYear && specMonth === joinMonth;
+                                  const todayYear = parseInt(specTodayStr.slice(0, 4), 10);
+                                  const todayMonthIdx = parseInt(specTodayStr.slice(5, 7), 10) - 1;
+                                  const isAtLatestMonth = specYear === todayYear && specMonth === todayMonthIdx;
+
+                                  const handleSpecificDayClick = (dateStr) => {
+                                    if (!editWageSpecificStart || (editWageSpecificStart && editWageSpecificEnd)) {
+                                      setEditWageSpecificStart(dateStr);
+                                      setEditWageSpecificEnd('');
+                                    } else if (dateStr < editWageSpecificStart) {
+                                      setEditWageSpecificStart(dateStr);
+                                    } else {
+                                      setEditWageSpecificEnd(dateStr);
+                                    }
+                                  };
+
+                                  return (
+                                    <div style={{ marginBottom: '16px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                        <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569' }}>{t('selectDates')}</label>
+                                        <span style={{ fontSize: '11px', fontWeight: '600', color: '#64748B' }}>
+                                          {editWageSpecificStart
+                                            ? `${new Date(editWageSpecificStart).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}${editWageSpecificEnd ? ` - ${new Date(editWageSpecificEnd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}`
+                                            : ''}
+                                        </span>
+                                      </div>
+                                      <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', padding: '10px', backgroundColor: '#F8FAFC' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWageSpecificCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                                            disabled={isAtEarliestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtEarliestMonth ? 'default' : 'pointer', color: isAtEarliestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&lsaquo;</button>
+                                          <span style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>{editWageSpecificCalendarMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWageSpecificCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                                            disabled={isAtLatestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtLatestMonth ? 'default' : 'pointer', color: isAtLatestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&rsaquo;</button>
                                         </div>
-                                        <div style={{ flex: '1 1 0', minWidth: 0 }}>
-                                          <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('to')}</label>
-                                          <input type="date" value={editWageSpecificEnd} min={laterOfDates(editWageSpecificStart, editWageJoinDateStr)} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWageSpecificEnd(e.target.value)} style={specificDateInputStyle} />
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '2px' }}>
+                                          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                                            <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: '#94A3B8', fontWeight: '600', padding: '3px 0' }}>{d}</div>
+                                          ))}
+                                        </div>
+                                        {specRows.map((row, ri) => (
+                                          <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                                            {row.map((dayNum, ci) => {
+                                              if (!dayNum) return <div key={ci} />;
+                                              const dateStr = `${specYear}-${String(specMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                              const isDisabled = dateStr < editWageJoinDateStr || dateStr > specTodayStr;
+                                              const isRangeEnd = dateStr === editWageSpecificStart || dateStr === editWageSpecificEnd;
+                                              const isInRange = editWageSpecificStart && editWageSpecificEnd &&
+                                                dateStr >= editWageSpecificStart && dateStr <= editWageSpecificEnd;
+                                              const isSelected = isRangeEnd || isInRange;
+                                              const { colors, dayWage, dayAdvance } = getEditWageDayInfo(dateStr, isDisabled);
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  key={ci}
+                                                  disabled={isDisabled}
+                                                  onClick={() => handleSpecificDayClick(dateStr)}
+                                                  style={{
+                                                    textAlign: 'center', padding: '5px 0', margin: '2px 0', borderRadius: '8px',
+                                                    fontSize: '12px', fontWeight: colors ? '700' : '500',
+                                                    cursor: isDisabled ? 'default' : 'pointer',
+                                                    color: isDisabled ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
+                                                    backgroundColor: colors ? colors.bg : 'transparent',
+                                                    border: isRangeEnd ? '2px solid #0B3C9B' : (isInRange ? '2px dashed #93C5FD' : '2px solid transparent'),
+                                                    boxSizing: 'border-box',
+                                                  }}
+                                                >
+                                                  <div>{dayNum}</div>
+                                                  {dayWage !== null && (
+                                                    <div style={{ fontSize: '7.5px', fontWeight: '700', lineHeight: '1.3', marginTop: '1px', color: colors ? colors.text : '#64748B' }}>
+                                                      <div>{`W-${dayWage}`}</div>
+                                                      {dayAdvance > 0 && <div>{`A-${dayAdvance}`}</div>}
+                                                    </div>
+                                                  )}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ))}
+                                        <div style={{ display: 'flex', gap: '12px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#DCFCE7', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('presentLabel')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#F1F5F9', display: 'inline-block', border: '1px solid #E2E8F0' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalHalfDay')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#FEE2E2', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalAbsent')}</span>
+                                          </div>
                                         </div>
                                       </div>
-                                    );
-                                  })()
-                                )}
-                                {editWageApplyTo === 'future' && (
-                                  <div style={{ marginBottom: '16px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('appliesFrom')}</label>
-                                    <input type="date" value={editWageFutureStart} min={editWageJoinDateStr} onKeyDown={(e) => e.preventDefault()} onClick={(e) => {try {if (typeof e.target.showPicker === 'function') {e.target.showPicker();}} catch (err) {console.error("Picker not supported or blocked:", err);}}} onChange={(e) => setEditWageFutureStart(e.target.value)} style={themeStyles.textInput} />
-                                  </div>
-                                )}
+                                    </div>
+                                  );
+                                })()}
+                                {editWageApplyTo === 'future' && (() => {
+                                  const futureYear = editWageFutureCalendarMonth.getFullYear();
+                                  const futureMonth = editWageFutureCalendarMonth.getMonth();
+                                  const futureFirstWeekday = new Date(futureYear, futureMonth, 1).getDay();
+                                  const futureDaysInMonth = new Date(futureYear, futureMonth + 1, 0).getDate();
+                                  const futureCells = [];
+                                  for (let i = 0; i < futureFirstWeekday; i++) futureCells.push(null);
+                                  for (let d = 1; d <= futureDaysInMonth; d++) futureCells.push(d);
+                                  const futureRows = [];
+                                  for (let i = 0; i < futureCells.length; i += 7) futureRows.push(futureCells.slice(i, i + 7));
+
+                                  const joinYear = parseInt(editWageJoinDateStr.slice(0, 4), 10);
+                                  const joinMonth = parseInt(editWageJoinDateStr.slice(5, 7), 10) - 1;
+                                  const isAtEarliestMonth = futureYear === joinYear && futureMonth === joinMonth;
+
+                                  return (
+                                    <div style={{ marginBottom: '16px' }}>
+                                      <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '2px' }}>{t('newWageStartsFrom')}</label>
+                                      <div style={{ border: '1px solid #E2E8F0', borderRadius: '12px', padding: '10px', backgroundColor: '#F8FAFC' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWageFutureCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                                            disabled={isAtEarliestMonth}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: isAtEarliestMonth ? 'default' : 'pointer', color: isAtEarliestMonth ? '#CBD5E1' : '#334155', padding: '2px 8px' }}
+                                          >&lsaquo;</button>
+                                          <span style={{ fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>{editWageFutureCalendarMonth.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setEditWageFutureCalendarMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                                            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#334155', padding: '2px 8px' }}
+                                          >&rsaquo;</button>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: '2px' }}>
+                                          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                                            <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: '#94A3B8', fontWeight: '600', padding: '3px 0' }}>{d}</div>
+                                          ))}
+                                        </div>
+                                        {futureRows.map((row, ri) => (
+                                          <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                                            {row.map((dayNum, ci) => {
+                                              if (!dayNum) return <div key={ci} />;
+                                              const dateStr = `${futureYear}-${String(futureMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                                              const isDisabled = dateStr < editWageJoinDateStr;
+                                              const isSelected = dateStr === editWageFutureStart;
+                                              const { colors, dayWage, dayAdvance } = getEditWageDayInfo(dateStr, isDisabled);
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  key={ci}
+                                                  disabled={isDisabled}
+                                                  onClick={() => setEditWageFutureStart(dateStr)}
+                                                  style={{
+                                                    textAlign: 'center', padding: '5px 0', margin: '2px 0', borderRadius: '8px',
+                                                    fontSize: '12px', fontWeight: colors ? '700' : '500',
+                                                    cursor: isDisabled ? 'default' : 'pointer',
+                                                    color: isDisabled ? '#CBD5E1' : (colors ? colors.text : '#1E293B'),
+                                                    backgroundColor: colors ? colors.bg : 'transparent',
+                                                    border: isSelected ? '2px solid #0B3C9B' : '2px solid transparent',
+                                                    boxSizing: 'border-box',
+                                                  }}
+                                                >
+                                                  <div>{dayNum}</div>
+                                                  {dayWage !== null && (
+                                                    <div style={{ fontSize: '7.5px', fontWeight: '700', lineHeight: '1.3', marginTop: '1px', color: colors ? colors.text : '#64748B' }}>
+                                                      <div>{`W-${dayWage}`}</div>
+                                                      {dayAdvance > 0 && <div>{`A-${dayAdvance}`}</div>}
+                                                    </div>
+                                                  )}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        ))}
+                                        <div style={{ display: 'flex', gap: '12px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#DCFCE7', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('presentLabel')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#F1F5F9', display: 'inline-block', border: '1px solid #E2E8F0' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalHalfDay')}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                            <span style={{ width: '9px', height: '9px', borderRadius: '3px', backgroundColor: '#FEE2E2', display: 'inline-block' }}></span>
+                                            <span style={{ fontSize: '10px', color: '#64748B' }}>{t('totalAbsent')}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
 
                                 <div style={{ marginBottom: '14px' }}>
-                                  <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('newDailyWage')}</label>
+                                  <label style={{ fontSize: '11px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>{t('newDailyWageFromDate')}</label>
                                   <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #CBD5E1', borderRadius: '8px', padding: '0 12px', backgroundColor: '#ffffff' }}>
                                     <span style={{ marginRight: '8px', fontWeight: '600', color: '#475569' }}>&#8377;</span>
                                     <input type="number" placeholder="e.g. 550" value={editWageNewAmount} onChange={(e) => setEditWageNewAmount(e.target.value.replace(/\D/g, ''))} style={{ flex: 1, padding: '12px 0', border: 'none', outline: 'none', backgroundColor: 'transparent', fontWeight: '600' }} />
@@ -16030,44 +18670,85 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
 
               {/* ===== Workers section ===== */}
               <div style={{ flex: 1, minHeight: 0, padding: '16px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexShrink: 0 }}>
-                  <h3 style={{ fontSize: '14px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('employees')}</h3>
-                  <span onClick={() => {
-                    setTempWorkerName(''); setTempWorkerPhone(''); setTempWorkerJoiningDate('');
-                    setTempWorkerWageAmount(''); setEditingWorkerId(null);
-                    setSelectedProjectId(activeSiteViewId); setIsWorkerSubFormOpen(true);
-                  }} style={{ fontSize: '12px', fontWeight: '600', color: '#0B3C9B', cursor: 'pointer' }}>{t('addEmployee')}</span>
+                {currentProject.isActive !== false && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTempWorkerName(''); setTempWorkerPhone(''); setTempWorkerJoiningDate('');
+                      setTempWorkerWageAmount(''); setEditingWorkerId(null);
+                      setSelectedProjectId(activeSiteViewId); setIsWorkerSubFormOpen(true);
+                    }}
+                    style={{ ...themeStyles.actionAddBtn, width: '100%', marginBottom: '12px', flexShrink: 0 }}
+                  >
+                    {t('addEmployee')}
+                  </button>
+                )}
+
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexShrink: 0 }}>
+                  <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                    <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8', fontSize: '13px' }}>&#128269;</span>
+                    <input
+                      type="text"
+                      placeholder={t('enterEmployeeName')}
+                      value={employeeSearchQuery}
+                      onChange={(e) => setEmployeeSearchQuery(e.target.value)}
+                      style={{ width: '100%', padding: '9px 12px 9px 34px', backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '10px', fontSize: '13px', outline: 'none', color: '#1E293B', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                  {currentProject.isActive !== false && (
+                    <button
+                      onClick={() => handleOpenAttendanceScreen(currentProject)}
+                      style={{
+                        backgroundColor: '#0B3C9B',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '8px 16px',
+                        fontSize: '13.5px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {t('markAttendance')}
+                    </button>
+                  )}
                 </div>
 
-                <div style={{ position: 'relative', marginBottom: '10px', flexShrink: 0 }}>
-                  <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94A3B8', fontSize: '13px' }}>&#128269;</span>
-                  <input
-                    type="text"
-                    placeholder={t('enterEmployeeName')}
-                    value={employeeSearchQuery}
-                    onChange={(e) => setEmployeeSearchQuery(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px 9px 34px', backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '10px', fontSize: '13px', outline: 'none', color: '#1E293B', boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexShrink: 0 }}>
-                  <button
-                    onClick={() => handleOpenAttendanceScreen(currentProject)}
-                    style={{
-                      backgroundColor: '#0B3C9B',
-                      justifyContent: 'center', 
-                      alignItems: 'center',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '8px 20px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {t('markAttendance')}
-                  </button>
+                <div style={{ display: 'flex', justifyContent: currentProject.isActive === false ? 'flex-end' : 'space-between', alignItems: 'center', gap: '8px', marginBottom: '10px', flexShrink: 0 }}>
+                  {currentProject.isActive !== false && (
+                    <div style={{ display: 'inline-flex', background: '#EEF0F4', borderRadius: '10px', padding: '3px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setEmployeeStatusFilter('active')}
+                        style={{
+                          border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12.5px', fontWeight: '700',
+                          fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.1px',
+                          backgroundColor: employeeStatusFilter === 'active' ? '#0B3C9B' : 'transparent',
+                          color: employeeStatusFilter === 'active' ? '#ffffff' : '#64748B',
+                          boxShadow: employeeStatusFilter === 'active' ? '0 1px 4px rgba(15,23,42,0.15)' : 'none',
+                        }}
+                      >
+                        {t('activeEmployees')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmployeeStatusFilter('inactive')}
+                        style={{
+                          border: 'none', borderRadius: '8px', padding: '7px 16px', fontSize: '12.5px', fontWeight: '700',
+                          fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.1px',
+                          backgroundColor: employeeStatusFilter === 'inactive' ? '#0B3C9B' : 'transparent',
+                          color: employeeStatusFilter === 'inactive' ? '#ffffff' : '#64748B',
+                          boxShadow: employeeStatusFilter === 'inactive' ? '0 1px 4px rgba(15,23,42,0.15)' : 'none',
+                        }}
+                      >
+                        {t('deactiveEmployees')}
+                      </button>
+                    </div>
+                  )}
                   <select value={workerSortMode} onChange={(e) => setWorkerSortMode(e.target.value)} style={themeStyles.sortSelect}>
                     <option value="az">{t('sortAZ')}</option>
                     <option value="za">{t('sortZA')}</option>
@@ -16080,26 +18761,49 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                     sortedWorkers.map((worker) => {
                       const initials = worker.name ? worker.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : 'W';
                       const avatarColors = getEmployeeAvatarColors(worker.name);
+                      const isDeactivated = isCurrentProjectDeactivated || worker.isActive === false;
+                      const lastAttendanceDateStr = isDeactivated ? getLastAttendanceDate(worker) : null;
                       return (
-                        <div key={worker.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #F1F5F9', flexShrink: 0 }}>
+                        <div
+                          key={worker.id}
+                          onClick={isDeactivated ? () => setSelectedDeactiveWorkerId(worker.id) : undefined}
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff', borderRadius: '14px', padding: '12px 14px', border: '1px solid #F1F5F9', flexShrink: 0, opacity: isDeactivated ? 0.75 : 1, cursor: isDeactivated ? 'pointer' : 'default' }}
+                        >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: avatarColors.bg, color: avatarColors.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', boxShadow: 'none', cursor: 'default' }}>{initials}</div>
                             <div>
                               <h5 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>{worker.name}</h5>
-                              <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748B' }}>{worker.role || t('labor')} &bull; <span style={{ color: '#94A3B8' }}>{t('joined')} {worker.joiningDate ? new Date(worker.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '01 Jul'}</span></p>
+                              <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748B' }}>
+                                {worker.role || t('labor')} &bull; <span style={{ color: '#94A3B8' }}>
+                                  {isDeactivated
+                                    ? `${t('lastDate')} ${lastAttendanceDateStr ? new Date(lastAttendanceDateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}`
+                                    : `${t('joined')} ${worker.joiningDate ? new Date(worker.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '01 Jul'}`}
+                                </span>
+                                {isDeactivated && (<><span> &bull; </span><span style={{ color: '#DC2626', fontWeight: '600' }}>{t('deactivated')}</span></>)}
+                              </p>
                             </div>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span
-                              onClick={() => handleEditWorkerInline(currentProject, worker)}
-                              style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-                              title={t('edit')}
-                            >&#9999;&#65039;</span>
-                            <span
-                              onClick={() => handleDeleteWorkerInline(currentProject.id, worker.id)}
-                              style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#FEF2F2', color: '#F87171' }}
-                              title={t('delete')}
-                            >&#128465;&#65039;</span>
+                            {!isDeactivated && (
+                              <span
+                                onClick={() => handleEditWorkerInline(currentProject, worker)}
+                                style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                                title={t('edit')}
+                              >&#9999;&#65039;</span>
+                            )}
+                            {!isDeactivated && (
+                              <span
+                                onClick={() => handleDeleteWorkerInline(currentProject.id, worker.id)}
+                                style={{ cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', backgroundColor: '#FEF2F2', color: '#F87171' }}
+                                title={t('delete')}
+                              >&#128465;&#65039;</span>
+                            )}
+                            {isDeactivated && (
+                              <span
+                                style={{ cursor: 'pointer', fontSize: '17px', width: '20px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94A3B8', flexShrink: 0 }}
+                                title={t('employeeDetails')}
+                              >&#8250;</span>
+                            )}
                           </div>
                         </div>
                       );
@@ -16109,6 +18813,86 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                   )}
                 </div>
               </div>
+
+              {/* ============ DEACTIVE EMPLOYEE DETAILS SCREEN ============ */}
+              {/* Read-only screen opened via the ">" arrow on the Deactive list. Full
+                  payment/attendance history stays intact on the worker object even after
+                  isActive is set to false, so nothing here needs to look anywhere else. */}
+              {selectedDeactiveWorkerId !== null && selectedDeactiveWorkerId !== undefined && (() => {
+                const deactiveWorker = (currentProject.employees || []).find(w => w.id === selectedDeactiveWorkerId);
+                if (!deactiveWorker) return null;
+
+                const lastAttendanceDateStr = getLastAttendanceDate(deactiveWorker);
+
+                const statusMetaDeactive = {
+                  P: { label: t('presentLabel'), sub: 'Full day' },
+                  HD: { label: t('totalHalfDay'), sub: '50%' },
+                  A: { label: t('totalAbsent'), sub: '0%' }
+                };
+
+                // Full history, unbounded by any date range - the deactivated employee's
+                // complete record, exactly what "Download Statement" should reflect.
+                const attendanceEntriesAll = Object.entries(deactiveWorker.attendance || {})
+                  .sort((a, b) => b[0].localeCompare(a[0]));
+                const paymentsAll = (deactiveWorker.payments || []).slice().sort((a, b) => b.date.localeCompare(a.date));
+                const advancePaymentsAll = (deactiveWorker.advancePayments || []).slice().sort((a, b) => b.date.localeCompare(a.date));
+                const bonusPaymentsAll = (deactiveWorker.bonusPayments || []).slice().sort((a, b) => b.date.localeCompare(a.date));
+
+                const dueAll = calcPaymentDueForRange(deactiveWorker, null, null);
+                const paidAll = calcPaidInRange(deactiveWorker, null, null);
+                const advanceAll = deactiveWorker.advance || 0;
+                const balanceAll = dueAll - advanceAll - paidAll;
+
+                return (
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#f4f6f9', zIndex: 999, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <div style={{ padding: '14px 16px', backgroundColor: '#ffffff', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                      <button onClick={() => setSelectedDeactiveWorkerId(null)} style={{ background: 'none', border: 'none', fontSize: '24px', color: '#1E293B', cursor: 'pointer', padding: 0, flexShrink: 0 }}>&lsaquo;</button>
+                      <h2 style={{ fontSize: '17px', fontWeight: '700', color: '#1E293B', margin: 0 }}>{t('employeeDetails')}</h2>
+                    </div>
+
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 16px 64px 16px' }}>
+                      <h3 style={{ fontSize: '19px', fontWeight: '700', color: '#0F172A', margin: '0 0 18px 0', textAlign: 'center' }}>
+                        {deactiveWorker.name}
+                      </h3>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+                        <div style={{ backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '14px', textAlign: 'center' }}>
+                          <p style={{ margin: '0 0 6px 0', fontSize: '10.5px', fontWeight: '700', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('dateOfJoining')}</p>
+                          <p style={{ margin: 0, fontSize: '14.5px', fontWeight: '700', color: '#0F172A' }}>
+                            {deactiveWorker.joiningDate ? new Date(deactiveWorker.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                          </p>
+                        </div>
+                        <div style={{ backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '14px', textAlign: 'center' }}>
+                          <p style={{ margin: '0 0 6px 0', fontSize: '10.5px', fontWeight: '700', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('lastDay')}</p>
+                          <p style={{ margin: 0, fontSize: '14.5px', fontWeight: '700', color: '#0F172A' }}>
+                            {lastAttendanceDateStr ? new Date(lastAttendanceDateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : t('noAttendanceMarkedYet')}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadStatement({
+                          worker: deactiveWorker, project: currentProject,
+                          fromDate: null, toDate: null,
+                          paymentDueForRange: dueAll, paidInRange: paidAll, balanceValue: balanceAll,
+                          paymentsInRange: paymentsAll, advancePaymentsInRange: advancePaymentsAll, bonusPaymentsInRange: bonusPaymentsAll,
+                          attendanceEntriesInRange: attendanceEntriesAll, statusMeta: statusMetaDeactive, selectedDate
+                        })}
+                        style={{
+                          width: '100%', fontSize: '13.5px', color: '#0B3C9B', fontWeight: '700', cursor: 'pointer',
+                          background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '12px',
+                          padding: '13px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                          touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent'
+                        }}
+                      >
+                        <span aria-hidden="true">&#8681;</span>
+                        {t('downloadStatement')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Add / Edit worker sub-form (existing project) */}
               {isWorkerSubFormOpen && (
@@ -16900,8 +19684,35 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
             </div>
           </div>
 
-          <div style={themeStyles.sectionMetaRow}>
-            <h3 style={themeStyles.sectionLabel}>{t('myProjects')}</h3>
+          <div style={{ ...themeStyles.sectionMetaRow, justifyContent: 'space-between', flexWrap: 'wrap', rowGap: '8px' }}>
+            <div style={{ display: 'inline-flex', background: '#EEF0F4', borderRadius: '10px', padding: '3px' }}>
+              <button
+                type="button"
+                onClick={() => setProjectStatusFilter('active')}
+                style={{
+                  border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '11.5px', fontWeight: '700',
+                  fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.1px',
+                  backgroundColor: projectStatusFilter === 'active' ? '#0B3C9B' : 'transparent',
+                  color: projectStatusFilter === 'active' ? '#ffffff' : '#64748B',
+                  boxShadow: projectStatusFilter === 'active' ? '0 1px 4px rgba(15,23,42,0.15)' : 'none',
+                }}
+              >
+                {t('activeEmployees')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setProjectStatusFilter('inactive')}
+                style={{
+                  border: 'none', borderRadius: '8px', padding: '6px 12px', fontSize: '11.5px', fontWeight: '700',
+                  fontFamily: 'inherit', cursor: 'pointer', letterSpacing: '0.1px',
+                  backgroundColor: projectStatusFilter === 'inactive' ? '#0B3C9B' : 'transparent',
+                  color: projectStatusFilter === 'inactive' ? '#ffffff' : '#64748B',
+                  boxShadow: projectStatusFilter === 'inactive' ? '0 1px 4px rgba(15,23,42,0.15)' : 'none',
+                }}
+              >
+                {t('deactiveEmployees')}
+              </button>
+            </div>
             <select value={projectSortMode} onChange={(e) => setProjectSortMode(e.target.value)} style={themeStyles.sortSelect}>
               <option value="az">{t('sortAZ')}</option>
               <option value="za">{t('sortZA')}</option>
@@ -16911,46 +19722,89 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
 
           <div style={themeStyles.projectsScrollArea}>
             {sortedProjects.length > 0 ? sortedProjects.map((project) => {
+              const isDeactiveProject = project.isActive === false;
               const activeWorkersCount = (project.employees || []).length;
-              const presentTodayCount = computeProjectPresentToday(project);
+              const activeOnlyEmployeesCount = (project.employees || []).filter(w => w.isActive !== false).length;
               const totalDueAmount = computeProjectTotalDue(project);
+              const totalWagesAmount = computeProjectTotalWages(project);
+              const totalBonusAmount = computeProjectTotalBonus(project);
               const lastAttendanceDate = computeProjectLastAttendanceDate(project);
               const todayStr = toLocalISODate(new Date());
               const isAttendanceStale = !lastAttendanceDate || lastAttendanceDate !== todayStr;
               return (
-                <div key={project.id} onClick={() => setActiveSiteViewId(project.id)} style={{ ...themeStyles.worksiteCard, cursor: 'pointer' }}>
+                <div
+                  key={project.id}
+                  onClick={() => {
+                    setActiveSiteViewId(project.id);
+                    // Opening a Deactive project should land straight on that project's
+                    // Deactive Employees list, not the Active tab.
+                    setEmployeeStatusFilter(isDeactiveProject ? 'inactive' : 'active');
+                  }}
+                  style={{ ...themeStyles.worksiteCard, cursor: 'pointer', opacity: isDeactiveProject ? 0.75 : 1 }}
+                >
                   <div style={themeStyles.cardHeadingRow}>
                     <div style={themeStyles.siteIconWrapper}>&#127959;&#65039;</div>
                     <h4 style={themeStyles.siteTitle}>{project.name}</h4>
                     <span style={themeStyles.arrowNavIndicator}>&rsaquo;</span>
                   </div>
-                  <div style={themeStyles.metricsGridRow}>
-                    <div style={themeStyles.metricCell}>
-                      <p style={themeStyles.metricValue}>{activeWorkersCount}</p>
-                      <span style={themeStyles.metricLabelText}>{t('employeesLabel')}</span>
+                  {isDeactiveProject ? (
+                    <div style={themeStyles.metricsRowLine}>
+                      <div style={themeStyles.metricCellFlat}>
+                        <p style={themeStyles.metricValueFlat}>{activeWorkersCount}</p>
+                        <span style={themeStyles.metricLabelTextFlat}>{t('employeesLabel')}</span>
+                      </div>
+                      <div style={themeStyles.metricDividerLine} />
+                      <div style={themeStyles.metricCellFlat}>
+                        <p style={{ ...themeStyles.metricValueFlat, color: '#0B3C9B' }}>{"\u20B9"}{totalWagesAmount.toLocaleString('en-IN')}</p>
+                        <span style={themeStyles.metricLabelTextFlat}>{t('wagesLabel')}</span>
+                      </div>
+                      <div style={themeStyles.metricDividerLine} />
+                      <div style={themeStyles.metricCellFlat}>
+                        <p style={{ ...themeStyles.metricValueFlat, color: '#10B981' }}>{"\u20B9"}{totalBonusAmount.toLocaleString('en-IN')}</p>
+                        <span style={themeStyles.metricLabelTextFlat}>{t('bonus')}</span>
+                      </div>
                     </div>
-                    <div style={themeStyles.metricCell}>
-                      <p style={{ ...themeStyles.metricValue, color: '#10B981' }}>{presentTodayCount}</p>
-                      <span style={themeStyles.metricLabelText}>{t('presentLabel')}</span>
+                  ) : (
+                    <div style={themeStyles.metricsRowLine}>
+                      <div style={themeStyles.metricCellFlat}>
+                        <p style={themeStyles.metricValueFlat}>{activeOnlyEmployeesCount}</p>
+                        <span style={themeStyles.metricLabelTextFlat}>{t('employeesLabel')}</span>
+                      </div>
+                      <div style={themeStyles.metricDividerLine} />
+                      <div style={themeStyles.metricCellFlat}>
+                        <p style={{ ...themeStyles.metricValueFlat, color: '#0B3C9B' }}>{"\u20B9"}{totalWagesAmount.toLocaleString('en-IN')}</p>
+                        <span style={themeStyles.metricLabelTextFlat}>{t('paidLabel')}</span>
+                      </div>
+                      <div style={themeStyles.metricDividerLine} />
+                      <div style={themeStyles.metricCellFlat}>
+                        <p style={{ ...themeStyles.metricValueDueFlat, color: totalDueAmount <= 0 ? '#10B981' : '#DC2626' }}>{"\u20B9"}{Math.abs(totalDueAmount).toLocaleString('en-IN')}</p>
+                        <span style={themeStyles.metricLabelTextFlat}>{totalDueAmount <= 0 ? t('extraPaidLabel') : t('dueLabel')}</span>
+                      </div>
+                      <div style={themeStyles.metricDividerLine} />
+                      <div style={themeStyles.metricCellFlat}>
+                        <p style={{ ...themeStyles.metricValueFlat, color: '#10B981' }}>{"\u20B9"}{totalBonusAmount.toLocaleString('en-IN')}</p>
+                        <span style={themeStyles.metricLabelTextFlat}>{t('bonus')}</span>
+                      </div>
                     </div>
-                    <div style={themeStyles.metricCell}>
-                      <p style={{ ...themeStyles.metricValueDue, color: totalDueAmount <= 0 ? '#10B981' : '#DC2626' }}>{"\u20B9"}{Math.abs(totalDueAmount).toLocaleString('en-IN')}</p>
-                      <span style={themeStyles.metricLabelText}>{totalDueAmount <= 0 ? t('extraPaidLabel') : t('totalDueLabel')}</span>
+                  )}
+                  {!isDeactiveProject && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingTop: '6px', borderTop: '1px solid #F1F5F9' }}>
+                      <span style={{ fontSize: '12px' }}>{isAttendanceStale ? '\u26A0\uFE0F' : '\u2705'}</span>
+                      <span style={{ fontSize: '11px', color: isAttendanceStale ? '#DC2626' : '#94A3B8', fontWeight: isAttendanceStale ? '600' : '500' }}>
+                        {lastAttendanceDate
+                          ? (lastAttendanceDate === todayStr ? t('attendanceMarkedToday') : `${t('attendanceMarkedOnPrefix')} ${formatShortDayLabel(lastAttendanceDate)}`)
+                          : t('attendanceNotMarked')}
+                      </span>
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingTop: '6px', borderTop: '1px solid #F1F5F9' }}>
-                    <span style={{ fontSize: '12px' }}>{isAttendanceStale ? '\u26A0\uFE0F' : '\u2705'}</span>
-                    <span style={{ fontSize: '11px', color: isAttendanceStale ? '#DC2626' : '#94A3B8', fontWeight: isAttendanceStale ? '600' : '500' }}>
-                      {lastAttendanceDate
-                        ? (lastAttendanceDate === todayStr ? t('attendanceMarkedToday') : `${t('attendanceMarkedOnPrefix')} ${formatShortDayLabel(lastAttendanceDate)}`)
-                        : t('attendanceNotMarked')}
-                    </span>
-                  </div>
+                  )}
                 </div>
               );
             }) : (
-              <p style={{ fontSize: '13px', color: '#64748B', textAlign: 'center', marginTop: '20px' }}>{t('noWorksitesMatch')}</p>
+              <p style={{ fontSize: '13px', color: '#64748B', textAlign: 'center', marginTop: '20px' }}>
+                {projectStatusFilter === 'inactive' ? t('noDeactiveWorksitesMatch') : t('noWorksitesMatch')}
+              </p>
             )}
+
           </div>
         </div>
 
@@ -17005,7 +19859,12 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
 
         {/* ============ PROJECT PICKER (for Attendance / Payments bottom-nav tabs) ============ */}
         {isProjectPickerOpen && (() => {
-          const pickerMatches = projects.filter(p => p.name.toLowerCase().includes(projectPickerSearch.toLowerCase()));
+          // Deactivated projects are excluded here - they're not valid targets for new
+          // attendance or payment entries, only viewable/recoverable from the Deactive tab.
+          const pickerMatches = projects
+            .filter(p => p.isActive !== false)
+            .filter(p => p.name.toLowerCase().includes(projectPickerSearch.toLowerCase()));
+
           const sortedPickerMatches = [...pickerMatches].sort((a, b) => a.name.localeCompare(b.name));
           const actionButtonLabel = projectPickerPurpose === 'payments' ? t('payment') : t('markAttendance');
           const handlePickProject = (project) => {
@@ -17037,7 +19896,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
                   style={themeStyles.matchedDropdown}
                 >
                   <option value="">{t('allProjects')}</option>
-                  {[...projects].sort((a, b) => a.name.localeCompare(b.name)).map(p => (<option key={p.id} value={p.name}>{p.name}</option>))}
+                  {[...projects].filter(p => p.isActive !== false).sort((a, b) => a.name.localeCompare(b.name)).map(p => (<option key={p.id} value={p.name}>{p.name}</option>))}
                 </select>
               </div>
 
@@ -17101,7 +19960,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
         <div style={authStyles.brandBlock}>
           <img src={smartpayLogo} alt="SmartManage" style={authStyles.logoImg} />
           <h1 style={authStyles.brandName}>SmartManage</h1>
-          <p style={authStyles.brandTagline}>Quote.Track Wages. Pay on Time.</p>
+          <p style={authStyles.brandTagline}>Quote. Track Wages. Pay on Time.</p>
         </div>
 
         {/* ---- Card ---- */}
@@ -17440,6 +20299,14 @@ const themeStyles = {
   metricValue: { fontSize: '16px', fontWeight: '700', color: '#1E293B', margin: 0, lineHeight: '1.2' },
   metricValueDue: { fontSize: '16px', fontWeight: '700', color: '#DC2626', margin: 0, lineHeight: '1.2' },
   metricLabelText: { fontSize: '11px', color: '#94A3B8', fontWeight: '500', lineHeight: '1.2' },
+  // Single-horizontal-line metrics row (Employees | Paid | Due | Bonus) used on the
+  // Projects list cards so all metrics stay on one line even on narrow mobile screens.
+  metricsRowLine: { display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', flexWrap: 'nowrap', gap: '4px', marginBottom: '6px' },
+  metricCellFlat: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: '1 1 0' },
+  metricDividerLine: { width: '1px', flexShrink: 0, backgroundColor: '#E2E8F0', alignSelf: 'stretch', marginTop: '2px', marginBottom: '2px' },
+  metricValueFlat: { fontSize: '14px', fontWeight: '700', color: '#1E293B', margin: 0, lineHeight: '1.2', whiteSpace: 'nowrap' },
+  metricValueDueFlat: { fontSize: '14px', fontWeight: '700', color: '#DC2626', margin: 0, lineHeight: '1.2', whiteSpace: 'nowrap' },
+  metricLabelTextFlat: { fontSize: '10px', color: '#94A3B8', fontWeight: '500', lineHeight: '1.2', whiteSpace: 'nowrap' },
   payoutTrackLine: { width: '100%', height: '6px', backgroundColor: '#E2E8F0', borderRadius: '3px', overflow: 'hidden', marginBottom: '6px' },
   payoutProgressValueBar: { height: '100%', backgroundColor: '#0EA5E9', borderRadius: '3px' },
   payoutMetaRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
@@ -17574,7 +20441,7 @@ const quotationModuleStyles = {
   discoverSubtitle: { fontSize: '10px', fontWeight: '500', color: '#94A3B8', lineHeight: '1.35' },
 };
 
-function FieldInput({ label, value, onChange, type = 'text', error }) {
+function FieldInput({ label, value, onChange, type = 'text', error, ...inputProps }) {
   return (
     <div>
       <div style={{ ...businessInfoStyles.fieldBox, ...(error ? { border: '1.5px solid #DC2626' } : null) }}>
@@ -17584,6 +20451,7 @@ function FieldInput({ label, value, onChange, type = 'text', error }) {
           value={value}
           onChange={(e) => onChange(e.target.value)}
           style={businessInfoStyles.fieldInputEl}
+          {...inputProps}
         />
       </div>
       {error && typeof error === 'string' && <p style={customerModuleStyles.fieldErrorText}>{error}</p>}
@@ -17631,7 +20499,7 @@ const quotationSettingsStyles = {
     width: '42px', height: '24px', borderRadius: '999px', border: 'none', cursor: 'pointer',
     position: 'relative', padding: 0, flexShrink: 0, transition: 'background-color 0.15s ease',
   },
-  switchTrackOn: { background: '#16A34A' },
+  switchTrackOn: { background: '#0F766E' },
   switchTrackOff: { background: '#CBD5E1' },
   switchThumb: {
     position: 'absolute', top: '2px', left: '2px', width: '20px', height: '20px', borderRadius: '50%',
@@ -17652,7 +20520,7 @@ const quotationSettingsStyles = {
     padding: '8px 6px', fontSize: '12.5px', fontWeight: '700', color: '#475569', cursor: 'pointer',
     fontFamily: 'inherit', letterSpacing: '0.1px', whiteSpace: 'nowrap',
   },
-  segmentedBtnActive: { background: '#16A34A', color: '#ffffff', boxShadow: '0 1px 4px rgba(15,23,42,0.15)' },
+  segmentedBtnActive: { background: '#0F766E', color: '#ffffff', boxShadow: '0 1px 4px rgba(15,23,42,0.15)' },
 };
 
 // Compact inline toggle switch used for every Yes/No "Display" setting row (GST, HSN,
@@ -17684,7 +20552,7 @@ function ToggleSwitchRow({ icon, label, value, onChange }) {
             }}
           />
         </button>
-        <span style={{ ...quotationSettingsStyles.toggleRowValueText, color: isYes ? '#16A34A' : '#64748B' }}>{isYes ? 'Yes' : 'No'}</span>
+        <span style={{ ...quotationSettingsStyles.toggleRowValueText, color: isYes ? '#0F766E' : '#64748B' }}>{isYes ? 'Yes' : 'No'}</span>
       </span>
     </div>
   );
@@ -17851,24 +20719,34 @@ const customerModuleStyles = {
   sortMenuItemLabelActive: { fontSize: '14px', fontWeight: '700', color: '#0F766E' },
 
   // Document list card (Quotation, Invoice, Purchase Order, Proforma Invoice,
-  // Delivery Note, Receipt) — name on the left, number/date/amount/status on the right.
+  // Delivery Note, Receipt) — compact single row: avatar, name + doc#/date, amount +
+  // status, chevron. Padding/gaps/font sizes are intentionally tight so more rows fit
+  // on a mobile screen at once (redesigned from a taller 3-line stacked layout).
   docCard: {
-    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '18px',
-    padding: '16px 18px', marginBottom: '12px', boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)',
+    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '14px',
+    padding: '10px 12px', marginBottom: '8px', boxShadow: '0 1px 4px rgba(15, 23, 42, 0.06)',
     cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center',
-    justifyContent: 'space-between', gap: '14px', boxSizing: 'border-box',
+    gap: '10px', boxSizing: 'border-box',
   },
+  docCardAvatar: {
+    width: '30px', height: '30px', borderRadius: '50%', background: '#E6F4F2', color: '#0F766E',
+    fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+  docCardMain: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' },
   docCardName: {
-    flex: 1, minWidth: 0, fontSize: '16.5px', fontWeight: '700', color: '#0F172A',
+    fontSize: '14px', fontWeight: '700', color: '#0F172A',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
-  docCardRight: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 },
-  docCardNumber: { fontSize: '13px', fontWeight: '600', color: '#64748B', whiteSpace: 'nowrap' },
-  docCardDate: { fontSize: '12.5px', color: '#94A3B8', whiteSpace: 'nowrap' },
-  docCardBottomRow: { display: 'flex', alignItems: 'center', gap: '8px' },
-  docCardAmount: { fontSize: '16.5px', fontWeight: '800', color: '#0F172A', whiteSpace: 'nowrap' },
+  docCardSubRow: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 },
+  docCardMeta: {
+    fontSize: '11.5px', color: '#94A3B8', fontWeight: '500', whiteSpace: 'nowrap',
+    overflow: 'hidden', textOverflow: 'ellipsis',
+  },
+  docCardRight: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px', flexShrink: 0 },
+  docCardAmount: { fontSize: '14px', fontWeight: '800', color: '#0F172A', whiteSpace: 'nowrap' },
   docCardStatusPill: {
-    fontSize: '10.5px', fontWeight: '700', padding: '3px 10px', borderRadius: '20px', whiteSpace: 'nowrap',
+    fontSize: '9px', fontWeight: '700', padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap',
   },
 
   // Customer List
@@ -17886,18 +20764,27 @@ const customerModuleStyles = {
   customerName: { fontSize: '16.5px', fontWeight: '700', color: '#0F172A' },
   editBadge: { width: '34px', height: '34px', borderRadius: '50%', background: '#0F766E', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   editBadgeBtn: { width: '34px', height: '34px', borderRadius: '50%', background: '#0F766E', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer' },
+  // Flat icon-over-label row action button (Edit / Delete) - matches the look of the
+  // Duplicate/Edit/Convert/Status/Delete bar on every document detail screen (no filled
+  // circular background), so list-row actions look consistent with the document footer.
+  rowActionBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', flexShrink: 0 },
+  rowActionIconWrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '18px', lineHeight: 1 },
+  rowActionLabel: { fontSize: '10px', fontWeight: '600', lineHeight: 1 },
   selectRowBtn: { flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' },
   emptyText: { textAlign: 'center', color: '#94A3B8', fontSize: '13.5px', lineHeight: '1.5', marginTop: '40px', padding: '0 20px' },
 
-  // Product List (extends the customer card layout with price/GST rows)
+  // Product List (compact card - name + actions on top row, Price/GST on one line below)
   productCard: {
-    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '18px',
-    padding: '18px 18px', marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '10px',
-    boxShadow: '0 2px 10px rgba(15, 23, 42, 0.05)', cursor: 'pointer', fontFamily: 'inherit',
+    width: '100%', textAlign: 'left', background: '#ffffff', border: 'none', borderRadius: '14px',
+    padding: '12px 14px', marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '5px',
+    boxShadow: '0 1px 6px rgba(15, 23, 42, 0.05)', cursor: 'pointer', fontFamily: 'inherit',
   },
-  productCardSelected: { boxShadow: '0 0 0 2px #0F766E, 0 2px 10px rgba(15, 23, 42, 0.05)' },
-  productCardTopRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  productDetailRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  productCardSelected: { boxShadow: '0 0 0 2px #0F766E, 0 1px 6px rgba(15, 23, 42, 0.05)' },
+  productCardTopRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' },
+  productDetailRow: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' },
+  productDetailText: { fontSize: '13px', fontWeight: '500', color: '#64748B' },
+  productDetailDivider: { fontSize: '13px', fontWeight: '400', color: '#CBD5E1' },
+  // Legacy stacked price/GST row labels - kept in case other screens still reference them.
   productDetailLabel: { fontSize: '14.5px', fontWeight: '500', color: '#334155' },
   productDetailValue: { fontSize: '15.5px', fontWeight: '700', color: '#0F172A' },
 
@@ -18041,6 +20928,14 @@ const makeQuotationStyles = {
   // Remove action appears within the Quotation Module so it never renders as a black
   // icon or an "X" cross.
   removeIconBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: '28px', height: '28px', padding: 0, background: 'transparent',
+    border: 'none', cursor: 'pointer', flexShrink: 0,
+  },
+  // Small pencil indicator shown on rows/cards that are tappable to edit (product lines,
+  // other charges, terms). Purely a visual cue - the row itself already carries the click
+  // handler, this icon does not need its own onClick.
+  editIconBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: '28px', height: '28px', padding: 0, background: 'transparent',
     border: 'none', cursor: 'pointer', flexShrink: 0,

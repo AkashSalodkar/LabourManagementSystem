@@ -22,6 +22,7 @@ namespace LMPTS.Application.DTOs
         public string Label { get; set; } = "Other Charges";
         public decimal Amount { get; set; }
         public bool Taxable { get; set; }
+        public decimal GstPercent { get; set; }
     }
 
     // Paid Info (for Invoices & Proforma Invoices)
@@ -45,6 +46,7 @@ namespace LMPTS.Application.DTOs
     public abstract class DocumentBaseDto
     {
         public string Date { get; set; } = string.Empty;
+        public string? DocSnapshot { get; set; }
         public string? OtherInfo { get; set; }
         public int? CustomerId { get; set; }
         public List<DocumentProductDto> Products { get; set; } = new();
@@ -163,6 +165,7 @@ namespace LMPTS.Application.DTOs
         public string? ReferenceNo { get; set; }
         public decimal? PaidAmount { get; set; }
         public string? PaymentFor { get; set; }
+        public string? DocSnapshot { get; set; }
 
         // Snapshot fields
         public string? CustomerName { get; set; }
