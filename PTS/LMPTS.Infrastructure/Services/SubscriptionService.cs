@@ -4,106 +4,141 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LMPTS.Infrastructure.Services
 {
-    // Field names are exactly what the React Subscription Page reads (camelCased by System.Text.Json).
-    public class SubscriptionStatusDto
-    {
-        public string State { get; set; } = "";            // trial | trial_expired | active | expired
-        public bool AccessAllowed { get; set; }
-        public DateTime ServerTime { get; set; }
-        public DateTime TrialStartAt { get; set; }
-        public DateTime TrialEndsAt { get; set; }
-        public int DaysRemaining { get; set; }
-        public DateTime? SubscriptionStartAt { get; set; }
-        public DateTime? SubscriptionEndsAt { get; set; }
-        public DateTime? PaymentDate { get; set; }
-        public decimal? PaidAmount { get; set; }
-        public string? PaymentReference { get; set; }
-    }
-
     public class SubscriptionService
     {
-        public const int TrialDays = 30, PeriodDays = 30;
-        public const decimal Price = 99m;
+        public const decimal Price = 99m;      // ₹99
+        public const int TrialDays = 30;
+        public const int MonthlyDays = 30;
 
         private readonly ApplicationDbContext _db;
         public SubscriptionService(ApplicationDbContext db) => _db = db;
 
-        // EF returns datetime2 as Kind=Unspecified; mark as UTC so JSON gets a "Z" and the app converts correctly.
-        private static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
-        private static DateTime? Utc(DateTime? d) => d.HasValue ? Utc(d.Value) : null;
-
-        /// Call from login (and register-complete). Idempotent: the unique index allows one trial row per user.
-        public async Task EnsureTrialStartedAsync(int userId)
+        public async Task<Subscription> EnsureTrialAsync(int userId)
         {
-            if (await _db.Subscriptions.AnyAsync(s => s.UserId == userId && s.PlanType == SubscriptionPlan.Trial)) return;
+            var existing = await _db.Subscriptions
+                .FirstOrDefaultAsync(s => s.UserId == userId && s.PlanType == SubscriptionPlan.Trial);
+            if (existing != null) return existing;
+
             var now = DateTime.UtcNow;
-            _db.Subscriptions.Add(new Subscription
+            var trial = new Subscription
             {
-                UserId = userId, PlanType = SubscriptionPlan.Trial,
-                StartDate = now, EndDate = now.AddDays(TrialDays),
-                PricePaid = 0, Note = "30-day free trial", IsActive = true
-            });
-            try { await _db.SaveChangesAsync(); }
-            catch (DbUpdateException) { /* concurrent first login created it; unique index keeps it to one */ }
+                UserId = userId,
+                PlanType = SubscriptionPlan.Trial,
+                StartDate = now,
+                EndDate = now.AddDays(TrialDays),
+                PricePaid = 0,
+                PaymentMethod = null,
+                IsActive = true,
+                Note = "30-day free trial",
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            _db.Subscriptions.Add(trial);
+            await _db.SaveChangesAsync();
+            return trial;
         }
 
         public async Task<SubscriptionStatusDto> GetStatusAsync(int userId)
         {
-            await EnsureTrialStartedAsync(userId);
+            await EnsureTrialAsync(userId);
             var now = DateTime.UtcNow;
 
-            var trial = await _db.Subscriptions.AsNoTracking()
-                .FirstAsync(s => s.UserId == userId && s.PlanType == SubscriptionPlan.Trial);
-            var paid = await _db.Subscriptions.AsNoTracking()
-                .Where(s => s.UserId == userId && s.PlanType == SubscriptionPlan.Monthly && s.IsActive)
-                .OrderByDescending(s => s.EndDate).ToListAsync();
+            var trial = await _db.Subscriptions
+                .Where(s => s.UserId == userId && s.PlanType == SubscriptionPlan.Trial)
+                .OrderByDescending(s => s.SubscriptionId)
+                .FirstOrDefaultAsync();
 
-            var current = paid.FirstOrDefault(s => s.StartDate <= now && s.EndDate > now);
-            var latestPaid = paid.FirstOrDefault();   // for showing payment info
-            var trialEnds = trial.EndDate ?? trial.StartDate.AddDays(TrialDays);
+            var activeMonthly = await _db.Subscriptions
+                .Where(s => s.UserId == userId && s.PlanType == SubscriptionPlan.Monthly
+                         && s.IsActive && s.EndDate != null && s.EndDate > now)
+                .OrderBy(s => s.StartDate)
+                .ToListAsync();
 
-            string state; bool allowed; DateTime? endForDays;
-            if (current != null) { state = "active"; allowed = true; endForDays = current.EndDate; }
-            else if (latestPaid != null && latestPaid.EndDate > now) { state = "active"; allowed = true; endForDays = latestPaid.EndDate; }
-            else if (latestPaid == null && now < trialEnds) { state = "trial"; allowed = true; endForDays = trialEnds; }
-            else if (latestPaid == null) { state = "trial_expired"; allowed = false; endForDays = null; }
-            else { state = "expired"; allowed = false; endForDays = null; }
+            var latestPaid = await _db.Subscriptions
+                .Where(s => s.UserId == userId && s.PlanType == SubscriptionPlan.Monthly)
+                .OrderByDescending(s => s.PaidAt)
+                .FirstOrDefaultAsync();
 
-            var shown = current ?? latestPaid;
-            return new SubscriptionStatusDto
+            var dto = new SubscriptionStatusDto
             {
-                State = state, AccessAllowed = allowed, ServerTime = now,
-                TrialStartAt = Utc(trial.StartDate), TrialEndsAt = Utc(trialEnds),
-                DaysRemaining = endForDays == null ? 0 : (int)Math.Ceiling((endForDays.Value - now).TotalDays),
-                SubscriptionStartAt = Utc(shown?.StartDate), SubscriptionEndsAt = Utc(shown?.EndDate),
-                PaymentDate = Utc(shown?.PaidAt), PaidAmount = shown?.PricePaid,
-                PaymentReference = shown?.PaymentReference ?? shown?.ProviderPaymentId
+                TrialStartAt = AsUtc(trial?.StartDate),
+                TrialEndsAt = AsUtc(trial?.EndDate),
             };
+
+            if (activeMonthly.Count > 0)
+            {
+                dto.State = "active";
+                dto.AccessAllowed = true;
+                dto.SubscriptionStartAt = AsUtc(activeMonthly.Min(s => s.StartDate));
+                dto.SubscriptionEndsAt = AsUtc(activeMonthly.Max(s => s.EndDate!.Value));
+                dto.DaysRemaining = Math.Max(0, (int)Math.Ceiling((activeMonthly.Max(s => s.EndDate!.Value) - now).TotalDays));
+                dto.PaymentDate = AsUtc(activeMonthly.Last().PaidAt);
+                dto.PaidAmount = activeMonthly.Last().PricePaid;
+                dto.PaymentReference = activeMonthly.Last().PaymentReference;
+            }
+            else if (trial != null && trial.EndDate > now)
+            {
+                dto.State = "trial";
+                dto.AccessAllowed = true;
+                dto.DaysRemaining = Math.Max(0, (int)Math.Ceiling((trial.EndDate!.Value - now).TotalDays));
+            }
+            else
+            {
+                dto.State = "expired";
+                dto.AccessAllowed = false;
+                dto.DaysRemaining = 0;
+                if (latestPaid != null)
+                {
+                    dto.SubscriptionStartAt = AsUtc(latestPaid.StartDate);
+                    dto.SubscriptionEndsAt = AsUtc(latestPaid.EndDate);
+                    dto.PaymentDate = AsUtc(latestPaid.PaidAt);
+                    dto.PaidAmount = latestPaid.PricePaid;
+                    dto.PaymentReference = latestPaid.PaymentReference;
+                }
+            }
+            return dto;
         }
 
-        public async Task<bool> HasAccessAsync(int userId) => (await GetStatusAsync(userId)).AccessAllowed;
+        public async Task<bool> HasAccessAsync(int userId)
+            => (await GetStatusAsync(userId)).AccessAllowed;
 
-        /// Called ONLY from the verified webhook. Creates a 30-day "monthly" row starting at verification time
-        /// (or right after the current period if the user renews early). Order update + new row save atomically;
-        /// the unique index on ProviderPaymentId rejects a payment that was already used.
-        public async Task ActivateAsync(SubscriptionPayment order, string providerPaymentId, string? upiReference)
+        public async Task ActivateAsync(SubscriptionPayment order, string providerPaymentId, string? paymentReference)
         {
+            if (order.Status == "paid") return;
             var now = DateTime.UtcNow;
-            var lastEnd = await _db.Subscriptions
-                .Where(s => s.UserId == order.UserId && s.PlanType == SubscriptionPlan.Monthly && s.IsActive)
-                .MaxAsync(s => (DateTime?)s.EndDate);
-            var start = lastEnd.HasValue && lastEnd.Value > now ? lastEnd.Value : now;
 
-            order.Status = "paid";
+            var currentEnd = await _db.Subscriptions
+                .Where(s => s.UserId == order.UserId && s.PlanType == SubscriptionPlan.Monthly
+                         && s.IsActive && s.EndDate != null)
+                .OrderByDescending(s => s.EndDate)
+                .Select(s => s.EndDate)
+                .FirstOrDefaultAsync();
+
+            var startFrom = (currentEnd.HasValue && currentEnd.Value > now) ? currentEnd.Value : now;
+            var newEnd = startFrom.AddDays(MonthlyDays);
+
             _db.Subscriptions.Add(new Subscription
             {
-                UserId = order.UserId, PlanType = SubscriptionPlan.Monthly,
-                StartDate = start, EndDate = start.AddDays(PeriodDays),
-                PricePaid = order.Amount, PaymentMethod = "UPI",
-                ProviderPaymentId = providerPaymentId, PaymentReference = upiReference, PaidAt = now,
-                Note = "30-day subscription", IsActive = true
+                UserId = order.UserId,
+                PlanType = SubscriptionPlan.Monthly,
+                StartDate = startFrom,
+                EndDate = newEnd,
+                PricePaid = order.Amount,
+                PaymentMethod = "UPI",
+                IsActive = true,
+                Note = "Paid subscription via Razorpay UPI QR",
+                ProviderPaymentId = providerPaymentId,
+                PaymentReference = paymentReference,
+                PaidAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
             });
-            await _db.SaveChangesAsync();   // throws DbUpdateException if providerPaymentId was already used
+
+            order.Status = "paid";
+            await _db.SaveChangesAsync();
         }
+
+        private static DateTime? AsUtc(DateTime? d)
+            => d.HasValue ? DateTime.SpecifyKind(d.Value, DateTimeKind.Utc) : null;
     }
 }

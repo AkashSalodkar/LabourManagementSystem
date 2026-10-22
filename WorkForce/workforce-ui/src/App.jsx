@@ -407,6 +407,7 @@ const translations = {
     
     // Exit
     exitConfirm: 'Are you sure you want to exit the app?',
+    cancelProcessConfirm: 'Do you want to cancel the process? Your unsaved details will be lost.',
     yes: 'Yes',
     no: 'No',
     
@@ -634,6 +635,7 @@ const translations = {
     
     // Exit
     exitConfirm: 'क्या आप वाकई ऐप से बाहर निकलना चाहते हैं?',
+    cancelProcessConfirm: 'क्या आप प्रक्रिया रद्द करना चाहते हैं? आपकी बिना सहेजी गई जानकारी हट जाएगी।',
     yes: 'हाँ',
     no: 'नहीं',
     
@@ -7677,18 +7679,107 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     });
   };
 
+  // Ask before throwing away work the user is in the middle of. Returns true so the back
+  // press is consumed; the screen only closes if the user answers Yes.
+  const confirmDiscardThen = (doClose) => {
+    showConfirm(t('cancelProcessConfirm'), doClose, { tone: 'warning', confirmLabel: t('yes'), cancelLabel: t('no') });
+    return true;
+  };
+
+  // Attendance counts as "in progress" only while dates are selected and something was marked/typed
+  // for them (the selection is cleared once the attendance is saved).
+  const hasUnsavedAttendance = () => {
+    if (!selectedAttendanceDates || selectedAttendanceDates.length === 0) return false;
+    return selectedAttendanceDates.some((d) => {
+      const marked = Object.values(pendingAttendanceByDate[d] || {}).some((r) => r && r.status);
+      const advance = Object.values(pendingAdvanceByDate[d] || {}).some((v) => parseFloat(v) > 0);
+      return marked || advance;
+    });
+  };
+
+  // ===== Quotation module: "Do you want to cancel the process?" guard =====
+  // Returns the leave action + dirty flag for the form screen currently open (or null when the
+  // current sub-screen is not a form). Used by BOTH the on-screen back arrow and the Android
+  // hardware back button, so both behave identically.
+  const getQuotationLeaveAction = () => {
+    const isBlank = (f) => !(
+      f.customerId || (f.products || []).length || (f.otherCharges || []).length ||
+      (f.termsIds || []).length || (f.paidInfo || []).length ||
+      String(f.otherInfo || '').trim() || String(f.dueDate || '').trim() ||
+      String(f.poNo || '').trim() || String(f.refNo || '').trim() || String(f.paidAmount || '').trim()
+    );
+    const make = (form, editingId, setEditing, detailView, newView) => ({
+      // Editing an existing document always asks (edits are not diffed); a new one only asks once something was entered.
+      dirty: !!editingId || !isBlank(form),
+      leave: () => {
+        if (editingId) { setEditing(null); setQuotationSubView(detailView); }
+        else setQuotationSubView(newView);
+      },
+    });
+    switch (quotationSubView) {
+      case 'makeQuotation': return make(quotationForm, editingQuotationId, setEditingQuotationId, 'quotationDetail', null);
+      case 'makePurchaseOrder': return make(purchaseOrderForm, editingPurchaseOrderId, setEditingPurchaseOrderId, 'purchaseOrderDetail', null);
+      case 'makeProformaInvoice': return make(proformaInvoiceForm, editingProformaInvoiceId, setEditingProformaInvoiceId, 'proformaInvoiceDetail', null);
+      case 'makeDeliveryNote': return make(deliveryNoteForm, editingDeliveryNoteId, setEditingDeliveryNoteId, 'deliveryNoteDetail', null);
+      case 'makeInvoice': return make(invoiceForm, editingInvoiceId, setEditingInvoiceId, 'invoiceDetail', null);
+      case 'makeReceipt': return make(receiptForm, editingReceiptId, setEditingReceiptId, 'receiptDetail', 'receiptList');
+      case 'addCustomer': {
+        const original = editingCustomerId
+          ? { ...emptyCustomerForm, ...(customers.find((c) => c.id === editingCustomerId) || {}) }
+          : emptyCustomerForm;
+        return {
+          dirty: JSON.stringify(customerForm) !== JSON.stringify(original),
+          leave: () => setQuotationSubView(customerFormReturnView),
+        };
+      }
+      case 'addProduct': {
+        const original = editingProductId
+          ? { ...emptyProductForm, ...(products.find((p) => p.id === editingProductId) || {}) }
+          : emptyProductForm;
+        return {
+          dirty: JSON.stringify(productForm) !== JSON.stringify(original),
+          leave: () => setQuotationSubView(productFormReturnView),
+        };
+      }
+      default: return null;
+    }
+  };
+  // Runs the back action for the open Quotation form screen, asking for confirmation first when
+  // there is unsaved work. Returns true if the back press was handled.
+  const requestQuotationLeave = () => {
+    const action = getQuotationLeaveAction();
+    if (!action) return false;
+    if (action.dirty) return confirmDiscardThen(action.leave);
+    action.leave();
+    return true;
+  };
+
   const closeTopmostScreen = () => {
-    if (isEditWageModalOpen) { setIsEditWageModalOpen(false); return true; }
+    if (isEditWageModalOpen) {
+      if (String(editWageNewAmount || '').trim() !== '') return confirmDiscardThen(() => setIsEditWageModalOpen(false));
+      setIsEditWageModalOpen(false); return true;
+    }
     if (trackerWorkerId) { setTrackerWorkerId(null); return true; }
     if (isCustomWeekPickerOpen) { setIsCustomWeekPickerOpen(false); return true; }
     if (isEditProjectModalOpen) { handleCloseEditProjectModal(); return true; }
     if (isProfileModalOpen) { setIsProfileModalOpen(false); return true; }
-    if (isWorkerSubFormOpen) { handleCloseWorkerFormSheet(); return true; }
+    if (isWorkerSubFormOpen) {
+      const isNewWorker = editingWorkerId === null || editingWorkerId === undefined;
+      const hasTypedWorkerData = [tempWorkerName, tempWorkerPhone, tempWorkerJoiningDate, tempWorkerWageAmount]
+        .some((v) => String(v || '').trim() !== '');
+      if (isNewWorker && hasTypedWorkerData) return confirmDiscardThen(() => handleCloseWorkerFormSheet());
+      handleCloseWorkerFormSheet(); return true;
+    }
     if (isProjectPickerOpen) { setIsProjectPickerOpen(false); return true; }
     if (isAddProjectOpen) {
-      setIsAddProjectOpen(false);
-      setNewSiteName('');
-      setTempWorkersList([]);
+      const closeAddProject = () => {
+        setIsAddProjectOpen(false);
+        setNewSiteName('');
+        setTempWorkersList([]);
+        setIsNewProjectNameDuplicate(false);
+      };
+      if (String(newSiteName || '').trim() !== '' || tempWorkersList.length > 0) return confirmDiscardThen(closeAddProject);
+      closeAddProject();
       return true;
     }
     if (selectedPaymentWorkerId) {
@@ -7700,8 +7791,12 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
       return true;
     }
     if (isAttendanceModalOpen) {
-      setIsAttendanceModalOpen(false);
-      setAttendanceWorkerSearchQuery('');
+      const closeAttendance = () => {
+        setIsAttendanceModalOpen(false);
+        setAttendanceWorkerSearchQuery('');
+      };
+      if (hasUnsavedAttendance()) return confirmDiscardThen(closeAttendance);
+      closeAttendance();
       return true;
     }
     if (isPaymentsPageOpen) {
@@ -7723,6 +7818,8 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     }
     // Quotations module: hardware back closes an open sheet/picker before stepping out of a sub-screen.
     if (showStatePicker) { setShowStatePicker(false); return true; }
+    // Quotations module: form screens ask "cancel the process?" before closing.
+    if (activeModule === 'quotations' && getQuotationLeaveAction()) return requestQuotationLeave();
     // Quotations module: hardware back steps out of a sub-screen before leaving the module.
     if (activeModule === 'quotations' && quotationSubView !== null) {
       setQuotationSubView(null);
@@ -12028,7 +12125,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
         return (
           <div style={customerModuleStyles.screen}>
             <div style={customerModuleStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView(customerFormReturnView)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+              <button type="button" onClick={() => requestQuotationLeave()} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingCustomerId ? 'Edit Customer' : 'Add Customer'}</h1>
@@ -12376,7 +12473,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
         return (
           <div style={customerModuleStyles.screen}>
             <div style={customerModuleStyles.header}>
-              <button type="button" onClick={() => setQuotationSubView(productFormReturnView)} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
+              <button type="button" onClick={() => requestQuotationLeave()} aria-label="Back" style={customerModuleStyles.headerIconBtn}>
                 <FiArrowLeft size={19} color="#ffffff" />
               </button>
               <h1 style={customerModuleStyles.headerTitle}>{editingProductId ? 'Edit Product' : 'Add Product'}</h1>
@@ -12782,8 +12879,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <button
                 type="button"
                 onClick={() => {
-                  if (editingQuotationId) { setEditingQuotationId(null); setQuotationSubView('quotationDetail'); }
-                  else { setQuotationSubView(null); }
+                  requestQuotationLeave();
                 }}
                 aria-label="Back"
                 style={customerModuleStyles.headerIconBtn}
@@ -13673,8 +13769,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <button
                 type="button"
                 onClick={() => {
-                  if (editingPurchaseOrderId) { setEditingPurchaseOrderId(null); setQuotationSubView('purchaseOrderDetail'); }
-                  else { setQuotationSubView(null); }
+                  requestQuotationLeave();
                 }}
                 aria-label="Back"
                 style={customerModuleStyles.headerIconBtn}
@@ -14437,8 +14532,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <button
                 type="button"
                 onClick={() => {
-                  if (editingProformaInvoiceId) { setEditingProformaInvoiceId(null); setQuotationSubView('proformaInvoiceDetail'); }
-                  else { setQuotationSubView(null); }
+                  requestQuotationLeave();
                 }}
                 aria-label="Back"
                 style={customerModuleStyles.headerIconBtn}
@@ -15542,8 +15636,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <button
                 type="button"
                 onClick={() => {
-                  if (editingDeliveryNoteId) { setEditingDeliveryNoteId(null); setQuotationSubView('deliveryNoteDetail'); }
-                  else { setQuotationSubView(null); }
+                  requestQuotationLeave();
                 }}
                 aria-label="Back"
                 style={customerModuleStyles.headerIconBtn}
@@ -16351,8 +16444,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <button
                 type="button"
                 onClick={() => {
-                  if (editingInvoiceId) { setEditingInvoiceId(null); setQuotationSubView('invoiceDetail'); }
-                  else { setQuotationSubView(null); }
+                  requestQuotationLeave();
                 }}
                 aria-label="Back"
                 style={customerModuleStyles.headerIconBtn}
@@ -17075,8 +17167,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
               <button
                 type="button"
                 onClick={() => {
-                  if (editingReceiptId) { setEditingReceiptId(null); setQuotationSubView('receiptDetail'); }
-                  else { setQuotationSubView('receiptList'); }
+                  requestQuotationLeave();
                 }}
                 aria-label="Back"
                 style={customerModuleStyles.headerIconBtn}
@@ -19471,7 +19562,7 @@ if (quotationSubView === 'deliveryNoteSettingsDetail') {
         {isAddProjectOpen && (
           <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: isKeyboardOpen ? '100vh' : 'calc(100vh - 64px)', backgroundColor: '#ffffff', zIndex: 1660, display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
             <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', borderBottom: '1px solid #F1F5F9' }}>
-              <button onClick={() => { setIsAddProjectOpen(false); setNewSiteName(''); setTempWorkersList([]); setIsNewProjectNameDuplicate(false); }} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
+              <button onClick={() => closeTopmostScreen()} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#1E293B', cursor: 'pointer', padding: 0 }}>&lsaquo;</button>
             </div>
             <div style={{ flex: 1, padding: '20px', overflowY: 'auto' }}>
               <div style={{ marginBottom: '24px' }}>

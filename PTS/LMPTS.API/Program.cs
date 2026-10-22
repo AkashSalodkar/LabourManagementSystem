@@ -1,33 +1,29 @@
-using LMPTS.Domain.Entities;
-using LMPTS.Infrastructure.Data;
-using LMPTS.Infrastructure.Sms;
-using LMPTS.Controllers;
-using LMPTS.Infrastructure.Services;
-using Microsoft.EntityFrameworkCore;
 using FirebaseAdmin;
 using Google.Apis.Auth.OAuth2;
+using LMPTS.Controllers;
+using LMPTS.Domain.Entities;
+using LMPTS.Infrastructure.Data;
+using LMPTS.Infrastructure.Services;
+using LMPTS.Infrastructure.Sms;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Cleaned up Controller registration
 builder.Services.AddControllers(options =>
 {
-    // ✅ Blocks data endpoints with HTTP 402 once the free trial / paid period is over.
-    // Login, /api/subscription/* (status, QR order, payment webhook) are exempt inside the filter.
+    // Blocks data endpoints with HTTP 402 once the free trial / paid period is over.
     options.Filters.AddService<SubscriptionRequiredFilter>();
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// ✅ MSG91 SMS service - real values (AuthKey/SenderId/FlowId) come from
-// App Service Application Settings (Msg91__AuthKey etc.), never committed to source.
+// Services
 builder.Services.Configure<Msg91Settings>(builder.Configuration.GetSection("Msg91"));
 builder.Services.AddHttpClient<ISmsService, Msg91SmsService>();
 
-// ✅ Subscription: 30-day free trial (starts on first login), then Rs.99 / 30 days via UPI.
-// The payment gateway (Razorpay UPI QR) credentials come from App Service Application Settings:
-//   Razorpay__KeyId, Razorpay__KeySecret, Razorpay__WebhookSecret  - never commit them to source.
-builder.Services.AddHttpClient(); // IHttpClientFactory, used by SubscriptionController to call the gateway
+// Razorpay / Subscription dependencies (Only added ONCE)
+builder.Services.AddHttpClient();
 builder.Services.AddScoped<SubscriptionService>();
 builder.Services.AddScoped<SubscriptionRequiredFilter>();
 
@@ -39,13 +35,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
         b =>
         {
             b.MigrationsAssembly("LMPTS.Infrastructure");
-            // ✅ Retry transient connection failures automatically - this covers the
-            // Azure SQL Serverless auto-pause/auto-resume delay (can take 30-60+ seconds
-            // on the first request after being idle) instead of failing immediately.
-            b.EnableRetryOnFailure(
-                maxRetryCount: 5,
-                maxRetryDelay: TimeSpan.FromSeconds(30),
-                errorNumbersToAdd: null);
+            b.EnableRetryOnFailure(5, TimeSpan.FromSeconds(30), null);
             b.CommandTimeout(90);
         });
 
@@ -57,7 +47,6 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
         options.LogTo(Console.WriteLine, LogLevel.Information);
     }
 });
-
 // ✅ READ CORS FROM appsettings.json (single source of truth - no hardcoded env-specific origins here)
 var allowedOrigins = builder.Configuration
     .GetSection("CorsOrigins:AllowedOrigins")

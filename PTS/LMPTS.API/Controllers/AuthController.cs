@@ -181,18 +181,9 @@ namespace LMPTS.API.Controllers
 
                 await _context.SaveChangesAsync();
 
-                // Create default subscription (Free plan)
-                var subscription = new Subscription
-                {
-                    UserId = user.Id,
-                    PlanType = "free",
-                    StartDate = DateTime.UtcNow,
-                    IsActive = true,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                await _context.Subscriptions.AddAsync(subscription);
-                await _context.SaveChangesAsync();
+                // No subscription row is created here. The 30-day trial row is created by
+                // SubscriptionService on the user's first /subscription/status call, so a legacy
+                // open-ended "free" row can never grant permanent access.
 
                 return Ok(new AuthResponseDto
                 {
@@ -316,30 +307,6 @@ namespace LMPTS.API.Controllers
             {
                 _logger.LogError(ex, "Error updating profile for user {UserId}", userId);
                 return StatusCode(500, new { message = "An error occurred while updating your profile." });
-            }
-        }
-
-        [HttpGet("test-user/{userId}")]
-        public async Task<IActionResult> TestUser(int userId)
-        {
-            try
-            {
-                var user = await _context.Users.FindAsync(userId);
-                if (user == null)
-                {
-                    return NotFound(new { message = $"User with ID {userId} not found" });
-                }
-                return Ok(new
-                {
-                    userId = user.Id,
-                    fullName = user.FullName,
-                    mobileNumber = user.MobileNumber,
-                    hasProjects = _context.Projects.Any(p => p.UserId == userId)
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = ex.Message });
             }
         }
     }
