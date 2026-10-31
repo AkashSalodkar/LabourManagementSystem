@@ -4,6 +4,7 @@ using LMPTS.Controllers;
 using LMPTS.Domain.Entities;
 using LMPTS.Infrastructure.Data;
 using LMPTS.Infrastructure.Services;
+using LMPTS.API.Filters;
 using LMPTS.Infrastructure.Sms;
 using Microsoft.EntityFrameworkCore;
 
@@ -17,6 +18,22 @@ builder.Services.AddControllers(options =>
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddControllers(options =>
+{
+    // Session validation first: reject requests from devices whose session has
+    // been superseded by a newer login on another device (single-device login).
+    options.Filters.AddService<SessionValidationFilter>();
+
+    // Existing 402 gate when the trial / paid period has ended.
+    options.Filters.AddService<SubscriptionRequiredFilter>();
+});
+
+// ...
+
+// Register the new filter (alongside the existing SubscriptionRequiredFilter)
+builder.Services.AddScoped<SessionValidationFilter>();
+builder.Services.AddScoped<SubscriptionRequiredFilter>();
 
 // Services
 builder.Services.Configure<Msg91Settings>(builder.Configuration.GetSection("Msg91"));

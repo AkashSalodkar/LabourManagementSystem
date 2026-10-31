@@ -39,12 +39,6 @@ namespace LMPTS.API.Controllers
                 var chargesMap = await GetOtherChargesMapAsync("Quotation", ids);
                 var termsMap = await GetTermSelectionsMapAsync("Quotation", ids);
 
-                // includeSnapshot: false - DocSnapshot carries a per-document copy of the
-                // business logo/signature/QR (base64) purely so a single quotation can be
-                // reprinted exactly as it looked when created. The list screen never reads
-                // it (see DocumentListCard), so sending it for every row here made this
-                // endpoint's payload grow with quotation count * image size. It's fetched
-                // on demand instead, via GetQuotation, when a specific quotation is opened.
                 return Ok(quotations.Select(q => MapQuotationToResponse(q, productsMap[q.Id], chargesMap[q.Id], termsMap[q.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
@@ -85,17 +79,14 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                // Add detailed logging
                 _logger.LogInformation("Creating quotation for user {UserId}. Date: {Date}, QuotationNo: {QuotationNo}",
                     userId, request.Date, request.QuotationNo);
 
-                // Validate request
                 if (request == null)
                 {
                     return BadRequest(new { message = "Quotation data is required." });
                 }
 
-                // Validate date
                 if (!TryParseDocumentDate(request.Date, out DateTime date))
                 {
                     _logger.LogWarning("Failed to parse date: {Date}", request.Date);
@@ -148,7 +139,6 @@ namespace LMPTS.API.Controllers
                 quotation.GrandTotal = CalculateGrandTotal(request.Products, request.OtherCharges);
                 quotation.UpdatedAt = DateTime.UtcNow;
 
-                // Remove existing children
                 var existingProducts = await GetProductsAsync("Quotation", id);
                 var existingCharges = await GetOtherChargesAsync("Quotation", id);
                 var existingTerms = await GetTermSelectionsAsync("Quotation", id);
@@ -178,15 +168,10 @@ namespace LMPTS.API.Controllers
             try
             {
                 var quotation = await _context.Quotations.FindAsync(id);
-                if (quotation == null)
-                {
-                    return NotFound(new { message = "Quotation not found." });
-                }
-
+                if (quotation == null) return NotFound(new { message = "Quotation not found." });
                 quotation.Status = status;
                 quotation.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Status updated successfully." });
             }
             catch (Exception ex)
@@ -201,13 +186,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var quotation = await _context.Quotations
-                    .FirstOrDefaultAsync(q => q.Id == id);
-
-                if (quotation == null)
-                {
-                    return NotFound(new { message = "Quotation not found." });
-                }
+                var quotation = await _context.Quotations.FirstOrDefaultAsync(q => q.Id == id);
+                if (quotation == null) return NotFound(new { message = "Quotation not found." });
 
                 var products = await GetProductsAsync("Quotation", id);
                 var charges = await GetOtherChargesAsync("Quotation", id);
@@ -236,18 +216,12 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var invoices = await _context.Invoices
-                    .Where(i => i.UserId == userId)
-                    .OrderByDescending(i => i.CreatedAt)
-                    .ToListAsync();
-
+                var invoices = await _context.Invoices.Where(i => i.UserId == userId).OrderByDescending(i => i.CreatedAt).ToListAsync();
                 var ids = invoices.Select(i => i.Id).ToList();
                 var productsMap = await GetProductsMapAsync("Invoice", ids);
                 var chargesMap = await GetOtherChargesMapAsync("Invoice", ids);
                 var termsMap = await GetTermSelectionsMapAsync("Invoice", ids);
                 var paidInfosMap = await GetPaidInfosMapAsync("Invoice", ids);
-
-                // includeSnapshot: false - see the identical note on GetQuotations above.
                 return Ok(invoices.Select(i => MapInvoiceToResponse(i, productsMap[i.Id], chargesMap[i.Id], termsMap[i.Id], paidInfosMap[i.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
@@ -262,19 +236,12 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var invoice = await _context.Invoices
-                    .FirstOrDefaultAsync(i => i.Id == id);
-
-                if (invoice == null)
-                {
-                    return NotFound(new { message = "Invoice not found." });
-                }
-
+                var invoice = await _context.Invoices.FirstOrDefaultAsync(i => i.Id == id);
+                if (invoice == null) return NotFound(new { message = "Invoice not found." });
                 var products = await GetProductsAsync("Invoice", id);
                 var charges = await GetOtherChargesAsync("Invoice", id);
                 var terms = await GetTermSelectionsAsync("Invoice", id);
                 var paidInfos = await GetPaidInfosAsync("Invoice", id);
-
                 return Ok(MapInvoiceToResponse(invoice, products, charges, terms, paidInfos));
             }
             catch (Exception ex)
@@ -289,19 +256,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                _logger.LogInformation("Creating invoice for user {UserId}. Date: {Date}, InvoiceNo: {InvoiceNo}",
-                    userId, request.Date, request.InvoiceNo);
-
-                if (request == null)
-                {
-                    return BadRequest(new { message = "Invoice data is required." });
-                }
-
-                if (!TryParseDocumentDate(request.Date, out DateTime date))
-                {
-                    _logger.LogWarning("Failed to parse date: {Date}", request.Date);
-                    return BadRequest(new { message = $"Invalid date format: {request.Date}. Please use DD/MM/YYYY." });
-                }
+                if (request == null) return BadRequest(new { message = "Invoice data is required." });
+                if (!TryParseDocumentDate(request.Date, out DateTime date)) return BadRequest(new { message = $"Invalid date format: {request.Date}. Please use DD/MM/YYYY." });
 
                 var invoice = new Invoice { UserId = userId };
                 MapInvoiceRequestToEntity(request, invoice);
@@ -340,13 +296,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var invoice = await _context.Invoices
-                    .FirstOrDefaultAsync(i => i.Id == id);
-
-                if (invoice == null)
-                {
-                    return NotFound(new { message = "Invoice not found." });
-                }
+                var invoice = await _context.Invoices.FirstOrDefaultAsync(i => i.Id == id);
+                if (invoice == null) return NotFound(new { message = "Invoice not found." });
 
                 MapInvoiceRequestToEntity(request, invoice);
                 invoice.GrandTotal = CalculateGrandTotal(request.Products, request.OtherCharges);
@@ -354,7 +305,6 @@ namespace LMPTS.API.Controllers
                 invoice.BalanceDue = invoice.GrandTotal - invoice.PaidTotal;
                 invoice.UpdatedAt = DateTime.UtcNow;
 
-                // Remove existing children
                 var existingProducts = await GetProductsAsync("Invoice", id);
                 var existingCharges = await GetOtherChargesAsync("Invoice", id);
                 var existingTerms = await GetTermSelectionsAsync("Invoice", id);
@@ -387,15 +337,10 @@ namespace LMPTS.API.Controllers
             try
             {
                 var invoice = await _context.Invoices.FindAsync(id);
-                if (invoice == null)
-                {
-                    return NotFound(new { message = "Invoice not found." });
-                }
-
+                if (invoice == null) return NotFound(new { message = "Invoice not found." });
                 invoice.Status = status;
                 invoice.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Status updated successfully." });
             }
             catch (Exception ex)
@@ -410,13 +355,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var invoice = await _context.Invoices
-                    .FirstOrDefaultAsync(i => i.Id == id);
-
-                if (invoice == null)
-                {
-                    return NotFound(new { message = "Invoice not found." });
-                }
+                var invoice = await _context.Invoices.FirstOrDefaultAsync(i => i.Id == id);
+                if (invoice == null) return NotFound(new { message = "Invoice not found." });
 
                 var products = await GetProductsAsync("Invoice", id);
                 var charges = await GetOtherChargesAsync("Invoice", id);
@@ -447,17 +387,11 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var purchaseOrders = await _context.PurchaseOrders
-                    .Where(p => p.UserId == userId)
-                    .OrderByDescending(p => p.CreatedAt)
-                    .ToListAsync();
-
+                var purchaseOrders = await _context.PurchaseOrders.Where(p => p.UserId == userId).OrderByDescending(p => p.CreatedAt).ToListAsync();
                 var ids = purchaseOrders.Select(p => p.Id).ToList();
                 var productsMap = await GetProductsMapAsync("PurchaseOrder", ids);
                 var chargesMap = await GetOtherChargesMapAsync("PurchaseOrder", ids);
                 var termsMap = await GetTermSelectionsMapAsync("PurchaseOrder", ids);
-
-                // includeSnapshot: false - see the identical note on GetQuotations above.
                 return Ok(purchaseOrders.Select(p => MapPurchaseOrderToResponse(p, productsMap[p.Id], chargesMap[p.Id], termsMap[p.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
@@ -472,18 +406,11 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var purchaseOrder = await _context.PurchaseOrders
-                    .FirstOrDefaultAsync(p => p.Id == id);
-
-                if (purchaseOrder == null)
-                {
-                    return NotFound(new { message = "Purchase order not found." });
-                }
-
+                var purchaseOrder = await _context.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == id);
+                if (purchaseOrder == null) return NotFound(new { message = "Purchase order not found." });
                 var products = await GetProductsAsync("PurchaseOrder", id);
                 var charges = await GetOtherChargesAsync("PurchaseOrder", id);
                 var terms = await GetTermSelectionsAsync("PurchaseOrder", id);
-
                 return Ok(MapPurchaseOrderToResponse(purchaseOrder, products, charges, terms));
             }
             catch (Exception ex)
@@ -498,44 +425,15 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                _logger.LogInformation("Creating purchase order for user {UserId}. Date: {Date}, PO No: {PONo}",
-                    userId, request.Date, request.PurchaseOrderNo);
+                if (request == null) return BadRequest(new { message = "Purchase order data is required." });
+                if (string.IsNullOrWhiteSpace(request.PurchaseOrderNo)) return BadRequest(new { message = "Purchase Order number is required." });
+                if (!TryParseDocumentDate(request.Date, out DateTime date)) return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
+                if (request.Products == null || request.Products.Count == 0) return BadRequest(new { message = "At least one product is required." });
+                if (request.CustomerId == null || request.CustomerId <= 0) return BadRequest(new { message = "Customer selection is required." });
 
-                // Validate request
-                if (request == null)
-                {
-                    return BadRequest(new { message = "Purchase order data is required." });
-                }
-
-                // Validate Purchase Order Number
-                if (string.IsNullOrWhiteSpace(request.PurchaseOrderNo))
-                {
-                    return BadRequest(new { message = "Purchase Order number is required." });
-                }
-
-                // Validate and parse date
-                if (!TryParseDocumentDate(request.Date, out DateTime date))
-                {
-                    _logger.LogWarning("Failed to parse date: {Date} for user {UserId}", request.Date, userId);
-                    return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
-                }
-
-                // Validate products
-                if (request.Products == null || request.Products.Count == 0)
-                {
-                    return BadRequest(new { message = "At least one product is required." });
-                }
-
-                // Validate customer
-                if (request.CustomerId == null || request.CustomerId <= 0)
-                {
-                    return BadRequest(new { message = "Customer selection is required." });
-                }
-
-                // Create the purchase order entity
                 var purchaseOrder = new PurchaseOrder { UserId = userId };
                 MapPurchaseOrderRequestToEntity(request, purchaseOrder);
-                purchaseOrder.Date = date; // Ensure date is set
+                purchaseOrder.Date = date;
                 purchaseOrder.GrandTotal = CalculateGrandTotal(request.Products, request.OtherCharges);
                 purchaseOrder.Status = "In-Progress";
                 purchaseOrder.CreatedAt = DateTime.UtcNow;
@@ -544,12 +442,8 @@ namespace LMPTS.API.Controllers
                 _context.PurchaseOrders.Add(purchaseOrder);
                 await _context.SaveChangesAsync();
 
-                // Save child entities (products, other charges, terms)
                 await SaveDocumentChildren(purchaseOrder.Id, "PurchaseOrder", request.Products, request.OtherCharges, request.TermsIds, null);
                 await _context.SaveChangesAsync();
-
-                _logger.LogInformation("Purchase Order created successfully with ID {PurchaseOrderId} for user {UserId}",
-                    purchaseOrder.Id, userId);
 
                 var newProducts = await GetProductsAsync("PurchaseOrder", purchaseOrder.Id);
                 var newCharges = await GetOtherChargesAsync("PurchaseOrder", purchaseOrder.Id);
@@ -574,19 +468,13 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var purchaseOrder = await _context.PurchaseOrders
-                    .FirstOrDefaultAsync(p => p.Id == id);
-
-                if (purchaseOrder == null)
-                {
-                    return NotFound(new { message = "Purchase order not found." });
-                }
+                var purchaseOrder = await _context.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == id);
+                if (purchaseOrder == null) return NotFound(new { message = "Purchase order not found." });
 
                 MapPurchaseOrderRequestToEntity(request, purchaseOrder);
                 purchaseOrder.GrandTotal = CalculateGrandTotal(request.Products, request.OtherCharges);
                 purchaseOrder.UpdatedAt = DateTime.UtcNow;
 
-                // Remove existing children
                 var existingProducts = await GetProductsAsync("PurchaseOrder", id);
                 var existingCharges = await GetOtherChargesAsync("PurchaseOrder", id);
                 var existingTerms = await GetTermSelectionsAsync("PurchaseOrder", id);
@@ -616,15 +504,10 @@ namespace LMPTS.API.Controllers
             try
             {
                 var purchaseOrder = await _context.PurchaseOrders.FindAsync(id);
-                if (purchaseOrder == null)
-                {
-                    return NotFound(new { message = "Purchase order not found." });
-                }
-
+                if (purchaseOrder == null) return NotFound(new { message = "Purchase order not found." });
                 purchaseOrder.Status = status;
                 purchaseOrder.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Status updated successfully." });
             }
             catch (Exception ex)
@@ -639,13 +522,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var purchaseOrder = await _context.PurchaseOrders
-                    .FirstOrDefaultAsync(p => p.Id == id);
-
-                if (purchaseOrder == null)
-                {
-                    return NotFound(new { message = "Purchase order not found." });
-                }
+                var purchaseOrder = await _context.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == id);
+                if (purchaseOrder == null) return NotFound(new { message = "Purchase order not found." });
 
                 var products = await GetProductsAsync("PurchaseOrder", id);
                 var charges = await GetOtherChargesAsync("PurchaseOrder", id);
@@ -674,18 +552,12 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var proformaInvoices = await _context.ProformaInvoices
-                    .Where(p => p.UserId == userId)
-                    .OrderByDescending(p => p.CreatedAt)
-                    .ToListAsync();
-
+                var proformaInvoices = await _context.ProformaInvoices.Where(p => p.UserId == userId).OrderByDescending(p => p.CreatedAt).ToListAsync();
                 var ids = proformaInvoices.Select(p => p.Id).ToList();
                 var productsMap = await GetProductsMapAsync("ProformaInvoice", ids);
                 var chargesMap = await GetOtherChargesMapAsync("ProformaInvoice", ids);
                 var termsMap = await GetTermSelectionsMapAsync("ProformaInvoice", ids);
                 var paidInfosMap = await GetPaidInfosMapAsync("ProformaInvoice", ids);
-
-                // includeSnapshot: false - see the identical note on GetQuotations above.
                 return Ok(proformaInvoices.Select(p => MapProformaInvoiceToResponse(p, productsMap[p.Id], chargesMap[p.Id], termsMap[p.Id], paidInfosMap[p.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
@@ -700,19 +572,12 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var proformaInvoice = await _context.ProformaInvoices
-                    .FirstOrDefaultAsync(p => p.Id == id);
-
-                if (proformaInvoice == null)
-                {
-                    return NotFound(new { message = "Proforma invoice not found." });
-                }
-
+                var proformaInvoice = await _context.ProformaInvoices.FirstOrDefaultAsync(p => p.Id == id);
+                if (proformaInvoice == null) return NotFound(new { message = "Proforma invoice not found." });
                 var products = await GetProductsAsync("ProformaInvoice", id);
                 var charges = await GetOtherChargesAsync("ProformaInvoice", id);
                 var terms = await GetTermSelectionsAsync("ProformaInvoice", id);
                 var paidInfos = await GetPaidInfosAsync("ProformaInvoice", id);
-
                 return Ok(MapProformaInvoiceToResponse(proformaInvoice, products, charges, terms, paidInfos));
             }
             catch (Exception ex)
@@ -727,44 +592,15 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                _logger.LogInformation("Creating proforma invoice for user {UserId}. Date: {Date}, PI No: {PINo}",
-                    userId, request.Date, request.ProformaInvoiceNo);
+                if (request == null) return BadRequest(new { message = "Proforma invoice data is required." });
+                if (string.IsNullOrWhiteSpace(request.ProformaInvoiceNo)) return BadRequest(new { message = "Proforma Invoice number is required." });
+                if (!TryParseDocumentDate(request.Date, out DateTime date)) return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
+                if (request.Products == null || request.Products.Count == 0) return BadRequest(new { message = "At least one product is required." });
+                if (request.CustomerId == null || request.CustomerId <= 0) return BadRequest(new { message = "Customer selection is required." });
 
-                // Validate request
-                if (request == null)
-                {
-                    return BadRequest(new { message = "Proforma invoice data is required." });
-                }
-
-                // Validate Proforma Invoice Number
-                if (string.IsNullOrWhiteSpace(request.ProformaInvoiceNo))
-                {
-                    return BadRequest(new { message = "Proforma Invoice number is required." });
-                }
-
-                // Validate and parse date
-                if (!TryParseDocumentDate(request.Date, out DateTime date))
-                {
-                    _logger.LogWarning("Failed to parse date: {Date} for user {UserId}", request.Date, userId);
-                    return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
-                }
-
-                // Validate products
-                if (request.Products == null || request.Products.Count == 0)
-                {
-                    return BadRequest(new { message = "At least one product is required." });
-                }
-
-                // Validate customer
-                if (request.CustomerId == null || request.CustomerId <= 0)
-                {
-                    return BadRequest(new { message = "Customer selection is required." });
-                }
-
-                // Create the proforma invoice entity
                 var proformaInvoice = new ProformaInvoice { UserId = userId };
                 MapProformaInvoiceRequestToEntity(request, proformaInvoice);
-                proformaInvoice.Date = date; // Ensure date is set
+                proformaInvoice.Date = date;
                 proformaInvoice.GrandTotal = CalculateGrandTotal(request.Products, request.OtherCharges);
                 proformaInvoice.PaidTotal = request.PaidInfo?.Sum(p => p.Amount) ?? 0;
                 proformaInvoice.BalanceDue = proformaInvoice.GrandTotal - proformaInvoice.PaidTotal;
@@ -772,29 +608,16 @@ namespace LMPTS.API.Controllers
                 proformaInvoice.CreatedAt = DateTime.UtcNow;
                 proformaInvoice.UpdatedAt = DateTime.UtcNow;
 
-                // Validate and parse DueDate if provided
-                if (!string.IsNullOrWhiteSpace(request.DueDate))
+                if (!string.IsNullOrWhiteSpace(request.DueDate) && TryParseDocumentDate(request.DueDate, out DateTime dueDate))
                 {
-                    if (TryParseDocumentDate(request.DueDate, out DateTime dueDate))
-                    {
-                        proformaInvoice.DueDate = dueDate;
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Failed to parse DueDate: {DueDate} for user {UserId}", request.DueDate, userId);
-                        // Don't fail the request, just log the warning
-                    }
+                    proformaInvoice.DueDate = dueDate;
                 }
 
                 _context.ProformaInvoices.Add(proformaInvoice);
                 await _context.SaveChangesAsync();
 
-                // Save child entities (products, other charges, terms, paid info)
                 await SaveDocumentChildren(proformaInvoice.Id, "ProformaInvoice", request.Products, request.OtherCharges, request.TermsIds, request.PaidInfo);
                 await _context.SaveChangesAsync();
-
-                _logger.LogInformation("Proforma Invoice created successfully with ID {ProformaInvoiceId} for user {UserId}",
-                    proformaInvoice.Id, userId);
 
                 var newProducts = await GetProductsAsync("ProformaInvoice", proformaInvoice.Id);
                 var newCharges = await GetOtherChargesAsync("ProformaInvoice", proformaInvoice.Id);
@@ -820,13 +643,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var proformaInvoice = await _context.ProformaInvoices
-                    .FirstOrDefaultAsync(p => p.Id == id);
-
-                if (proformaInvoice == null)
-                {
-                    return NotFound(new { message = "Proforma invoice not found." });
-                }
+                var proformaInvoice = await _context.ProformaInvoices.FirstOrDefaultAsync(p => p.Id == id);
+                if (proformaInvoice == null) return NotFound(new { message = "Proforma invoice not found." });
 
                 MapProformaInvoiceRequestToEntity(request, proformaInvoice);
                 proformaInvoice.GrandTotal = CalculateGrandTotal(request.Products, request.OtherCharges);
@@ -834,7 +652,6 @@ namespace LMPTS.API.Controllers
                 proformaInvoice.BalanceDue = proformaInvoice.GrandTotal - proformaInvoice.PaidTotal;
                 proformaInvoice.UpdatedAt = DateTime.UtcNow;
 
-                // Remove existing children
                 var existingProducts = await GetProductsAsync("ProformaInvoice", id);
                 var existingCharges = await GetOtherChargesAsync("ProformaInvoice", id);
                 var existingTerms = await GetTermSelectionsAsync("ProformaInvoice", id);
@@ -867,15 +684,10 @@ namespace LMPTS.API.Controllers
             try
             {
                 var proformaInvoice = await _context.ProformaInvoices.FindAsync(id);
-                if (proformaInvoice == null)
-                {
-                    return NotFound(new { message = "Proforma invoice not found." });
-                }
-
+                if (proformaInvoice == null) return NotFound(new { message = "Proforma invoice not found." });
                 proformaInvoice.Status = status;
                 proformaInvoice.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Status updated successfully." });
             }
             catch (Exception ex)
@@ -890,13 +702,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var proformaInvoice = await _context.ProformaInvoices
-                    .FirstOrDefaultAsync(p => p.Id == id);
-
-                if (proformaInvoice == null)
-                {
-                    return NotFound(new { message = "Proforma invoice not found." });
-                }
+                var proformaInvoice = await _context.ProformaInvoices.FirstOrDefaultAsync(p => p.Id == id);
+                if (proformaInvoice == null) return NotFound(new { message = "Proforma invoice not found." });
 
                 var products = await GetProductsAsync("ProformaInvoice", id);
                 var charges = await GetOtherChargesAsync("ProformaInvoice", id);
@@ -927,17 +734,11 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var deliveryNotes = await _context.DeliveryNotes
-                    .Where(d => d.UserId == userId)
-                    .OrderByDescending(d => d.CreatedAt)
-                    .ToListAsync();
-
+                var deliveryNotes = await _context.DeliveryNotes.Where(d => d.UserId == userId).OrderByDescending(d => d.CreatedAt).ToListAsync();
                 var ids = deliveryNotes.Select(d => d.Id).ToList();
                 var productsMap = await GetProductsMapAsync("DeliveryNote", ids);
                 var chargesMap = await GetOtherChargesMapAsync("DeliveryNote", ids);
                 var termsMap = await GetTermSelectionsMapAsync("DeliveryNote", ids);
-
-                // includeSnapshot: false - see the identical note on GetQuotations above.
                 return Ok(deliveryNotes.Select(d => MapDeliveryNoteToResponse(d, productsMap[d.Id], chargesMap[d.Id], termsMap[d.Id], includeSnapshot: false)));
             }
             catch (Exception ex)
@@ -952,18 +753,11 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var deliveryNote = await _context.DeliveryNotes
-                    .FirstOrDefaultAsync(d => d.Id == id);
-
-                if (deliveryNote == null)
-                {
-                    return NotFound(new { message = "Delivery note not found." });
-                }
-
+                var deliveryNote = await _context.DeliveryNotes.FirstOrDefaultAsync(d => d.Id == id);
+                if (deliveryNote == null) return NotFound(new { message = "Delivery note not found." });
                 var products = await GetProductsAsync("DeliveryNote", id);
                 var charges = await GetOtherChargesAsync("DeliveryNote", id);
                 var terms = await GetTermSelectionsAsync("DeliveryNote", id);
-
                 return Ok(MapDeliveryNoteToResponse(deliveryNote, products, charges, terms));
             }
             catch (Exception ex)
@@ -978,38 +772,12 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                _logger.LogInformation("Creating delivery note for user {UserId}. Date: {Date}, DN No: {DNNo}",
-                    userId, request.Date, request.DeliveryNoteNo);
+                if (request == null) return BadRequest(new { message = "Delivery note data is required." });
+                if (string.IsNullOrWhiteSpace(request.DeliveryNoteNo)) return BadRequest(new { message = "Delivery Note number is required." });
+                if (!TryParseDocumentDate(request.Date, out DateTime date)) return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
+                if (request.Products == null || request.Products.Count == 0) return BadRequest(new { message = "At least one product is required." });
+                if (request.CustomerId == null || request.CustomerId <= 0) return BadRequest(new { message = "Customer selection is required." });
 
-                if (request == null)
-                {
-                    return BadRequest(new { message = "Delivery note data is required." });
-                }
-
-                if (string.IsNullOrWhiteSpace(request.DeliveryNoteNo))
-                {
-                    return BadRequest(new { message = "Delivery Note number is required." });
-                }
-
-                if (!TryParseDocumentDate(request.Date, out DateTime date))
-                {
-                    _logger.LogWarning("Failed to parse date: {Date} for user {UserId}", request.Date, userId);
-                    return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
-                }
-
-                // Validate products
-                if (request.Products == null || request.Products.Count == 0)
-                {
-                    return BadRequest(new { message = "At least one product is required." });
-                }
-
-                // Validate customer
-                if (request.CustomerId == null || request.CustomerId <= 0)
-                {
-                    return BadRequest(new { message = "Customer selection is required." });
-                }
-
-                // Create the delivery note entity
                 var deliveryNote = new DeliveryNote
                 {
                     UserId = userId,
@@ -1033,24 +801,10 @@ namespace LMPTS.API.Controllers
                 };
 
                 _context.DeliveryNotes.Add(deliveryNote);
-
-                // IMPORTANT: Save changes BEFORE adding child records
                 await _context.SaveChangesAsync();
 
-                // Now save child entities with the correct DocumentId
-                await SaveDocumentChildren(
-                    deliveryNote.Id,
-                    "DeliveryNote",
-                    request.Products,
-                    request.OtherCharges ?? new List<DocumentOtherChargeDto>(),
-                    request.TermsIds,
-                    null
-                );
-
+                await SaveDocumentChildren(deliveryNote.Id, "DeliveryNote", request.Products, request.OtherCharges ?? new List<DocumentOtherChargeDto>(), request.TermsIds, null);
                 await _context.SaveChangesAsync();
-
-                _logger.LogInformation("Delivery Note created successfully with ID {DeliveryNoteId} for user {UserId}",
-                    deliveryNote.Id, userId);
 
                 var newProducts = await GetProductsAsync("DeliveryNote", deliveryNote.Id);
                 var newCharges = await GetOtherChargesAsync("DeliveryNote", deliveryNote.Id);
@@ -1075,18 +829,12 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var deliveryNote = await _context.DeliveryNotes
-                    .FirstOrDefaultAsync(d => d.Id == id);
-
-                if (deliveryNote == null)
-                {
-                    return NotFound(new { message = "Delivery note not found." });
-                }
+                var deliveryNote = await _context.DeliveryNotes.FirstOrDefaultAsync(d => d.Id == id);
+                if (deliveryNote == null) return NotFound(new { message = "Delivery note not found." });
 
                 MapDeliveryNoteRequestToEntity(request, deliveryNote);
                 deliveryNote.UpdatedAt = DateTime.UtcNow;
 
-                // Remove existing children
                 var existingProducts = await GetProductsAsync("DeliveryNote", id);
                 var existingCharges = await GetOtherChargesAsync("DeliveryNote", id);
                 var existingTerms = await GetTermSelectionsAsync("DeliveryNote", id);
@@ -1116,15 +864,10 @@ namespace LMPTS.API.Controllers
             try
             {
                 var deliveryNote = await _context.DeliveryNotes.FindAsync(id);
-                if (deliveryNote == null)
-                {
-                    return NotFound(new { message = "Delivery note not found." });
-                }
-
+                if (deliveryNote == null) return NotFound(new { message = "Delivery note not found." });
                 deliveryNote.Status = status;
                 deliveryNote.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Status updated successfully." });
             }
             catch (Exception ex)
@@ -1139,13 +882,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var deliveryNote = await _context.DeliveryNotes
-                    .FirstOrDefaultAsync(d => d.Id == id);
-
-                if (deliveryNote == null)
-                {
-                    return NotFound(new { message = "Delivery note not found." });
-                }
+                var deliveryNote = await _context.DeliveryNotes.FirstOrDefaultAsync(d => d.Id == id);
+                if (deliveryNote == null) return NotFound(new { message = "Delivery note not found." });
 
                 var products = await GetProductsAsync("DeliveryNote", id);
                 var charges = await GetOtherChargesAsync("DeliveryNote", id);
@@ -1174,12 +912,7 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var receipts = await _context.Receipts
-                    .Where(r => r.UserId == userId)
-                    .OrderByDescending(r => r.CreatedAt)
-                    .ToListAsync();
-
-                // includeSnapshot: false - see the identical note on GetQuotations above.
+                var receipts = await _context.Receipts.Where(r => r.UserId == userId).OrderByDescending(r => r.CreatedAt).ToListAsync();
                 return Ok(receipts.Select(r => MapReceiptToResponse(r, includeSnapshot: false)));
             }
             catch (Exception ex)
@@ -1194,14 +927,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var receipt = await _context.Receipts
-                    .FirstOrDefaultAsync(r => r.Id == id);
-
-                if (receipt == null)
-                {
-                    return NotFound(new { message = "Receipt not found." });
-                }
-
+                var receipt = await _context.Receipts.FirstOrDefaultAsync(r => r.Id == id);
+                if (receipt == null) return NotFound(new { message = "Receipt not found." });
                 return Ok(MapReceiptToResponse(receipt));
             }
             catch (Exception ex)
@@ -1216,36 +943,12 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                _logger.LogInformation("Creating receipt for user {UserId}. Date: {Date}, ReceiptNo: {ReceiptNo}",
-                    userId, request.Date, request.ReceiptNo);
+                if (request == null) return BadRequest(new { message = "Receipt data is required." });
+                if (string.IsNullOrWhiteSpace(request.ReceiptNo)) return BadRequest(new { message = "Receipt number is required." });
+                if (!TryParseDocumentDate(request.Date, out DateTime date)) return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
+                if (request.CustomerId == null || request.CustomerId <= 0) return BadRequest(new { message = "Customer selection is required." });
+                if (request.PaidAmount == null || request.PaidAmount <= 0) return BadRequest(new { message = "Paid amount is required and must be greater than 0." });
 
-                if (request == null)
-                {
-                    return BadRequest(new { message = "Receipt data is required." });
-                }
-
-                if (string.IsNullOrWhiteSpace(request.ReceiptNo))
-                {
-                    return BadRequest(new { message = "Receipt number is required." });
-                }
-
-                if (!TryParseDocumentDate(request.Date, out DateTime date))
-                {
-                    _logger.LogWarning("Failed to parse date: {Date} for user {UserId}", request.Date, userId);
-                    return BadRequest(new { message = $"Invalid date format: '{request.Date}'. Please use DD/MM/YYYY format." });
-                }
-
-                if (request.CustomerId == null || request.CustomerId <= 0)
-                {
-                    return BadRequest(new { message = "Customer selection is required." });
-                }
-
-                if (request.PaidAmount == null || request.PaidAmount <= 0)
-                {
-                    return BadRequest(new { message = "Paid amount is required and must be greater than 0." });
-                }
-
-                // Create the receipt entity (Receipt doesn't have child records)
                 var receipt = new Receipt
                 {
                     UserId = userId,
@@ -1273,9 +976,6 @@ namespace LMPTS.API.Controllers
                 _context.Receipts.Add(receipt);
                 await _context.SaveChangesAsync();
 
-                _logger.LogInformation("Receipt created successfully with ID {ReceiptId} for user {UserId}",
-                    receipt.Id, userId);
-
                 return CreatedAtAction(nameof(GetReceipt), new { id = receipt.Id }, MapReceiptToResponse(receipt));
             }
             catch (DbUpdateException dbEx)
@@ -1295,13 +995,8 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var receipt = await _context.Receipts
-                    .FirstOrDefaultAsync(r => r.Id == id);
-
-                if (receipt == null)
-                {
-                    return NotFound(new { message = "Receipt not found." });
-                }
+                var receipt = await _context.Receipts.FirstOrDefaultAsync(r => r.Id == id);
+                if (receipt == null) return NotFound(new { message = "Receipt not found." });
 
                 MapReceiptRequestToEntity(request, receipt);
                 receipt.UpdatedAt = DateTime.UtcNow;
@@ -1324,15 +1019,10 @@ namespace LMPTS.API.Controllers
             try
             {
                 var receipt = await _context.Receipts.FindAsync(id);
-                if (receipt == null)
-                {
-                    return NotFound(new { message = "Receipt not found." });
-                }
-
+                if (receipt == null) return NotFound(new { message = "Receipt not found." });
                 receipt.Status = status;
                 receipt.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Status updated successfully." });
             }
             catch (Exception ex)
@@ -1348,14 +1038,9 @@ namespace LMPTS.API.Controllers
             try
             {
                 var receipt = await _context.Receipts.FindAsync(id);
-                if (receipt == null)
-                {
-                    return NotFound(new { message = "Receipt not found." });
-                }
-
+                if (receipt == null) return NotFound(new { message = "Receipt not found." });
                 _context.Receipts.Remove(receipt);
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Receipt deleted successfully." });
             }
             catch (Exception ex)
@@ -1397,16 +1082,9 @@ namespace LMPTS.API.Controllers
         {
             try
             {
-                var term = new DocumentTerm
-                {
-                    UserId = userId,
-                    DocumentType = documentType,
-                    Text = request.Text
-                };
-
+                var term = new DocumentTerm { UserId = userId, DocumentType = documentType, Text = request.Text };
                 _context.DocumentTerms.Add(term);
                 await _context.SaveChangesAsync();
-
                 return Ok(new DocumentTermDto { Id = term.Id.ToString(), Text = term.Text });
             }
             catch (Exception ex)
@@ -1422,16 +1100,10 @@ namespace LMPTS.API.Controllers
             try
             {
                 var term = await _context.DocumentTerms.FindAsync(id);
-                if (term == null)
-                {
-                    return NotFound(new { message = "Term not found." });
-                }
-
+                if (term == null) return NotFound(new { message = "Term not found." });
                 term.Text = request.Text;
                 term.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
-
                 return Ok(new DocumentTermDto { Id = term.Id.ToString(), Text = term.Text });
             }
             catch (Exception ex)
@@ -1447,14 +1119,9 @@ namespace LMPTS.API.Controllers
             try
             {
                 var term = await _context.DocumentTerms.FindAsync(id);
-                if (term == null)
-                {
-                    return NotFound(new { message = "Term not found." });
-                }
-
+                if (term == null) return NotFound(new { message = "Term not found." });
                 _context.DocumentTerms.Remove(term);
                 await _context.SaveChangesAsync();
-
                 return Ok(new { message = "Term deleted successfully." });
             }
             catch (Exception ex)
@@ -1510,10 +1177,8 @@ namespace LMPTS.API.Controllers
                     settings = new QuotationSetting { UserId = userId };
                     _context.QuotationSettings.Add(settings);
                 }
-
                 MapQuotationSettingsToEntity(request, settings);
                 settings.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
                 return Ok(new { message = "Quotation settings updated successfully." });
             }
@@ -1535,10 +1200,8 @@ namespace LMPTS.API.Controllers
                     settings = new InvoiceSetting { UserId = userId };
                     _context.InvoiceSettings.Add(settings);
                 }
-
                 MapInvoiceSettingsToEntity(request, settings);
                 settings.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
                 return Ok(new { message = "Invoice settings updated successfully." });
             }
@@ -1560,10 +1223,8 @@ namespace LMPTS.API.Controllers
                     settings = new PurchaseOrderSetting { UserId = userId };
                     _context.PurchaseOrderSettings.Add(settings);
                 }
-
                 MapPurchaseOrderSettingsToEntity(request, settings);
                 settings.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
                 return Ok(new { message = "Purchase order settings updated successfully." });
             }
@@ -1585,10 +1246,8 @@ namespace LMPTS.API.Controllers
                     settings = new ProformaInvoiceSetting { UserId = userId };
                     _context.ProformaInvoiceSettings.Add(settings);
                 }
-
                 MapProformaInvoiceSettingsToEntity(request, settings);
                 settings.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
                 return Ok(new { message = "Proforma invoice settings updated successfully." });
             }
@@ -1610,10 +1269,8 @@ namespace LMPTS.API.Controllers
                     settings = new DeliveryNoteSetting { UserId = userId };
                     _context.DeliveryNoteSettings.Add(settings);
                 }
-
                 MapDeliveryNoteSettingsToEntity(request, settings);
                 settings.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
                 return Ok(new { message = "Delivery note settings updated successfully." });
             }
@@ -1635,10 +1292,8 @@ namespace LMPTS.API.Controllers
                     settings = new ReceiptSetting { UserId = userId };
                     _context.ReceiptSettings.Add(settings);
                 }
-
                 MapReceiptSettingsToEntity(request, settings);
                 settings.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
                 return Ok(new { message = "Receipt settings updated successfully." });
             }
@@ -1660,10 +1315,8 @@ namespace LMPTS.API.Controllers
                     settings = new ColumnHeadingSetting { UserId = userId };
                     _context.ColumnHeadingSettings.Add(settings);
                 }
-
                 MapColumnHeadingSettingsToEntity(request, settings);
                 settings.UpdatedAt = DateTime.UtcNow;
-
                 await _context.SaveChangesAsync();
                 return Ok(new { message = "Column heading settings updated successfully." });
             }
@@ -1685,44 +1338,24 @@ namespace LMPTS.API.Controllers
             return Math.Round(productTotal + chargesTotal, 2);
         }
 
-        // Dates coming from the frontend are always formatted as "dd/MM/yyyy"
-        // (see formatQuotationDate in App.jsx). Using the culture-dependent
-        // DateTime.TryParse here previously meant that on a server running an
-        // en-US (or similar) culture, any date like "25/08/2026" - where the
-        // "day" segment isn't a valid month - would silently fail to parse and
-        // leave the Date field unset. Parsing explicitly against the known
-        // "dd/MM/yyyy" format with InvariantCulture removes that ambiguity.
-        // A couple of fallback formats are also accepted (ISO 8601 and the
-        // culture-dependent parse as a last resort) so any date the client
-        // might send in another shape still has a chance to parse correctly.
         private static readonly string[] DocumentDateFormats = {
-            "dd/MM/yyyy",
-            "dd-MM-yyyy",
-            "yyyy-MM-dd",
-            "yyyy-MM-ddTHH:mm:ss",
-            "MM/dd/yyyy"  // Added as fallback
+            "dd/MM/yyyy", "dd-MM-yyyy", "yyyy-MM-dd", "yyyy-MM-ddTHH:mm:ss", "MM/dd/yyyy"
         };
 
         private static bool TryParseDocumentDate(string? value, out DateTime date)
         {
             date = default;
             if (string.IsNullOrWhiteSpace(value)) return false;
-
-            // Try exact formats first
             foreach (var format in DocumentDateFormats)
             {
                 if (DateTime.TryParseExact(value, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
                     return true;
             }
-
-            // Last-resort fallback
             return DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
         }
 
         private async Task SaveDocumentChildren(int documentId, string documentType, List<DocumentProductDto> products, List<DocumentOtherChargeDto> charges, List<string> termIds, List<DocumentPaidInfoDto>? paidInfos)
         {
-            // Only save products if the document type supports them
-            // DeliveryNote, Receipt, and other types might not have products table
             var documentTypesWithProducts = new[] { "Quotation", "Invoice", "PurchaseOrder", "ProformaInvoice", "DeliveryNote" };
 
             if (products != null && documentTypesWithProducts.Contains(documentType))
@@ -1747,7 +1380,6 @@ namespace LMPTS.API.Controllers
                 }
             }
 
-            // Only save other charges if the document type supports them
             if (charges != null && documentTypesWithProducts.Contains(documentType))
             {
                 foreach (var c in charges)
@@ -1766,25 +1398,17 @@ namespace LMPTS.API.Controllers
                 }
             }
 
-            // Save term selections for all document types
             if (termIds != null)
             {
                 foreach (var termId in termIds)
                 {
                     if (int.TryParse(termId, out int id))
                     {
-                        _context.DocumentTermSelections.Add(new DocumentTermSelection
-                        {
-                            DocumentType = documentType,
-                            DocumentId = documentId,
-                            TermId = id,
-                            CreatedAt = DateTime.UtcNow
-                        });
+                        _context.DocumentTermSelections.Add(new DocumentTermSelection { DocumentType = documentType, DocumentId = documentId, TermId = id, CreatedAt = DateTime.UtcNow });
                     }
                 }
             }
 
-            // Only save paid info for Invoice and ProformaInvoice
             if (paidInfos != null && (documentType == "Invoice" || documentType == "ProformaInvoice"))
             {
                 foreach (var p in paidInfos)
@@ -1806,81 +1430,39 @@ namespace LMPTS.API.Controllers
             }
         }
 
-        // ============================================================
-        // CHILD LOADING HELPERS
-        // Products / OtherCharges / TermSelections / PaidInfos live in
-        // shared tables keyed by (DocumentType, DocumentId) rather than
-        // a real foreign key to a specific document table, so Quotation,
-        // Invoice, PurchaseOrder, ProformaInvoice and DeliveryNote have
-        // no "Products"/"OtherCharges"/"TermSelections" navigation
-        // property for EF to .Include(). They must be queried explicitly.
-        // ============================================================
+        private Task<List<DocumentProduct>> GetProductsAsync(string documentType, int documentId) => _context.DocumentProducts.Where(p => p.DocumentType == documentType && p.DocumentId == documentId).ToListAsync();
+        private Task<List<DocumentOtherCharge>> GetOtherChargesAsync(string documentType, int documentId) => _context.DocumentOtherCharges.Where(c => c.DocumentType == documentType && c.DocumentId == documentId).ToListAsync();
+        private Task<List<DocumentTermSelection>> GetTermSelectionsAsync(string documentType, int documentId) => _context.DocumentTermSelections.Where(t => t.DocumentType == documentType && t.DocumentId == documentId).ToListAsync();
+        private Task<List<DocumentPaidInfo>> GetPaidInfosAsync(string documentType, int documentId) => _context.DocumentPaidInfos.Where(p => p.DocumentType == documentType && p.DocumentId == documentId).ToListAsync();
 
-        private Task<List<DocumentProduct>> GetProductsAsync(string documentType, int documentId) =>
-            _context.DocumentProducts
-                .Where(p => p.DocumentType == documentType && p.DocumentId == documentId)
-                .ToListAsync();
-
-        private Task<List<DocumentOtherCharge>> GetOtherChargesAsync(string documentType, int documentId) =>
-            _context.DocumentOtherCharges
-                .Where(c => c.DocumentType == documentType && c.DocumentId == documentId)
-                .ToListAsync();
-
-        private Task<List<DocumentTermSelection>> GetTermSelectionsAsync(string documentType, int documentId) =>
-            _context.DocumentTermSelections
-                .Where(t => t.DocumentType == documentType && t.DocumentId == documentId)
-                .ToListAsync();
-
-        private Task<List<DocumentPaidInfo>> GetPaidInfosAsync(string documentType, int documentId) =>
-            _context.DocumentPaidInfos
-                .Where(p => p.DocumentType == documentType && p.DocumentId == documentId)
-                .ToListAsync();
-
-        // Bulk variants for list endpoints, so we issue one query per
-        // child table instead of one per document (avoids N+1 queries).
         private async Task<ILookup<int, DocumentProduct>> GetProductsMapAsync(string documentType, IEnumerable<int> documentIds)
         {
             var ids = documentIds.ToList();
-            var items = await _context.DocumentProducts
-                .Where(p => p.DocumentType == documentType && ids.Contains(p.DocumentId))
-                .ToListAsync();
+            var items = await _context.DocumentProducts.Where(p => p.DocumentType == documentType && ids.Contains(p.DocumentId)).ToListAsync();
             return items.ToLookup(p => p.DocumentId);
         }
 
         private async Task<ILookup<int, DocumentOtherCharge>> GetOtherChargesMapAsync(string documentType, IEnumerable<int> documentIds)
         {
             var ids = documentIds.ToList();
-            var items = await _context.DocumentOtherCharges
-                .Where(c => c.DocumentType == documentType && ids.Contains(c.DocumentId))
-                .ToListAsync();
+            var items = await _context.DocumentOtherCharges.Where(c => c.DocumentType == documentType && ids.Contains(c.DocumentId)).ToListAsync();
             return items.ToLookup(c => c.DocumentId);
         }
 
         private async Task<ILookup<int, DocumentTermSelection>> GetTermSelectionsMapAsync(string documentType, IEnumerable<int> documentIds)
         {
             var ids = documentIds.ToList();
-            var items = await _context.DocumentTermSelections
-                .Where(t => t.DocumentType == documentType && ids.Contains(t.DocumentId))
-                .ToListAsync();
+            var items = await _context.DocumentTermSelections.Where(t => t.DocumentType == documentType && ids.Contains(t.DocumentId)).ToListAsync();
             return items.ToLookup(t => t.DocumentId);
         }
 
         private async Task<ILookup<int, DocumentPaidInfo>> GetPaidInfosMapAsync(string documentType, IEnumerable<int> documentIds)
         {
             var ids = documentIds.ToList();
-            var items = await _context.DocumentPaidInfos
-                .Where(p => p.DocumentType == documentType && ids.Contains(p.DocumentId))
-                .ToListAsync();
+            var items = await _context.DocumentPaidInfos.Where(p => p.DocumentType == documentType && ids.Contains(p.DocumentId)).ToListAsync();
             return items.ToLookup(p => p.DocumentId);
         }
 
-        // ============================================================
-        // MAPPING METHODS - QUOTATION
-        // ============================================================
-
-        // includeSnapshot defaults to true so GetQuotation (single), CreateQuotation and
-        // UpdateQuotation - which all need the real DocSnapshot for preview/PDF/share -
-        // are unaffected. Only GetQuotations (the list endpoint) passes false.
         private QuotationResponseDto MapQuotationToResponse(Quotation q, IEnumerable<DocumentProduct> qProducts, IEnumerable<DocumentOtherCharge> qCharges, IEnumerable<DocumentTermSelection> qTerms, bool includeSnapshot = true)
         {
             return new QuotationResponseDto
@@ -1901,25 +1483,8 @@ namespace LMPTS.API.Controllers
                 CustomerAddressLine3 = q.CustomerAddressLine3,
                 CustomerBillingAddress = q.CustomerBillingAddress,
                 CustomerShippingAddress = q.CustomerShippingAddress,
-                Products = qProducts.Select(p => new DocumentProductDto
-                {
-                    ProductId = p.ProductId,
-                    Name = p.ProductName,
-                    Price = p.Price,
-                    Gst = p.Gst,
-                    Qty = p.Qty,
-                    Unit = p.Unit,
-                    Hsn = p.Hsn,
-                    Description = p.Description
-                }).ToList(),
-                OtherCharges = qCharges.Select(c => new DocumentOtherChargeDto
-                {
-                    Id = c.Id.ToString(),
-                    Label = c.Label,
-                    Amount = c.Amount,
-                    Taxable = c.IsTaxable,
-                    GstPercent = c.GstPercent
-                }).ToList(),
+                Products = qProducts.Select(p => new DocumentProductDto { ProductId = p.ProductId, Name = p.ProductName, Price = p.Price, Gst = p.Gst, Qty = p.Qty, Unit = p.Unit, Hsn = p.Hsn, Description = p.Description }).ToList(),
+                OtherCharges = qCharges.Select(c => new DocumentOtherChargeDto { Id = c.Id.ToString(), Label = c.Label, Amount = c.Amount, Taxable = c.IsTaxable, GstPercent = c.GstPercent }).ToList(),
                 TermsIds = qTerms.Select(t => t.TermId.ToString()).ToList(),
                 GrandTotal = q.GrandTotal,
                 Status = q.Status,
@@ -1930,28 +1495,12 @@ namespace LMPTS.API.Controllers
 
         private void MapQuotationRequestToEntity(QuotationRequestDto dto, Quotation entity)
         {
-            if (TryParseDocumentDate(dto.Date, out DateTime date))
-                entity.Date = date;
-            else
-                entity.Date = DateTime.UtcNow;
-            entity.QuotationNo = dto.QuotationNo;
-            entity.OtherInfo = dto.OtherInfo;
-            entity.CustomerId = dto.CustomerId;
-            entity.CustomerName = dto.CustomerName;
-            entity.CustomerCompany = dto.CustomerCompany;
-            entity.CustomerMobile = dto.CustomerMobile;
-            entity.CustomerEmail = dto.CustomerEmail;
-            entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
-            entity.CustomerAddressLine2 = dto.CustomerAddressLine2;
-            entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
-            entity.CustomerBillingAddress = dto.CustomerBillingAddress;
-            entity.CustomerShippingAddress = dto.CustomerShippingAddress;
-            entity.DocSnapshot = dto.DocSnapshot;
+            if (TryParseDocumentDate(dto.Date, out DateTime date)) entity.Date = date; else entity.Date = DateTime.UtcNow;
+            entity.QuotationNo = dto.QuotationNo; entity.OtherInfo = dto.OtherInfo; entity.CustomerId = dto.CustomerId; entity.CustomerName = dto.CustomerName;
+            entity.CustomerCompany = dto.CustomerCompany; entity.CustomerMobile = dto.CustomerMobile; entity.CustomerEmail = dto.CustomerEmail;
+            entity.CustomerAddressLine1 = dto.CustomerAddressLine1; entity.CustomerAddressLine2 = dto.CustomerAddressLine2; entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
+            entity.CustomerBillingAddress = dto.CustomerBillingAddress; entity.CustomerShippingAddress = dto.CustomerShippingAddress; entity.DocSnapshot = dto.DocSnapshot;
         }
-
-        // ============================================================
-        // MAPPING METHODS - INVOICE
-        // ============================================================
 
         private InvoiceResponseDto MapInvoiceToResponse(Invoice inv, IEnumerable<DocumentProduct> invProducts, IEnumerable<DocumentOtherCharge> invCharges, IEnumerable<DocumentTermSelection> invTerms, IEnumerable<DocumentPaidInfo> invPaidInfos, bool includeSnapshot = true)
         {
@@ -1975,33 +1524,10 @@ namespace LMPTS.API.Controllers
                 CustomerAddressLine3 = inv.CustomerAddressLine3,
                 CustomerBillingAddress = inv.CustomerBillingAddress,
                 CustomerShippingAddress = inv.CustomerShippingAddress,
-                Products = invProducts.Select(p => new DocumentProductDto
-                {
-                    ProductId = p.ProductId,
-                    Name = p.ProductName,
-                    Price = p.Price,
-                    Gst = p.Gst,
-                    Qty = p.Qty,
-                    Unit = p.Unit,
-                    Hsn = p.Hsn,
-                    Description = p.Description
-                }).ToList(),
-                OtherCharges = invCharges.Select(c => new DocumentOtherChargeDto
-                {
-                    Id = c.Id.ToString(),
-                    Label = c.Label,
-                    Amount = c.Amount,
-                    Taxable = c.IsTaxable,
-                    GstPercent = c.GstPercent
-                }).ToList(),
+                Products = invProducts.Select(p => new DocumentProductDto { ProductId = p.ProductId, Name = p.ProductName, Price = p.Price, Gst = p.Gst, Qty = p.Qty, Unit = p.Unit, Hsn = p.Hsn, Description = p.Description }).ToList(),
+                OtherCharges = invCharges.Select(c => new DocumentOtherChargeDto { Id = c.Id.ToString(), Label = c.Label, Amount = c.Amount, Taxable = c.IsTaxable, GstPercent = c.GstPercent }).ToList(),
                 TermsIds = invTerms.Select(t => t.TermId.ToString()).ToList(),
-                PaidInfo = invPaidInfos.Select(p => new DocumentPaidInfoDto
-                {
-                    Id = p.Id.ToString(),
-                    Date = p.Date.ToString("dd/MM/yyyy"),
-                    Amount = p.Amount,
-                    Note = p.Note
-                }).ToList(),
+                PaidInfo = invPaidInfos.Select(p => new DocumentPaidInfoDto { Id = p.Id.ToString(), Date = p.Date.ToString("dd/MM/yyyy"), Amount = p.Amount, Note = p.Note }).ToList(),
                 GrandTotal = inv.GrandTotal,
                 PaidTotal = inv.PaidTotal,
                 BalanceDue = inv.BalanceDue,
@@ -2013,31 +1539,13 @@ namespace LMPTS.API.Controllers
 
         private void MapInvoiceRequestToEntity(InvoiceRequestDto dto, Invoice entity)
         {
-            if (TryParseDocumentDate(dto.Date, out DateTime date))
-                entity.Date = date;
-            else
-                entity.Date = DateTime.UtcNow;
-            entity.InvoiceNo = dto.InvoiceNo;
-            if (TryParseDocumentDate(dto.DueDate, out DateTime dueDate))
-                entity.DueDate = dueDate;
-            entity.PoNo = dto.PoNo;
-            entity.OtherInfo = dto.OtherInfo;
-            entity.CustomerId = dto.CustomerId;
-            entity.CustomerName = dto.CustomerName;
-            entity.CustomerCompany = dto.CustomerCompany;
-            entity.CustomerMobile = dto.CustomerMobile;
-            entity.CustomerEmail = dto.CustomerEmail;
-            entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
-            entity.CustomerAddressLine2 = dto.CustomerAddressLine2;
-            entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
-            entity.CustomerBillingAddress = dto.CustomerBillingAddress;
-            entity.CustomerShippingAddress = dto.CustomerShippingAddress;
-            entity.DocSnapshot = dto.DocSnapshot;
+            if (TryParseDocumentDate(dto.Date, out DateTime date)) entity.Date = date; else entity.Date = DateTime.UtcNow;
+            entity.InvoiceNo = dto.InvoiceNo; if (TryParseDocumentDate(dto.DueDate, out DateTime dueDate)) entity.DueDate = dueDate;
+            entity.PoNo = dto.PoNo; entity.OtherInfo = dto.OtherInfo; entity.CustomerId = dto.CustomerId; entity.CustomerName = dto.CustomerName; entity.CustomerCompany = dto.CustomerCompany;
+            entity.CustomerMobile = dto.CustomerMobile; entity.CustomerEmail = dto.CustomerEmail; entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
+            entity.CustomerAddressLine2 = dto.CustomerAddressLine2; entity.CustomerAddressLine3 = dto.CustomerAddressLine3; entity.CustomerBillingAddress = dto.CustomerBillingAddress;
+            entity.CustomerShippingAddress = dto.CustomerShippingAddress; entity.DocSnapshot = dto.DocSnapshot;
         }
-
-        // ============================================================
-        // MAPPING METHODS - PURCHASE ORDER
-        // ============================================================
 
         private PurchaseOrderResponseDto MapPurchaseOrderToResponse(PurchaseOrder po, IEnumerable<DocumentProduct> poProducts, IEnumerable<DocumentOtherCharge> poCharges, IEnumerable<DocumentTermSelection> poTerms, bool includeSnapshot = true)
         {
@@ -2059,25 +1567,8 @@ namespace LMPTS.API.Controllers
                 CustomerAddressLine3 = po.CustomerAddressLine3,
                 CustomerBillingAddress = po.CustomerBillingAddress,
                 CustomerShippingAddress = po.CustomerShippingAddress,
-                Products = poProducts.Select(p => new DocumentProductDto
-                {
-                    ProductId = p.ProductId,
-                    Name = p.ProductName,
-                    Price = p.Price,
-                    Gst = p.Gst,
-                    Qty = p.Qty,
-                    Unit = p.Unit,
-                    Hsn = p.Hsn,
-                    Description = p.Description
-                }).ToList(),
-                OtherCharges = poCharges.Select(c => new DocumentOtherChargeDto
-                {
-                    Id = c.Id.ToString(),
-                    Label = c.Label,
-                    Amount = c.Amount,
-                    Taxable = c.IsTaxable,
-                    GstPercent = c.GstPercent
-                }).ToList(),
+                Products = poProducts.Select(p => new DocumentProductDto { ProductId = p.ProductId, Name = p.ProductName, Price = p.Price, Gst = p.Gst, Qty = p.Qty, Unit = p.Unit, Hsn = p.Hsn, Description = p.Description }).ToList(),
+                OtherCharges = poCharges.Select(c => new DocumentOtherChargeDto { Id = c.Id.ToString(), Label = c.Label, Amount = c.Amount, Taxable = c.IsTaxable, GstPercent = c.GstPercent }).ToList(),
                 TermsIds = poTerms.Select(t => t.TermId.ToString()).ToList(),
                 GrandTotal = po.GrandTotal,
                 Status = po.Status,
@@ -2088,26 +1579,12 @@ namespace LMPTS.API.Controllers
 
         private void MapPurchaseOrderRequestToEntity(PurchaseOrderRequestDto dto, PurchaseOrder entity)
         {
-            if (TryParseDocumentDate(dto.Date, out DateTime date))
-                entity.Date = date;
-            entity.PurchaseOrderNo = dto.PurchaseOrderNo;
-            entity.OtherInfo = dto.OtherInfo;
-            entity.CustomerId = dto.CustomerId;
-            entity.CustomerName = dto.CustomerName;
-            entity.CustomerCompany = dto.CustomerCompany;
-            entity.CustomerMobile = dto.CustomerMobile;
-            entity.CustomerEmail = dto.CustomerEmail;
-            entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
-            entity.CustomerAddressLine2 = dto.CustomerAddressLine2;
-            entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
-            entity.CustomerBillingAddress = dto.CustomerBillingAddress;
-            entity.CustomerShippingAddress = dto.CustomerShippingAddress;
-            entity.DocSnapshot = dto.DocSnapshot;
+            if (TryParseDocumentDate(dto.Date, out DateTime date)) entity.Date = date;
+            entity.PurchaseOrderNo = dto.PurchaseOrderNo; entity.OtherInfo = dto.OtherInfo; entity.CustomerId = dto.CustomerId; entity.CustomerName = dto.CustomerName;
+            entity.CustomerCompany = dto.CustomerCompany; entity.CustomerMobile = dto.CustomerMobile; entity.CustomerEmail = dto.CustomerEmail;
+            entity.CustomerAddressLine1 = dto.CustomerAddressLine1; entity.CustomerAddressLine2 = dto.CustomerAddressLine2; entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
+            entity.CustomerBillingAddress = dto.CustomerBillingAddress; entity.CustomerShippingAddress = dto.CustomerShippingAddress; entity.DocSnapshot = dto.DocSnapshot;
         }
-
-        // ============================================================
-        // MAPPING METHODS - PROFORMA INVOICE
-        // ============================================================
 
         private ProformaInvoiceResponseDto MapProformaInvoiceToResponse(ProformaInvoice pi, IEnumerable<DocumentProduct> piProducts, IEnumerable<DocumentOtherCharge> piCharges, IEnumerable<DocumentTermSelection> piTerms, IEnumerable<DocumentPaidInfo> piPaidInfos, bool includeSnapshot = true)
         {
@@ -2131,33 +1608,10 @@ namespace LMPTS.API.Controllers
                 CustomerAddressLine3 = pi.CustomerAddressLine3,
                 CustomerBillingAddress = pi.CustomerBillingAddress,
                 CustomerShippingAddress = pi.CustomerShippingAddress,
-                Products = piProducts.Select(p => new DocumentProductDto
-                {
-                    ProductId = p.ProductId,
-                    Name = p.ProductName,
-                    Price = p.Price,
-                    Gst = p.Gst,
-                    Qty = p.Qty,
-                    Unit = p.Unit,
-                    Hsn = p.Hsn,
-                    Description = p.Description
-                }).ToList(),
-                OtherCharges = piCharges.Select(c => new DocumentOtherChargeDto
-                {
-                    Id = c.Id.ToString(),
-                    Label = c.Label,
-                    Amount = c.Amount,
-                    Taxable = c.IsTaxable,
-                    GstPercent = c.GstPercent
-                }).ToList(),
+                Products = piProducts.Select(p => new DocumentProductDto { ProductId = p.ProductId, Name = p.ProductName, Price = p.Price, Gst = p.Gst, Qty = p.Qty, Unit = p.Unit, Hsn = p.Hsn, Description = p.Description }).ToList(),
+                OtherCharges = piCharges.Select(c => new DocumentOtherChargeDto { Id = c.Id.ToString(), Label = c.Label, Amount = c.Amount, Taxable = c.IsTaxable, GstPercent = c.GstPercent }).ToList(),
                 TermsIds = piTerms.Select(t => t.TermId.ToString()).ToList(),
-                PaidInfo = piPaidInfos.Select(p => new DocumentPaidInfoDto
-                {
-                    Id = p.Id.ToString(),
-                    Date = p.Date.ToString("dd/MM/yyyy"),
-                    Amount = p.Amount,
-                    Note = p.Note
-                }).ToList(),
+                PaidInfo = piPaidInfos.Select(p => new DocumentPaidInfoDto { Id = p.Id.ToString(), Date = p.Date.ToString("dd/MM/yyyy"), Amount = p.Amount, Note = p.Note }).ToList(),
                 GrandTotal = pi.GrandTotal,
                 PaidTotal = pi.PaidTotal,
                 BalanceDue = pi.BalanceDue,
@@ -2169,29 +1623,13 @@ namespace LMPTS.API.Controllers
 
         private void MapProformaInvoiceRequestToEntity(ProformaInvoiceRequestDto dto, ProformaInvoice entity)
         {
-            if (TryParseDocumentDate(dto.Date, out DateTime date))
-                entity.Date = date;
-            entity.ProformaInvoiceNo = dto.ProformaInvoiceNo;
-            if (TryParseDocumentDate(dto.DueDate, out DateTime dueDate))
-                entity.DueDate = dueDate;
-            entity.PoNo = dto.PoNo;
-            entity.OtherInfo = dto.OtherInfo;
-            entity.CustomerId = dto.CustomerId;
-            entity.CustomerName = dto.CustomerName;
-            entity.CustomerCompany = dto.CustomerCompany;
-            entity.CustomerMobile = dto.CustomerMobile;
-            entity.CustomerEmail = dto.CustomerEmail;
-            entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
-            entity.CustomerAddressLine2 = dto.CustomerAddressLine2;
-            entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
-            entity.CustomerBillingAddress = dto.CustomerBillingAddress;
-            entity.CustomerShippingAddress = dto.CustomerShippingAddress;
-            entity.DocSnapshot = dto.DocSnapshot;
+            if (TryParseDocumentDate(dto.Date, out DateTime date)) entity.Date = date;
+            entity.ProformaInvoiceNo = dto.ProformaInvoiceNo; if (TryParseDocumentDate(dto.DueDate, out DateTime dueDate)) entity.DueDate = dueDate;
+            entity.PoNo = dto.PoNo; entity.OtherInfo = dto.OtherInfo; entity.CustomerId = dto.CustomerId; entity.CustomerName = dto.CustomerName; entity.CustomerCompany = dto.CustomerCompany;
+            entity.CustomerMobile = dto.CustomerMobile; entity.CustomerEmail = dto.CustomerEmail; entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
+            entity.CustomerAddressLine2 = dto.CustomerAddressLine2; entity.CustomerAddressLine3 = dto.CustomerAddressLine3; entity.CustomerBillingAddress = dto.CustomerBillingAddress;
+            entity.CustomerShippingAddress = dto.CustomerShippingAddress; entity.DocSnapshot = dto.DocSnapshot;
         }
-
-        // ============================================================
-        // MAPPING METHODS - DELIVERY NOTE
-        // ============================================================
 
         private DeliveryNoteResponseDto MapDeliveryNoteToResponse(DeliveryNote dn, IEnumerable<DocumentProduct> dnProducts, IEnumerable<DocumentOtherCharge> dnCharges, IEnumerable<DocumentTermSelection> dnTerms, bool includeSnapshot = true)
         {
@@ -2214,25 +1652,8 @@ namespace LMPTS.API.Controllers
                 CustomerAddressLine3 = dn.CustomerAddressLine3,
                 CustomerBillingAddress = dn.CustomerBillingAddress,
                 CustomerShippingAddress = dn.CustomerShippingAddress,
-                Products = dnProducts.Select(p => new DocumentProductDto
-                {
-                    ProductId = p.ProductId,
-                    Name = p.ProductName,
-                    Price = p.Price,
-                    Gst = p.Gst,
-                    Qty = p.Qty,
-                    Unit = p.Unit,
-                    Hsn = p.Hsn,
-                    Description = p.Description
-                }).ToList(),
-                OtherCharges = dnCharges.Select(c => new DocumentOtherChargeDto
-                {
-                    Id = c.Id.ToString(),
-                    Label = c.Label,
-                    Amount = c.Amount,
-                    Taxable = c.IsTaxable,
-                    GstPercent = c.GstPercent
-                }).ToList(),
+                Products = dnProducts.Select(p => new DocumentProductDto { ProductId = p.ProductId, Name = p.ProductName, Price = p.Price, Gst = p.Gst, Qty = p.Qty, Unit = p.Unit, Hsn = p.Hsn, Description = p.Description }).ToList(),
+                OtherCharges = dnCharges.Select(c => new DocumentOtherChargeDto { Id = c.Id.ToString(), Label = c.Label, Amount = c.Amount, Taxable = c.IsTaxable, GstPercent = c.GstPercent }).ToList(),
                 TermsIds = dnTerms.Select(t => t.TermId.ToString()).ToList(),
                 Status = dn.Status,
                 CreatedAt = dn.CreatedAt,
@@ -2242,27 +1663,12 @@ namespace LMPTS.API.Controllers
 
         private void MapDeliveryNoteRequestToEntity(DeliveryNoteRequestDto dto, DeliveryNote entity)
         {
-            if (TryParseDocumentDate(dto.Date, out DateTime date))
-                entity.Date = date;
-            entity.DeliveryNoteNo = dto.DeliveryNoteNo;
-            entity.RefNo = dto.RefNo;
-            entity.OtherInfo = dto.OtherInfo;
-            entity.CustomerId = dto.CustomerId;
-            entity.CustomerName = dto.CustomerName;
-            entity.CustomerCompany = dto.CustomerCompany;
-            entity.CustomerMobile = dto.CustomerMobile;
-            entity.CustomerEmail = dto.CustomerEmail;
-            entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
-            entity.CustomerAddressLine2 = dto.CustomerAddressLine2;
-            entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
-            entity.CustomerBillingAddress = dto.CustomerBillingAddress;
-            entity.CustomerShippingAddress = dto.CustomerShippingAddress;
-            entity.DocSnapshot = dto.DocSnapshot;
+            if (TryParseDocumentDate(dto.Date, out DateTime date)) entity.Date = date;
+            entity.DeliveryNoteNo = dto.DeliveryNoteNo; entity.RefNo = dto.RefNo; entity.OtherInfo = dto.OtherInfo; entity.CustomerId = dto.CustomerId;
+            entity.CustomerName = dto.CustomerName; entity.CustomerCompany = dto.CustomerCompany; entity.CustomerMobile = dto.CustomerMobile; entity.CustomerEmail = dto.CustomerEmail;
+            entity.CustomerAddressLine1 = dto.CustomerAddressLine1; entity.CustomerAddressLine2 = dto.CustomerAddressLine2; entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
+            entity.CustomerBillingAddress = dto.CustomerBillingAddress; entity.CustomerShippingAddress = dto.CustomerShippingAddress; entity.DocSnapshot = dto.DocSnapshot;
         }
-
-        // ============================================================
-        // MAPPING METHODS - RECEIPT
-        // ============================================================
 
         private ReceiptResponseDto MapReceiptToResponse(Receipt r, bool includeSnapshot = true)
         {
@@ -2295,33 +1701,13 @@ namespace LMPTS.API.Controllers
 
         private void MapReceiptRequestToEntity(ReceiptRequestDto dto, Receipt entity)
         {
-            if (TryParseDocumentDate(dto.Date, out DateTime date))
-                entity.Date = date;
-            else
-                entity.Date = DateTime.UtcNow;
-
-            entity.ReceiptNo = dto.ReceiptNo;
-            entity.CustomerId = dto.CustomerId;
-            entity.CustomerName = dto.CustomerName;
-            entity.CustomerCompany = dto.CustomerCompany;
-            entity.CustomerMobile = dto.CustomerMobile;
-            entity.CustomerEmail = dto.CustomerEmail;
-            entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
-            entity.CustomerAddressLine2 = dto.CustomerAddressLine2;
-            entity.CustomerAddressLine3 = dto.CustomerAddressLine3;
-            entity.CustomerBillingAddress = dto.CustomerBillingAddress;
-            entity.CustomerShippingAddress = dto.CustomerShippingAddress;
-            entity.PaymentMode = dto.PaymentMode;
-            entity.ReferenceNo = dto.ReferenceNo;
-            // FIX: Handle nullable decimal properly
-            entity.PaidAmount = dto.PaidAmount ?? 0; // Use null-coalescing operator
-            entity.PaymentFor = dto.PaymentFor;
-            entity.DocSnapshot = dto.DocSnapshot;
+            if (TryParseDocumentDate(dto.Date, out DateTime date)) entity.Date = date; else entity.Date = DateTime.UtcNow;
+            entity.ReceiptNo = dto.ReceiptNo; entity.CustomerId = dto.CustomerId; entity.CustomerName = dto.CustomerName; entity.CustomerCompany = dto.CustomerCompany;
+            entity.CustomerMobile = dto.CustomerMobile; entity.CustomerEmail = dto.CustomerEmail; entity.CustomerAddressLine1 = dto.CustomerAddressLine1;
+            entity.CustomerAddressLine2 = dto.CustomerAddressLine2; entity.CustomerAddressLine3 = dto.CustomerAddressLine3; entity.CustomerBillingAddress = dto.CustomerBillingAddress;
+            entity.CustomerShippingAddress = dto.CustomerShippingAddress; entity.PaymentMode = dto.PaymentMode; entity.ReferenceNo = dto.ReferenceNo;
+            entity.PaidAmount = dto.PaidAmount ?? 0; entity.PaymentFor = dto.PaymentFor; entity.DocSnapshot = dto.DocSnapshot;
         }
-
-        // ============================================================
-        // MAPPING METHODS - SETTINGS
-        // ============================================================
 
         private QuotationSettingsDto MapQuotationSettingsToDto(QuotationSetting s)
         {
@@ -2337,23 +1723,19 @@ namespace LMPTS.API.Controllers
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
                 ShowUpiInfo = s.ShowUpiInfo,
-                ShowSignature = s.ShowSignature
+                ShowSignature = s.ShowSignature,
+                TopMessageMode = s.TopMessageMode,
+                BottomMessageMode = s.BottomMessageMode,
+                MessageModeSchemaVersion = s.MessageModeSchemaVersion
             };
         }
 
         private void MapQuotationSettingsToEntity(QuotationSettingsDto dto, QuotationSetting entity)
         {
-            entity.NumberPrefix = dto.NumberPrefix;
-            entity.SerialNumber = dto.SerialNumber;
-            entity.DiscountType = dto.DiscountType;
-            entity.TaxType = dto.TaxType;
-            entity.ShowProductHSN = dto.ShowProductHSN;
-            entity.ShowShippingAddress = dto.ShowShippingAddress;
-            entity.TopMessage = dto.TopMessage;
-            entity.BottomMessage = dto.BottomMessage;
-            entity.ShowBankInfo = dto.ShowBankInfo;
-            entity.ShowUpiInfo = dto.ShowUpiInfo;
-            entity.ShowSignature = dto.ShowSignature;
+            entity.NumberPrefix = dto.NumberPrefix; entity.SerialNumber = dto.SerialNumber; entity.DiscountType = dto.DiscountType; entity.TaxType = dto.TaxType;
+            entity.ShowProductHSN = dto.ShowProductHSN; entity.ShowShippingAddress = dto.ShowShippingAddress; entity.TopMessage = dto.TopMessage; entity.BottomMessage = dto.BottomMessage;
+            entity.ShowBankInfo = dto.ShowBankInfo; entity.ShowUpiInfo = dto.ShowUpiInfo; entity.ShowSignature = dto.ShowSignature;
+            entity.TopMessageMode = dto.TopMessageMode; entity.BottomMessageMode = dto.BottomMessageMode; entity.MessageModeSchemaVersion = dto.MessageModeSchemaVersion;
         }
 
         private InvoiceSettingsDto MapInvoiceSettingsToDto(InvoiceSetting s)
@@ -2370,23 +1752,19 @@ namespace LMPTS.API.Controllers
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
                 ShowUpiInfo = s.ShowUpiInfo,
-                ShowSignature = s.ShowSignature
+                ShowSignature = s.ShowSignature,
+                TopMessageMode = s.TopMessageMode,
+                BottomMessageMode = s.BottomMessageMode,
+                MessageModeSchemaVersion = s.MessageModeSchemaVersion
             };
         }
 
         private void MapInvoiceSettingsToEntity(InvoiceSettingsDto dto, InvoiceSetting entity)
         {
-            entity.NumberPrefix = dto.NumberPrefix;
-            entity.SerialNumber = dto.SerialNumber;
-            entity.DiscountType = dto.DiscountType;
-            entity.TaxType = dto.TaxType;
-            entity.ShowProductHSN = dto.ShowProductHSN;
-            entity.ShowShippingAddress = dto.ShowShippingAddress;
-            entity.TopMessage = dto.TopMessage;
-            entity.BottomMessage = dto.BottomMessage;
-            entity.ShowBankInfo = dto.ShowBankInfo;
-            entity.ShowUpiInfo = dto.ShowUpiInfo;
-            entity.ShowSignature = dto.ShowSignature;
+            entity.NumberPrefix = dto.NumberPrefix; entity.SerialNumber = dto.SerialNumber; entity.DiscountType = dto.DiscountType; entity.TaxType = dto.TaxType;
+            entity.ShowProductHSN = dto.ShowProductHSN; entity.ShowShippingAddress = dto.ShowShippingAddress; entity.TopMessage = dto.TopMessage; entity.BottomMessage = dto.BottomMessage;
+            entity.ShowBankInfo = dto.ShowBankInfo; entity.ShowUpiInfo = dto.ShowUpiInfo; entity.ShowSignature = dto.ShowSignature;
+            entity.TopMessageMode = dto.TopMessageMode; entity.BottomMessageMode = dto.BottomMessageMode; entity.MessageModeSchemaVersion = dto.MessageModeSchemaVersion;
         }
 
         private PurchaseOrderSettingsDto MapPurchaseOrderSettingsToDto(PurchaseOrderSetting s)
@@ -2403,23 +1781,19 @@ namespace LMPTS.API.Controllers
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
                 ShowUpiInfo = s.ShowUpiInfo,
-                ShowSignature = s.ShowSignature
+                ShowSignature = s.ShowSignature,
+                TopMessageMode = s.TopMessageMode,
+                BottomMessageMode = s.BottomMessageMode,
+                MessageModeSchemaVersion = s.MessageModeSchemaVersion
             };
         }
 
         private void MapPurchaseOrderSettingsToEntity(PurchaseOrderSettingsDto dto, PurchaseOrderSetting entity)
         {
-            entity.NumberPrefix = dto.NumberPrefix;
-            entity.SerialNumber = dto.SerialNumber;
-            entity.DiscountType = dto.DiscountType;
-            entity.TaxType = dto.TaxType;
-            entity.ShowProductHSN = dto.ShowProductHSN;
-            entity.ShowShippingAddress = dto.ShowShippingAddress;
-            entity.TopMessage = dto.TopMessage;
-            entity.BottomMessage = dto.BottomMessage;
-            entity.ShowBankInfo = dto.ShowBankInfo;
-            entity.ShowUpiInfo = dto.ShowUpiInfo;
-            entity.ShowSignature = dto.ShowSignature;
+            entity.NumberPrefix = dto.NumberPrefix; entity.SerialNumber = dto.SerialNumber; entity.DiscountType = dto.DiscountType; entity.TaxType = dto.TaxType;
+            entity.ShowProductHSN = dto.ShowProductHSN; entity.ShowShippingAddress = dto.ShowShippingAddress; entity.TopMessage = dto.TopMessage; entity.BottomMessage = dto.BottomMessage;
+            entity.ShowBankInfo = dto.ShowBankInfo; entity.ShowUpiInfo = dto.ShowUpiInfo; entity.ShowSignature = dto.ShowSignature;
+            entity.TopMessageMode = dto.TopMessageMode; entity.BottomMessageMode = dto.BottomMessageMode; entity.MessageModeSchemaVersion = dto.MessageModeSchemaVersion;
         }
 
         private ProformaInvoiceSettingsDto MapProformaInvoiceSettingsToDto(ProformaInvoiceSetting s)
@@ -2436,23 +1810,19 @@ namespace LMPTS.API.Controllers
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
                 ShowUpiInfo = s.ShowUpiInfo,
-                ShowSignature = s.ShowSignature
+                ShowSignature = s.ShowSignature,
+                TopMessageMode = s.TopMessageMode,
+                BottomMessageMode = s.BottomMessageMode,
+                MessageModeSchemaVersion = s.MessageModeSchemaVersion
             };
         }
 
         private void MapProformaInvoiceSettingsToEntity(ProformaInvoiceSettingsDto dto, ProformaInvoiceSetting entity)
         {
-            entity.NumberPrefix = dto.NumberPrefix;
-            entity.SerialNumber = dto.SerialNumber;
-            entity.DiscountType = dto.DiscountType;
-            entity.TaxType = dto.TaxType;
-            entity.ShowProductHSN = dto.ShowProductHSN;
-            entity.ShowShippingAddress = dto.ShowShippingAddress;
-            entity.TopMessage = dto.TopMessage;
-            entity.BottomMessage = dto.BottomMessage;
-            entity.ShowBankInfo = dto.ShowBankInfo;
-            entity.ShowUpiInfo = dto.ShowUpiInfo;
-            entity.ShowSignature = dto.ShowSignature;
+            entity.NumberPrefix = dto.NumberPrefix; entity.SerialNumber = dto.SerialNumber; entity.DiscountType = dto.DiscountType; entity.TaxType = dto.TaxType;
+            entity.ShowProductHSN = dto.ShowProductHSN; entity.ShowShippingAddress = dto.ShowShippingAddress; entity.TopMessage = dto.TopMessage; entity.BottomMessage = dto.BottomMessage;
+            entity.ShowBankInfo = dto.ShowBankInfo; entity.ShowUpiInfo = dto.ShowUpiInfo; entity.ShowSignature = dto.ShowSignature;
+            entity.TopMessageMode = dto.TopMessageMode; entity.BottomMessageMode = dto.BottomMessageMode; entity.MessageModeSchemaVersion = dto.MessageModeSchemaVersion;
         }
 
         private DeliveryNoteSettingsDto MapDeliveryNoteSettingsToDto(DeliveryNoteSetting s)
@@ -2467,59 +1837,39 @@ namespace LMPTS.API.Controllers
                 BottomMessage = s.BottomMessage,
                 ShowBankInfo = s.ShowBankInfo,
                 ShowUpiInfo = s.ShowUpiInfo,
-                ShowSignature = s.ShowSignature
+                ShowSignature = s.ShowSignature,
+                TopMessageMode = s.TopMessageMode,
+                BottomMessageMode = s.BottomMessageMode,
+                MessageModeSchemaVersion = s.MessageModeSchemaVersion
             };
         }
 
         private void MapDeliveryNoteSettingsToEntity(DeliveryNoteSettingsDto dto, DeliveryNoteSetting entity)
         {
-            entity.NumberPrefix = dto.NumberPrefix;
-            entity.SerialNumber = dto.SerialNumber;
-            entity.ShowProductHSN = dto.ShowProductHSN;
-            entity.ShowShippingAddress = dto.ShowShippingAddress;
-            entity.TopMessage = dto.TopMessage;
-            entity.BottomMessage = dto.BottomMessage;
-            entity.ShowBankInfo = dto.ShowBankInfo;
-            entity.ShowUpiInfo = dto.ShowUpiInfo;
+            entity.NumberPrefix = dto.NumberPrefix; entity.SerialNumber = dto.SerialNumber; entity.ShowProductHSN = dto.ShowProductHSN; entity.ShowShippingAddress = dto.ShowShippingAddress;
+            entity.TopMessage = dto.TopMessage; entity.BottomMessage = dto.BottomMessage; entity.ShowBankInfo = dto.ShowBankInfo; entity.ShowUpiInfo = dto.ShowUpiInfo;
             entity.ShowSignature = dto.ShowSignature;
+            entity.TopMessageMode = dto.TopMessageMode; entity.BottomMessageMode = dto.BottomMessageMode; entity.MessageModeSchemaVersion = dto.MessageModeSchemaVersion;
         }
 
         private ReceiptSettingsDto MapReceiptSettingsToDto(ReceiptSetting s)
         {
-            return new ReceiptSettingsDto
-            {
-                NumberPrefix = s.NumberPrefix,
-                SerialNumber = s.SerialNumber,
-                ReceiptType = s.ReceiptType,
-                ShowSignature = s.ShowSignature
-            };
+            return new ReceiptSettingsDto { NumberPrefix = s.NumberPrefix, SerialNumber = s.SerialNumber, ReceiptType = s.ReceiptType, ShowSignature = s.ShowSignature };
         }
 
         private void MapReceiptSettingsToEntity(ReceiptSettingsDto dto, ReceiptSetting entity)
         {
-            entity.NumberPrefix = dto.NumberPrefix;
-            entity.SerialNumber = dto.SerialNumber;
-            entity.ReceiptType = dto.ReceiptType;
-            entity.ShowSignature = dto.ShowSignature;
+            entity.NumberPrefix = dto.NumberPrefix; entity.SerialNumber = dto.SerialNumber; entity.ReceiptType = dto.ReceiptType; entity.ShowSignature = dto.ShowSignature;
         }
 
         private ColumnHeadingSettingsDto MapColumnHeadingSettingsToDto(ColumnHeadingSetting s)
         {
-            return new ColumnHeadingSettingsDto
-            {
-                TaxLabel = s.TaxLabel,
-                HsnLabel = s.HsnLabel,
-                OtherChargesLabel = s.OtherChargesLabel,
-                ShowQty2Column = s.ShowQty2Column
-            };
+            return new ColumnHeadingSettingsDto { TaxLabel = s.TaxLabel, HsnLabel = s.HsnLabel, OtherChargesLabel = s.OtherChargesLabel, ShowQty2Column = s.ShowQty2Column };
         }
 
         private void MapColumnHeadingSettingsToEntity(ColumnHeadingSettingsDto dto, ColumnHeadingSetting entity)
         {
-            entity.TaxLabel = dto.TaxLabel;
-            entity.HsnLabel = dto.HsnLabel;
-            entity.OtherChargesLabel = dto.OtherChargesLabel;
-            entity.ShowQty2Column = dto.ShowQty2Column;
+            entity.TaxLabel = dto.TaxLabel; entity.HsnLabel = dto.HsnLabel; entity.OtherChargesLabel = dto.OtherChargesLabel; entity.ShowQty2Column = dto.ShowQty2Column;
         }
     }
 }

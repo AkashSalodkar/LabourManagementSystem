@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using LMPTS.Application.DTOs;
 using LMPTS.Domain.Entities;
+using System.Security.Cryptography;
 using LMPTS.Infrastructure.Data;
 using LMPTS.Infrastructure.Sms;
 using FirebaseAdmin.Auth;
@@ -177,6 +178,9 @@ namespace LMPTS.API.Controllers
                     CreatedAt = DateTime.UtcNow
                 };
 
+                var sessionToken = GenerateSessionToken();
+                user.CurrentSessionToken = sessionToken;
+                user.SessionTokenCreatedAt = DateTime.UtcNow;
                 await _context.Users.AddAsync(user);
 
                 await _context.SaveChangesAsync();
@@ -193,7 +197,8 @@ namespace LMPTS.API.Controllers
                     Industry = user.Industry,
                     Role = user.Role.ToString(),
                     IsVerified = user.IsVerified,
-                    ProfileImage = user.ProfileImage
+                    ProfileImage = user.ProfileImage,
+                    SessionToken = sessionToken       // NEW
                 });
             }
             catch (Exception ex)
@@ -232,6 +237,10 @@ namespace LMPTS.API.Controllers
                 {
                     return Unauthorized(new { message = "Account not found. Please register first." });
                 }
+                var sessionToken = GenerateSessionToken();
+                user.CurrentSessionToken = sessionToken;
+                user.SessionTokenCreatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
 
                 return Ok(new AuthResponseDto
                 {
@@ -241,7 +250,8 @@ namespace LMPTS.API.Controllers
                     Industry = user.Industry,
                     Role = user.Role.ToString(),
                     IsVerified = user.IsVerified,
-                    ProfileImage = user.ProfileImage
+                    ProfileImage = user.ProfileImage,
+                    SessionToken = sessionToken       // NEW
                 });
             }
             catch (Exception ex)
@@ -250,7 +260,62 @@ namespace LMPTS.API.Controllers
                 return StatusCode(500, new { message = "An error occurred during login." });
             }
         }
+        /// <summary>
+        /// Frontend polls this every 60s (and on app resume) to confirm the device is
+        /// still the "active" one for this account. A stale device will be rejected
+        /// by SessionValidationFilter with 401 + code SESSION_REPLACED *before* this
+        /// action runs, so reaching this action already proves the token is current.
+        ///
+        /// We still validate explicitly here too, because the filter's policy is to
+        /// let requests with no session headers through (needed for pre-login state,
+        /// the Razorpay webhook, etc.) - and a call to this endpoint with no token
+        /// should be answered with 401, not 200.
+        /// </summary>
+        [HttpGet("session-check")]
+        public async Task<IActionResult> SessionCheck()
+        {
+            var sessionToken = Request.Headers["X-Session-Token"].ToString();
+            var userIdHeader = Request.Headers["X-User-Id"].ToString();
 
+            if (string.IsNullOrWhiteSpace(sessionToken) || string.IsNullOrWhiteSpace(userIdHeader))
+            {
+                return Unauthorized(new { code = "NO_SESSION", message = "Not signed in." });
+            }
+
+            if (!int.TryParse(userIdHeader, out var userId))
+            {
+                return Unauthorized(new { code = "NO_SESSION", message = "Invalid session." });
+            }
+
+            var user = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => new { u.Id, u.CurrentSessionToken })
+                .FirstOrDefaultAsync();
+
+            if (user == null)
+            {
+                return Unauthorized(new { code = "NO_SESSION", message = "User not found." });
+            }
+
+            if (string.IsNullOrEmpty(user.CurrentSessionToken))
+            {
+                // Legacy account that never went through the new login flow -
+                // let them in and their next login will seed a token.
+                return Ok(new { ok = true });
+            }
+
+            if (!string.Equals(user.CurrentSessionToken, sessionToken, StringComparison.Ordinal))
+            {
+                return Unauthorized(new
+                {
+                    code = "SESSION_REPLACED",
+                    message = "You were signed out because your account was logged in on another device."
+                });
+            }
+
+            return Ok(new { ok = true });
+        }
         [HttpPut("profile/{userId}")]
         public async Task<IActionResult> UpdateProfile(int userId, [FromBody] UpdateProfileRequestDto request)
         {
@@ -308,6 +373,12 @@ namespace LMPTS.API.Controllers
                 _logger.LogError(ex, "Error updating profile for user {UserId}", userId);
                 return StatusCode(500, new { message = "An error occurred while updating your profile." });
             }
+        }
+        private static string GenerateSessionToken()
+        {
+            Span<byte> bytes = stackalloc byte[32];
+            RandomNumberGenerator.Fill(bytes);
+            return Convert.ToHexString(bytes).ToLowerInvariant();
         }
     }
 }

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
-import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import { FiUser, FiPhone, FiChevronDown, FiArrowRight } from 'react-icons/fi';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
 import { HiOutlineUserGroup, HiOutlineCalendar, HiOutlineWallet } from 'react-icons/hi2';
@@ -63,7 +62,6 @@ const translations = {
     bulkMark: 'Bulk mark:',
     allPresent: 'All Present',
     allAbsent: 'All Absent',
-    enterEmployeeName: 'Enter Employee Name',
     noEmployeesJoined: 'No employees had joined this project as of the selected date.',
     saveAttendance: 'Save Attendance',
     attendanceSavedSuccess: 'Attendance Saved Successfully.',
@@ -82,7 +80,6 @@ const translations = {
     appliesFrom: 'APPLIES FROM',
     newDailyWage: 'NEW DAILY WAGE',
     noteOptional: 'NOTE (OPTIONAL)',
-    cancel: 'Cancel',
     saveWage: 'Save wage',
     wageUpdatedSuccess: 'Wage updated successfully.',
     sameWageError: 'The new wage must be different from the current wage.',
@@ -108,7 +105,6 @@ const translations = {
     maxDaysError: 'Max 31 Days attendance at a time.',
     removeAttendance: 'Remove attendance?',
     removeAttendanceConfirm: 'This will unmark attendance for {date} for every worker in this project.',
-    remove: 'Remove',
     
     // Payments
     payments: 'Payments',
@@ -183,14 +179,12 @@ const translations = {
     
     // Project Picker
     enterProjectName: 'Enter Project Name',
-    allProjects: 'All Projects',
     markAttendance: 'Mark Attendance',
     payment: 'Payment',
     
     // Edit Project
     editProject: 'Edit Project',
     projectName: 'Project Name',
-    saveChanges: 'Save Changes',
     deleteProject: 'Delete this worksite project completely?',
     
     // Employee form validation
@@ -213,9 +207,6 @@ const translations = {
     ok: 'OK',
     edit: 'Edit',
     delete: 'Delete',
-    remove: 'Remove',
-    cancel: 'Cancel',
-    save: 'Save',
   },
   hi: {
     // Navigation
@@ -263,7 +254,6 @@ const translations = {
     bulkMark: 'बल्क मार्क:',
     allPresent: 'सभी उपस्थित',
     allAbsent: 'सभी अनुपस्थित',
-    enterEmployeeName: 'कर्मचारी का नाम दर्ज करें',
     noEmployeesJoined: 'चयनित तारीख तक इस प्रोजेक्ट में कोई कर्मचारी शामिल नहीं हुआ था।',
     saveAttendance: 'उपस्थिति सहेजें',
     attendanceSavedSuccess: 'उपस्थिति सफलतापूर्वक सहेजी गई।',
@@ -282,7 +272,6 @@ const translations = {
     appliesFrom: 'से लागू',
     newDailyWage: 'नई दैनिक मजदूरी',
     noteOptional: 'नोट (वैकल्पिक)',
-    cancel: 'रद्द करें',
     saveWage: 'वेतन सहेजें',
     wageUpdatedSuccess: 'वेतन सफलतापूर्वक अपडेट किया गया।',
     sameWageError: 'नई मजदूरी वर्तमान मजदूरी से अलग होनी चाहिए।',
@@ -308,7 +297,6 @@ const translations = {
     maxDaysError: 'एक बार में अधिकतम 31 दिनों की उपस्थिति।',
     removeAttendance: 'उपस्थिति हटाएं?',
     removeAttendanceConfirm: 'इससे इस प्रोजेक्ट के हर कर्मचारी के लिए {date} की उपस्थिति हट जाएगी।',
-    remove: 'हटाएं',
     
     // Payments
     payments: 'भुगतान',
@@ -343,7 +331,6 @@ const translations = {
     noTransactions: 'इस सीमा में कोई लेन-देन दर्ज नहीं है।',
     selectDatePlaceholder: 'तारीख चुनें',
     note: 'नोट (वैकल्पिक)',
-    save: 'सहेजें',
     paymentSavedMsg: 'भुगतान की गई राशि में जोड़ा गया और भुगतान इतिहास में दर्ज किया गया।',
     bonusSavedMsg: 'बोनस भुगतान इतिहास में दर्ज किया गया।',
     
@@ -372,7 +359,6 @@ const translations = {
     updateProfile: 'प्रोफ़ाइल अपडेट करें',
     yourName: 'आपका नाम',
     tapToChangePhoto: 'प्रोफ़ाइल फोटो बदलने के लिए टैप करें',
-    saveChanges: 'बदलाव सहेजें',
     signOut: 'साइन आउट',
     yourDataIsSecure: 'आपका डेटा हमारे साथ सुरक्षित है।',
     
@@ -383,14 +369,12 @@ const translations = {
     
     // Project Picker
     enterProjectName: 'प्रोजेक्ट का नाम दर्ज करें',
-    allProjects: 'सभी प्रोजेक्ट',
     markAttendance: 'उपस्थिति दर्ज करें',
     payment: 'भुगतान',
     
     // Edit Project
     editProject: 'प्रोजेक्ट संपादित करें',
     projectName: 'प्रोजेक्ट का नाम',
-    saveChanges: 'बदलाव सहेजें',
     deleteProject: 'क्या आप इस वर्कसाइट प्रोजेक्ट को पूरी तरह से हटाना चाहते हैं?',
     
     // Employee form validation
@@ -567,7 +551,7 @@ const attendanceService = {
     api.delete(`/attendance/date?projectId=${projectId}&date=${date}`),
 };
 // Add this state near other state declarations
-const [loadingProjects, setLoadingProjects] = useState(false);
+const [, setLoadingProjects] = useState(false);
 // Add this function to load projects
 const loadUserProjects = async (userId) => {
   try {
@@ -633,10 +617,14 @@ const paymentService = {
   const t = (key) => (translations[language] && translations[language][key]) || translations.en[key] || key;
   const handleLanguageChange = (langCode) => {
     setLanguage(langCode);
-    try { localStorage.setItem(LANGUAGE_STORAGE_KEY, langCode); } catch {}
+    try {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, langCode);
+    } catch {
+      // Ignore storage failures and continue with the in-memory language change.
+    }
   };
   
-  const [viewportHeightPx, setViewportHeightPx] = useState(() =>
+  const [, setViewportHeightPx] = useState(() =>
     typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 800
   );
   const formatSiteName = (name) => {

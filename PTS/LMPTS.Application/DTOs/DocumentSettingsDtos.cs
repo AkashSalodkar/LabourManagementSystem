@@ -13,6 +13,10 @@
         public string ShowBankInfo { get; set; } = "Yes";
         public string ShowUpiInfo { get; set; } = "Yes";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     public class InvoiceSettingsDto
@@ -28,6 +32,10 @@
         public string ShowBankInfo { get; set; } = "Yes";
         public string ShowUpiInfo { get; set; } = "Yes";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     public class PurchaseOrderSettingsDto
@@ -43,6 +51,10 @@
         public string ShowBankInfo { get; set; } = "No";
         public string ShowUpiInfo { get; set; } = "No";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     public class ProformaInvoiceSettingsDto
@@ -58,6 +70,10 @@
         public string ShowBankInfo { get; set; } = "No";
         public string ShowUpiInfo { get; set; } = "No";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     public class DeliveryNoteSettingsDto
@@ -71,6 +87,10 @@
         public string ShowBankInfo { get; set; } = "No";
         public string ShowUpiInfo { get; set; } = "No";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     public class ReceiptSettingsDto

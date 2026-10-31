@@ -89,7 +89,8 @@ namespace LMPTS.Domain.Entities
         [Required, MaxLength(64)]
         public string ProviderQrId { get; set; } = "";
 
-        [Required, MaxLength(400)]
+        // FIXED: Increased from 400 to 1000 for long gateway/CDN URLs
+        [Required, MaxLength(1000)]
         public string QrImageUrl { get; set; } = "";
 
         [Column(TypeName = "decimal(10,2)")]
@@ -104,6 +105,10 @@ namespace LMPTS.Domain.Entities
 
         [Column(TypeName = "datetime2")]
         public DateTime ExpiresAt { get; set; }
+
+        // FIXED: Added UpdatedAt property required by ApplicationDbContext
+        [Column(TypeName = "datetime2")]
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
         [ForeignKey(nameof(UserId))]
         public virtual User User { get; set; } = null!;

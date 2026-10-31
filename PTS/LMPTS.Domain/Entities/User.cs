@@ -25,6 +25,13 @@ namespace LMPTS.Domain.Entities
 
         public UserRole Role { get; set; } = UserRole.Supervisor;
 
+        [MaxLength(128)]
+        public string? CurrentSessionToken { get; set; }
+
+        // When the currently-active session token was issued (audit / support).
+        [Column(TypeName = "datetime2")]
+        public DateTime? SessionTokenCreatedAt { get; set; }
+
         // Navigation properties
         public virtual ICollection<Project> Projects { get; set; } = new List<Project>();
         public virtual ICollection<Subscription> Subscriptions { get; set; } = new List<Subscription>();

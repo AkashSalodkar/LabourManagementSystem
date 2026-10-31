@@ -40,6 +40,10 @@ namespace LMPTS.Domain.Entities
         public string ShowBankInfo { get; set; } = "Yes";
         public string ShowUpiInfo { get; set; } = "Yes";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     [Table("InvoiceSettings")]
@@ -54,6 +58,10 @@ namespace LMPTS.Domain.Entities
         public string ShowBankInfo { get; set; } = "Yes";
         public string ShowUpiInfo { get; set; } = "Yes";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     [Table("PurchaseOrderSettings")]
@@ -68,6 +76,10 @@ namespace LMPTS.Domain.Entities
         public string ShowBankInfo { get; set; } = "No";
         public string ShowUpiInfo { get; set; } = "No";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     [Table("ProformaInvoiceSettings")]
@@ -82,6 +94,10 @@ namespace LMPTS.Domain.Entities
         public string ShowBankInfo { get; set; } = "No";
         public string ShowUpiInfo { get; set; } = "No";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     [Table("DeliveryNoteSettings")]
@@ -94,6 +110,10 @@ namespace LMPTS.Domain.Entities
         public string ShowBankInfo { get; set; } = "No";
         public string ShowUpiInfo { get; set; } = "No";
         public string ShowSignature { get; set; } = "Yes";
+
+        public string? TopMessageMode { get; set; } = "Default";
+        public string? BottomMessageMode { get; set; } = "Default";
+        public int MessageModeSchemaVersion { get; set; } = 2;
     }
 
     [Table("ReceiptSettings")]

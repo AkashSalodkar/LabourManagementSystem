@@ -57,7 +57,7 @@ namespace LMPTS.Infrastructure.Data
             base.OnModelCreating(modelBuilder);
 
             // ============================================================
-            // EXISTING CONFIGURATIONS (Keep your existing ones)
+            // EXISTING CONFIGURATIONS
             // ============================================================
 
             // User Configuration
@@ -75,7 +75,7 @@ namespace LMPTS.Infrastructure.Data
             // UserOtp Configuration
             modelBuilder.Entity<UserOtp>(entity =>
             {
-                entity.HasKey(e => e.OtpId);
+                // FIX: removed duplicate HasKey(e => e.OtpId)
                 entity.HasKey(e => e.OtpId);
                 entity.Property(e => e.MobileNumber).IsRequired().HasMaxLength(10);
                 entity.Property(e => e.OtpCode).IsRequired().HasMaxLength(6);
@@ -125,15 +125,9 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.NetAmount).HasColumnType("decimal(10,2)");
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
-                // Was (WorkerId, AttendanceDate) - widened to include ProjectId now that a
-                // single day's attendance is scoped per project a worker was marked under.
                 entity.HasIndex(e => new { e.WorkerId, e.ProjectId, e.AttendanceDate }).IsUnique();
                 entity.HasIndex(e => e.AttendanceDate);
                 entity.HasIndex(e => e.ProjectId);
-                // Restrict, not Cascade: Attendance already cascades to Worker, and Worker
-                // cascades to Project - a second cascading path from Attendance straight to
-                // Project would give SQL Server multiple cascade paths to the same table,
-                // which it rejects at migration time.
                 entity.HasOne(e => e.Project)
                     .WithMany()
                     .HasForeignKey(e => e.ProjectId)
@@ -219,12 +213,10 @@ namespace LMPTS.Infrastructure.Data
             });
 
             // Subscription Configuration
-            // One row per access period: PlanType "trial" (exactly one per user) or "monthly" (one per verified UPI payment).
             modelBuilder.Entity<Subscription>(entity =>
             {
                 entity.HasKey(e => e.SubscriptionId);
                 entity.Property(e => e.PlanType).IsRequired().HasMaxLength(20).HasDefaultValue("trial");
-                // Was "date". Trial/paid periods need the exact time, stored in UTC.
                 entity.Property(e => e.StartDate).HasColumnType("datetime2");
                 entity.Property(e => e.EndDate).HasColumnType("datetime2");
                 entity.Property(e => e.PricePaid).HasColumnType("decimal(10,2)");
@@ -237,29 +229,31 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
                 entity.HasIndex(e => new { e.UserId, e.IsActive });
 
-                // The same gateway payment can never create two subscription periods.
                 entity.HasIndex(e => e.ProviderPaymentId)
                     .IsUnique()
                     .HasFilter("[ProviderPaymentId] IS NOT NULL");
 
-                // Exactly one free trial per account, no matter how often the user logs in/out.
                 entity.HasIndex(e => e.UserId)
                     .IsUnique()
                     .HasDatabaseName("UX_Subscriptions_OneTrialPerUser")
                     .HasFilter("[PlanType] = 'trial'");
             });
 
-            // SubscriptionPayment Configuration (UPI QR orders; become "paid" only via the verified gateway webhook)
+            // SubscriptionPayment Configuration
             modelBuilder.Entity<SubscriptionPayment>(entity =>
             {
                 entity.HasKey(e => e.SubscriptionPaymentId);
                 entity.Property(e => e.OrderRef).IsRequired().HasMaxLength(64);
                 entity.Property(e => e.ProviderQrId).IsRequired().HasMaxLength(64);
-                entity.Property(e => e.QrImageUrl).IsRequired().HasMaxLength(400);
+                // FIX: bumped 400 -> 1000 to accommodate signed CDN / gateway URLs
+                entity.Property(e => e.QrImageUrl).IsRequired().HasMaxLength(1000);
                 entity.Property(e => e.Amount).HasColumnType("decimal(10,2)");
                 entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
-                entity.Property(e => e.CreatedAt).HasColumnType("datetime2");
+                // FIX: added GETDATE() default so inserts don't have to set CreatedAt
+                entity.Property(e => e.CreatedAt).HasColumnType("datetime2").HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.ExpiresAt).HasColumnType("datetime2");
+                // FIX: new audit column, consistent with every other settings table
+                entity.Property(e => e.UpdatedAt).HasColumnType("datetime2").HasDefaultValueSql("GETDATE()");
 
                 entity.HasOne(e => e.User)
                     .WithMany()
@@ -308,9 +302,7 @@ namespace LMPTS.Infrastructure.Data
             // NEW QUOTATION MODULE CONFIGURATIONS
             // ============================================================
 
-            // ============================================================
             // 1. BusinessInfo - One-to-One with User
-            // ============================================================
             modelBuilder.Entity<BusinessInfo>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -333,7 +325,6 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<BusinessInfo>(e => e.UserId)
@@ -342,9 +333,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // ============================================================
-            // 2. Customer - One-to-Many with User (NO CASCADE)
-            // ============================================================
+            // 2. Customer
             modelBuilder.Entity<Customer>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -360,7 +349,6 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
@@ -370,9 +358,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.Name);
             });
 
-            // ============================================================
-            // 3. Product - One-to-Many with User (NO CASCADE)
-            // ============================================================
+            // 3. Product
             modelBuilder.Entity<Product>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -384,7 +370,6 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
@@ -394,20 +379,20 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.Name);
             });
 
-            // ============================================================
-            // 4. Document Settings - One-to-One with User (NO CASCADE)
-            // ============================================================
+            // 4. Document Settings - One-to-One with User
+            // FIX: TopMessageMode / BottomMessageMode now constrained to 50 chars
+            //      (was implicitly nvarchar(max) via the "razorpay" migration).
 
-            // QuotationSetting
             modelBuilder.Entity<QuotationSetting>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.NumberPrefix).HasMaxLength(20);
                 entity.Property(e => e.SerialNumber).HasMaxLength(10);
+                entity.Property(e => e.TopMessageMode).HasMaxLength(50);
+                entity.Property(e => e.BottomMessageMode).HasMaxLength(50);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<QuotationSetting>(e => e.UserId)
@@ -416,16 +401,16 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // InvoiceSetting
             modelBuilder.Entity<InvoiceSetting>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.NumberPrefix).HasMaxLength(20);
                 entity.Property(e => e.SerialNumber).HasMaxLength(10);
+                entity.Property(e => e.TopMessageMode).HasMaxLength(50);
+                entity.Property(e => e.BottomMessageMode).HasMaxLength(50);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<InvoiceSetting>(e => e.UserId)
@@ -434,16 +419,16 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // PurchaseOrderSetting
             modelBuilder.Entity<PurchaseOrderSetting>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.NumberPrefix).HasMaxLength(20);
                 entity.Property(e => e.SerialNumber).HasMaxLength(10);
+                entity.Property(e => e.TopMessageMode).HasMaxLength(50);
+                entity.Property(e => e.BottomMessageMode).HasMaxLength(50);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<PurchaseOrderSetting>(e => e.UserId)
@@ -452,16 +437,16 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // ProformaInvoiceSetting
             modelBuilder.Entity<ProformaInvoiceSetting>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.NumberPrefix).HasMaxLength(20);
                 entity.Property(e => e.SerialNumber).HasMaxLength(10);
+                entity.Property(e => e.TopMessageMode).HasMaxLength(50);
+                entity.Property(e => e.BottomMessageMode).HasMaxLength(50);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<ProformaInvoiceSetting>(e => e.UserId)
@@ -470,16 +455,16 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // DeliveryNoteSetting
             modelBuilder.Entity<DeliveryNoteSetting>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.NumberPrefix).HasMaxLength(20);
                 entity.Property(e => e.SerialNumber).HasMaxLength(10);
+                entity.Property(e => e.TopMessageMode).HasMaxLength(50);
+                entity.Property(e => e.BottomMessageMode).HasMaxLength(50);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<DeliveryNoteSetting>(e => e.UserId)
@@ -488,7 +473,6 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // ReceiptSetting
             modelBuilder.Entity<ReceiptSetting>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -497,7 +481,6 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<ReceiptSetting>(e => e.UserId)
@@ -506,14 +489,12 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // ColumnHeadingSetting
             modelBuilder.Entity<ColumnHeadingSetting>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithOne()
                     .HasForeignKey<ColumnHeadingSetting>(e => e.UserId)
@@ -522,9 +503,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.UserId).IsUnique();
             });
 
-            // ============================================================
-            // 5. Document Terms - One-to-Many with User (NO CASCADE)
-            // ============================================================
+            // 5. Document Terms
             modelBuilder.Entity<DocumentTerm>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -533,7 +512,6 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
@@ -542,9 +520,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => new { e.UserId, e.DocumentType });
             });
 
-            // ============================================================
-            // 6. Document Products - No User relationship, only Document
-            // ============================================================
+            // 6. Document Products
             modelBuilder.Entity<DocumentProduct>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -558,7 +534,6 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // Product reference (optional, can be deleted without affecting documents)
                 entity.HasOne(e => e.Product)
                     .WithMany()
                     .HasForeignKey(e => e.ProductId)
@@ -568,9 +543,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.ProductId);
             });
 
-            // ============================================================
-            // 7. Document Other Charges - No User relationship
-            // ============================================================
+            // 7. Document Other Charges
             modelBuilder.Entity<DocumentOtherCharge>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -583,9 +556,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => new { e.DocumentType, e.DocumentId });
             });
 
-            // ============================================================
-            // 8. Document Paid Info - No User relationship
-            // ============================================================
+            // 8. Document Paid Info
             modelBuilder.Entity<DocumentPaidInfo>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -598,16 +569,13 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => new { e.DocumentType, e.DocumentId });
             });
 
-            // ============================================================
-            // 9. Document Term Selections - No User relationship
-            // ============================================================
+            // 9. Document Term Selections
             modelBuilder.Entity<DocumentTermSelection>(entity =>
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.DocumentType).IsRequired().HasMaxLength(20);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
 
-                // Many-to-One with DocumentTerm
                 entity.HasOne(e => e.Term)
                     .WithMany()
                     .HasForeignKey(e => e.TermId)
@@ -616,13 +584,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => new { e.DocumentType, e.DocumentId, e.TermId }).IsUnique();
             });
 
-            // ============================================================
-            // 10-15. DOCUMENTS (Quotation, Invoice, PurchaseOrder, etc.)
-            // ============================================================
-
-            // ============================================================
-            // QUOTATIONS - NO CASCADE ON USER, CASCADE ON CHILDREN
-            // ============================================================
+            // 10. Quotations
             modelBuilder.Entity<Quotation>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -640,13 +602,11 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade on User
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // FIX: Use Restrict instead of SetNull on Customer
                 entity.HasOne(e => e.Customer)
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)
@@ -659,9 +619,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.Status);
             });
 
-            // ============================================================
-            // INVOICES
-            // ============================================================
+            // 11. Invoices
             modelBuilder.Entity<Invoice>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -683,13 +641,11 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade on User
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // FIX: Use Restrict instead of SetNull on Customer
                 entity.HasOne(e => e.Customer)
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)
@@ -702,9 +658,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.Status);
             });
 
-            // ============================================================
-            // PURCHASE ORDERS
-            // ============================================================
+            // 12. Purchase Orders
             modelBuilder.Entity<PurchaseOrder>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -722,13 +676,11 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade on User
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // FIX: Use Restrict instead of SetNull on Customer
                 entity.HasOne(e => e.Customer)
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)
@@ -741,9 +693,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.Status);
             });
 
-            // ============================================================
-            // PROFORMA INVOICES
-            // ============================================================
+            // 13. Proforma Invoices
             modelBuilder.Entity<ProformaInvoice>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -765,13 +715,11 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade on User
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // FIX: Use Restrict instead of SetNull on Customer
                 entity.HasOne(e => e.Customer)
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)
@@ -784,9 +732,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.Status);
             });
 
-            // ============================================================
-            // DELIVERY NOTES
-            // ============================================================
+            // 14. Delivery Notes
             modelBuilder.Entity<DeliveryNote>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -804,13 +750,11 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade on User
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // FIX: Use Restrict instead of SetNull on Customer
                 entity.HasOne(e => e.Customer)
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)
@@ -823,9 +767,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasIndex(e => e.Status);
             });
 
-            // ============================================================
-            // RECEIPTS
-            // ============================================================
+            // 15. Receipts
             modelBuilder.Entity<Receipt>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -845,13 +787,11 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
 
-                // FIX: Use Restrict instead of Cascade on User
                 entity.HasOne(e => e.User)
                     .WithMany()
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                // FIX: Use Restrict instead of SetNull on Customer
                 entity.HasOne(e => e.Customer)
                     .WithMany()
                     .HasForeignKey(e => e.CustomerId)

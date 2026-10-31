@@ -60,6 +60,7 @@ namespace LMPTS.Application.DTOs
         public string Role { get; set; } = string.Empty;
         public bool IsVerified { get; set; }
         public string? Token { get; set; }
+        public string? SessionToken { get; set; }
         public string? ProfileImage { get; set; }
     }
 
