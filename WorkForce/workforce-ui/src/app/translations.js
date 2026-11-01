@@ -185,6 +185,9 @@ export const translations = {
     
     // Exit
     exitConfirm: 'Are you sure you want to exit the app?',
+    updateAvailableTitle: 'Update Available',
+    updateAvailableMessage: 'A new version of SmartManage is available. Please update to the latest version.',
+    updateNow: 'Update',
     cancelProcessConfirm: 'Do you want to cancel the process? Your unsaved details will be lost.',
     yes: 'Yes',
     no: 'No',
@@ -413,6 +416,9 @@ export const translations = {
     
     // Exit
     exitConfirm: 'क्या आप वाकई ऐप से बाहर निकलना चाहते हैं?',
+    updateAvailableTitle: 'अपडेट उपलब्ध है',
+    updateAvailableMessage: 'SmartManage का नया संस्करण उपलब्ध है। कृपया नवीनतम संस्करण पर अपडेट करें।',
+    updateNow: 'अपडेट करें',
     cancelProcessConfirm: 'क्या आप प्रक्रिया रद्द करना चाहते हैं? आपकी बिना सहेजी गई जानकारी हट जाएगी।',
     yes: 'हाँ',
     no: 'नहीं',

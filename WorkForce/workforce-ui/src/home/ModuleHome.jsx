@@ -6,7 +6,7 @@ import { ATTENDANCE_TUTORIAL_VIDEO_URL, DOCUMENTS_TUTORIAL_VIDEO_URL } from './c
 import { AppPopup } from '../shared/components';
 import { Capacitor } from '@capacitor/core';
 import { FaWhatsapp } from 'react-icons/fa';
-import { FiArrowLeft, FiFileText, FiPhone } from 'react-icons/fi';
+import { FiArrowLeft, FiEdit2, FiFileText, FiPhone } from 'react-icons/fi';
 import { Fragment } from 'react';
 import { HiOutlineMail } from 'react-icons/hi';
 import { HiOutlineUserGroup } from 'react-icons/hi2';
@@ -57,18 +57,24 @@ export default function ModuleHome() {
       <div style={moduleHomeStyles.screen}>
         <div style={moduleHomeStyles.scrollArea}>
           <div style={moduleHomeStyles.headerRow}>
-            <button
-              type="button"
-              onClick={() => { setDraftProfileImg(undefined); setIsProfileModalOpen(true); }}
-              style={moduleHomeStyles.avatarButton}
-              aria-label="Profile and settings"
-            >
-              {profileImg ? (
-                <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-              ) : (
-                getInitials(loggedInUser?.fullName) || homeDisplayName.substring(0, 2).toUpperCase()
-              )}
-            </button>
+            <div style={moduleHomeStyles.avatarWrap}>
+              <button
+                type="button"
+                onClick={() => { setDraftProfileImg(undefined); setIsProfileModalOpen(true); }}
+                style={moduleHomeStyles.avatarButton}
+                aria-label="Edit profile photo and name"
+              >
+                {profileImg ? (
+                  <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                ) : (
+                  getInitials(loggedInUser?.fullName) || homeDisplayName.substring(0, 2).toUpperCase()
+                )}
+              </button>
+              {/* Small pencil badge so users know the photo / name can be edited */}
+              <span style={moduleHomeStyles.avatarEditBadge} aria-hidden="true">
+                <FiEdit2 size={10} color="#ffffff" />
+              </span>
+            </div>
             <div style={moduleHomeStyles.brandRow}>
               <img src={smartpayLogo} alt="SmartManage" style={moduleHomeStyles.logoImg} />
               <span style={moduleHomeStyles.brandName}>SmartManage</span>

@@ -8,6 +8,7 @@ import { API_BASE_URL, DEV_SKIP_LOGIN, LANGUAGE_STORAGE_KEY } from '../shared/co
 import { App } from '@capacitor/app';
 import { AppPopup } from '../shared/components';
 import { AppShellContext } from './AppShellContext';
+import { AppUpdate, AppUpdateAvailability } from '@capawesome/capacitor-app-update';
 import { Capacitor } from '@capacitor/core';
 import { DEV_MOCK_USER } from './constants';
 import DocumentsModule from '../modules/documents/DocumentsModule';
@@ -501,6 +502,54 @@ export default function AppShell() {
       onConfirm: () => { closeAppPopup(); onConfirm(); },
     });
   };
+
+
+  // ===== New version on Play Store -> ask the user to update =====
+  // Runs when the app opens and every time it comes back to the foreground. Uses the same
+  // common AppPopup (via setAppPopup) as every other confirm popup: Yes = update, No = later.
+  // The prompt is shown at most once per app launch so "No" is respected until the next open.
+  // Only works on the installed Android app (Play Store build) - on web / debug builds the
+  // plugin throws or reports nothing, which is silently ignored.
+  const updatePromptShownRef = useRef(false);
+
+  const checkForAppUpdate = async () => {
+    if (updatePromptShownRef.current || !Capacitor.isNativePlatform()) return;
+    try {
+      const info = await AppUpdate.getAppUpdateInfo();
+      if (info.updateAvailability !== AppUpdateAvailability.UPDATE_AVAILABLE) return;
+      updatePromptShownRef.current = true;
+      const startUpdate = async () => {
+        try {
+          if (info.immediateUpdateAllowed) await AppUpdate.performImmediateUpdate();
+          else await AppUpdate.openAppStore();
+        } catch (e) {
+          try { await AppUpdate.openAppStore(); } catch { /* ignore */ }
+        }
+      };
+      // Don't overwrite another popup that is already on screen - retry on next resume instead.
+      setAppPopup((current) => {
+        if (current?.open) { updatePromptShownRef.current = false; return current; }
+        return {
+          open: true,
+          tone: 'info',
+          title: t('updateAvailableTitle'),
+          message: t('updateAvailableMessage'),
+          confirmLabel: t('yes'),
+          cancelLabel: t('no'),
+          onConfirm: () => { closeAppPopup(); startUpdate(); },
+        };
+      });
+    } catch (e) {
+      // Not installed from Play Store / no network / plugin unavailable - nothing to show.
+    }
+  };
+
+  useEffect(() => {
+    checkForAppUpdate();
+    const listenerPromise = App.addListener('appStateChange', ({ isActive }) => { if (isActive) checkForAppUpdate(); });
+    return () => { listenerPromise.then((h) => h.remove()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
 
   // Ask before throwing away work the user is in the middle of. Returns true so the back

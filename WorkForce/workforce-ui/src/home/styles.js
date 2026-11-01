@@ -11,6 +11,12 @@ export const moduleHomeStyles = {
   brandRow: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
   logoImg: { width: '30px', height: '30px', objectFit: 'contain', borderRadius: '8px' },
   brandName: { fontSize: '11px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.01em' },
+  avatarWrap: { position: 'relative', width: '36px', height: '36px', flexShrink: 0 },
+  avatarEditBadge: {
+    position: 'absolute', right: '-4px', bottom: '-4px', width: '18px', height: '18px', borderRadius: '50%',
+    background: '#0B3C9B', border: '2px solid #ffffff', boxSizing: 'border-box',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none',
+  },
   avatarButton: {
     width: '36px', height: '36px', borderRadius: '50%', border: 'none',
     background: 'linear-gradient(135deg, #0B3C9B, #2554EB)', color: '#ffffff',
