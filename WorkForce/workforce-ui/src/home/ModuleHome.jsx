@@ -6,8 +6,8 @@ import { ATTENDANCE_TUTORIAL_VIDEO_URL, DOCUMENTS_TUTORIAL_VIDEO_URL } from './c
 import { AppPopup } from '../shared/components';
 import { Capacitor } from '@capacitor/core';
 import { FaWhatsapp } from 'react-icons/fa';
-import { FiArrowLeft, FiEdit2, FiFileText, FiPhone } from 'react-icons/fi';
-import { Fragment } from 'react';
+import { FiArrowLeft, FiChevronRight, FiEdit2, FiFileText, FiPhone, FiPlayCircle, FiPlus, FiSearch } from 'react-icons/fi';
+import { Fragment, useState } from 'react';
 import { HiOutlineMail } from 'react-icons/hi';
 import { HiOutlineUserGroup } from 'react-icons/hi2';
 import { formatSubDate, handleWatchTutorialVideo } from './helpers';
@@ -49,88 +49,128 @@ export default function ModuleHome() {
     t,
   } = useAppShell();
 
-
+  // Search box on the main page filters the module cards by name / description.
+  const [moduleSearch, setModuleSearch] = useState('');
 
   if (activeModule !== null) return null;
+
+  // Full name for the greeting (falls back to the first name / 'there').
+  const homeFullName = loggedInUser?.fullName?.trim() || homeDisplayName;
+
+  // To add a new module: add one entry here (id is passed to setActiveModule).
+  const homeModules = [
+    {
+      id: 'attendance',
+      title: 'Projects, Attendance, Wages',
+      badgeBg: 'linear-gradient(135deg, #2554EB, #0B3C9B)',
+      icon: <HiOutlineUserGroup size={26} color="#ffffff" />,
+      videoUrl: ATTENDANCE_TUTORIAL_VIDEO_URL,
+      videoLabel: 'Watch Manage Employee video',
+      keywords: 'employee attendance payment payments wages project manage',
+    },
+    {
+      id: 'quotations',
+      title: 'Quotation, Invoice & Business Docs',
+      badgeBg: 'linear-gradient(135deg, #14B8A6, #0F766E)',
+      icon: <FiFileText size={24} color="#ffffff" />,
+      videoUrl: DOCUMENTS_TUTORIAL_VIDEO_URL,
+      videoLabel: 'Watch Create Quotation, Invoice & Business Docs video',
+      keywords: 'quotation invoice business docs documents bill',
+    },
+  ];
+  const homeNavActive = { ...themeStyles.navItemTabActive, background: '#E3E7EC', color: '#4B5563' };
+  const searchText = moduleSearch.trim().toLowerCase();
+  const visibleModules = homeModules.filter((m) =>
+    !searchText || `${m.title} ${m.keywords}`.toLowerCase().includes(searchText)
+  );
 
     return (
       <div style={moduleHomeStyles.screen}>
         <div style={moduleHomeStyles.scrollArea}>
-          <div style={moduleHomeStyles.headerRow}>
-            <div style={moduleHomeStyles.avatarWrap}>
-              <button
-                type="button"
-                onClick={() => { setDraftProfileImg(undefined); setIsProfileModalOpen(true); }}
-                style={moduleHomeStyles.avatarButton}
-                aria-label="Edit profile photo and name"
-              >
-                {profileImg ? (
-                  <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                ) : (
-                  getInitials(loggedInUser?.fullName) || homeDisplayName.substring(0, 2).toUpperCase()
-                )}
-              </button>
-              {/* Small pencil badge so users know the photo / name can be edited */}
-              <span style={moduleHomeStyles.avatarEditBadge} aria-hidden="true">
-                <FiEdit2 size={10} color="#ffffff" />
-              </span>
-            </div>
-            <div style={moduleHomeStyles.brandRow}>
-              <img src={smartpayLogo} alt="SmartManage" style={moduleHomeStyles.logoImg} />
-              <span style={moduleHomeStyles.brandName}>SmartManage</span>
-            </div>
-          </div>
-
-          <div style={moduleHomeStyles.greetBlock}>
-            <h1 style={moduleHomeStyles.greetTitle}>{t('greetingHi')}, {homeDisplayName} </h1>
-            <p style={moduleHomeStyles.greetSubtitle}>What would you like to do today?</p>
-          </div>
-
-          <div style={moduleHomeStyles.panel}>
-            <div style={moduleHomeStyles.tileGrid}>
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => setActiveModule('attendance')}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveModule('attendance'); }}
-                style={moduleHomeStyles.tile}
-              >
+          <div style={moduleHomeStyles.header}>
+            <div style={moduleHomeStyles.headerRow}>
+              <div style={moduleHomeStyles.avatarWrap}>
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(ATTENDANCE_TUTORIAL_VIDEO_URL); }}
-                  aria-label="Watch Manage Employee video"
-                  style={moduleHomeStyles.tilePlayBadge}
+                  onClick={() => { setDraftProfileImg(undefined); setIsProfileModalOpen(true); }}
+                  style={moduleHomeStyles.avatarButton}
+                  aria-label="Edit profile photo and name"
                 >
-                  <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
+                  {profileImg ? (
+                    <img src={profileImg} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                  ) : (
+                    getInitials(loggedInUser?.fullName) || homeDisplayName.substring(0, 2).toUpperCase()
+                  )}
                 </button>
-                <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #2554EB, #0B3C9B)' }}>
-                  <HiOutlineUserGroup size={20} color="#ffffff" />
+                {/* Small pencil badge so users know the photo / name can be edited */}
+                <span style={moduleHomeStyles.avatarEditBadge} aria-hidden="true">
+                  <FiEdit2 size={11} color="#4B5563" />
                 </span>
-                <span style={moduleHomeStyles.tileTitleAdjustable}>Manage Employee<br />Track Attendance<br />Handle Payments</span>
               </div>
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => setActiveModule('quotations')}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveModule('quotations'); }}
-                style={moduleHomeStyles.tile}
-              >
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(DOCUMENTS_TUTORIAL_VIDEO_URL); }}
-                  aria-label="Watch Create Quotation, Invoice & Business Docs video"
-                  style={moduleHomeStyles.tilePlayBadge}
-                >
-                  <span style={{ marginLeft: '2px' }}>&#9654;&#65039;</span>
-                </button>
-                <span style={{ ...moduleHomeStyles.tileBadge, background: 'linear-gradient(135deg, #14B8A6, #0F766E)' }}>
-                  <FiFileText size={19} color="#ffffff" />
-                </span>
-                <span style={moduleHomeStyles.tileTitleAdjustable}>Quotation, Invoice<br />&amp; Business Docs</span>
+              <div style={moduleHomeStyles.brandRow}>
+                <div style={moduleHomeStyles.logoTile}>
+                  <img src={smartpayLogo} alt="SmartManage" style={moduleHomeStyles.logoImg} />
+                </div>
+                <span style={moduleHomeStyles.brandName}>SmartManage</span>
               </div>
+            </div>
+
+            <div style={moduleHomeStyles.greetBlock}>
+              <h1 style={moduleHomeStyles.greetTitle}>{t('greetingHi')}, {homeFullName}</h1>
+              <p style={moduleHomeStyles.greetSubtitle}>What would you like to do today?</p>
             </div>
           </div>
 
+          <div style={moduleHomeStyles.content}>
+            <label style={moduleHomeStyles.searchBox}>
+              <FiSearch size={20} color="#4A5468" aria-hidden="true" />
+              <input
+                type="search"
+                value={moduleSearch}
+                onChange={(e) => setModuleSearch(e.target.value)}
+                placeholder="Search modules"
+                aria-label="Search modules"
+                style={moduleHomeStyles.searchInput}
+              />
+            </label>
+
+            <div style={moduleHomeStyles.moduleList}>
+              {visibleModules.map((m) => (
+                <div
+                  key={m.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setActiveModule(m.id)}
+                  onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) setActiveModule(m.id); }}
+                  style={moduleHomeStyles.moduleCard}
+                >
+                  <span style={{ ...moduleHomeStyles.moduleBadge, background: m.badgeBg }}>{m.icon}</span>
+                  <span style={moduleHomeStyles.moduleText}>
+                    <span style={moduleHomeStyles.moduleTitle}>{m.title}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleWatchTutorialVideo(m.videoUrl); }}
+                    aria-label={m.videoLabel}
+                    style={moduleHomeStyles.modulePlayBtn}
+                  >
+                    <FiPlayCircle size={24} />
+                  </button>
+                  <FiChevronRight size={20} color="#4A5468" aria-hidden="true" />
+                </div>
+              ))}
+
+              {!searchText && (
+                <div style={moduleHomeStyles.moreModulesCard}>
+                  <span style={moduleHomeStyles.moreModulesBadge}><FiPlus size={26} color="#4A5468" /></span>
+                  <span style={moduleHomeStyles.moreModulesText}>More modules coming soon</span>
+                </div>
+              )}
+              {searchText && visibleModules.length === 0 && (
+                <p style={moduleHomeStyles.noResultText}>No module found</p>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Home / Subscribe / Contact Us — styled to match the Attendance module's bottom nav bar exactly */}
@@ -138,7 +178,7 @@ export default function ModuleHome() {
           <button
             type="button"
             onClick={() => { setIsSubscribePageOpen(false); setIsHelpPageOpen(false); }}
-            style={!isSubscribePageOpen && !isHelpPageOpen ? themeStyles.navItemTabActive : themeStyles.navItemTab}
+            style={!isSubscribePageOpen && !isHelpPageOpen ? homeNavActive : themeStyles.navItemTab}
           >
             <span style={themeStyles.navTabIcon}>&#128193;</span>
             <span style={themeStyles.navTabLabel}>{t('navHome')}</span>
@@ -146,7 +186,7 @@ export default function ModuleHome() {
           <button
             type="button"
             onClick={() => { setIsSubscribePageOpen(true); setIsHelpPageOpen(false); }}
-            style={isSubscribePageOpen ? themeStyles.navItemTabActive : themeStyles.navItemTab}
+            style={isSubscribePageOpen ? homeNavActive : themeStyles.navItemTab}
           >
             <span style={themeStyles.navTabIcon}>&#11088;</span>
             <span style={themeStyles.navTabLabel}>{t('navSubscribe')}</span>
@@ -154,7 +194,7 @@ export default function ModuleHome() {
           <button
             type="button"
             onClick={() => { setIsHelpPageOpen(true); setIsSubscribePageOpen(false); }}
-            style={isHelpPageOpen ? themeStyles.navItemTabActive : themeStyles.navItemTab}
+            style={isHelpPageOpen ? homeNavActive : themeStyles.navItemTab}
           >
             <span style={themeStyles.navTabIcon}>&#128222;</span>
             <span style={themeStyles.navTabLabel}>{t('navHelp')}</span>
