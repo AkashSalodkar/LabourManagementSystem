@@ -34,5 +34,11 @@ export const authFetch = async (url, options = {}, timeoutMs) => {
     const body = await res.clone().json().catch(() => ({}));
     if (body.code === 'SESSION_REPLACED') window.dispatchEvent(new Event('session-replaced'));
   }
+  if (res.status === 402) {
+    const body = await res.clone().json().catch(() => ({}));
+    if (body.code === 'SUBSCRIPTION_REQUIRED') {
+      window.dispatchEvent(new Event('subscription-required'));
+    }
+  }
   return res;
 };

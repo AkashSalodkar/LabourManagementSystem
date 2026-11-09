@@ -395,6 +395,7 @@ export default function AppShell() {
   // using ITS clock. The device clock is never used for access decisions.
   const [subStatus, setSubStatus] = useState(null);
       // response of GET /subscription/status
+  const [subStatusUserId, setSubStatusUserId] = useState(null);
   const [subLoading, setSubLoading] = useState(false);
 
   const [subError, setSubError] = useState('');
@@ -403,7 +404,15 @@ export default function AppShell() {
         // { orderId, qrImage, upiUri, amount, expiresAt }
   const [subOrderState, setSubOrderState] = useState('idle');
  // idle | creating | waiting | paid | failed | expired
-  const subLocked = !!(subStatus && subStatus.accessAllowed === false);
+  const hasCurrentSubscriptionStatus =
+    !!loggedInUser?.userId &&
+    String(loggedInUser.userId) === subStatusUserId &&
+    typeof subStatus?.accessAllowed === 'boolean';
+  const subLocked = !!(
+    isUserAuthenticated &&
+    loggedInUser?.userId &&
+    (!hasCurrentSubscriptionStatus || subStatus.accessAllowed !== true)
+  );
 
 
   const loadSubscriptionStatus = async () => {
@@ -411,10 +420,16 @@ export default function AppShell() {
     try {
       setSubLoading(true);
       const s = await api.get(`/subscription/status?userId=${loggedInUser.userId}`);
+      if (typeof s?.accessAllowed !== 'boolean') {
+        throw new Error('Subscription status response is invalid.');
+      }
       setSubStatus(s);
+      setSubStatusUserId(String(loggedInUser.userId));
       setSubError('');
       return s;
     } catch (e) {
+      setSubStatus(null);
+      setSubStatusUserId(null);
       setSubError('Could not load subscription status. Check your connection and try again.');
       return null;
     } finally { setSubLoading(false); }
@@ -443,10 +458,16 @@ export default function AppShell() {
   }, [isUserAuthenticated, loggedInUser?.userId, isSubscribePageOpen]);
 
 
-  // Trial over / subscription over -> the Subscribe page is shown and cannot be dismissed.
+  const handleSubscriptionRequired = () => {
+    setSubStatus(null);
+    setSubStatusUserId(null);
+    loadSubscriptionStatus();
+  };
   useEffect(() => {
-    if (subLocked) setIsSubscribePageOpen(true);
-  }, [subLocked]);
+    window.addEventListener('subscription-required', handleSubscriptionRequired);
+    return () => window.removeEventListener('subscription-required', handleSubscriptionRequired);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedInUser?.userId]);
 
 
   // Poll the backend for payment confirmation. The backend flips the order to "paid" ONLY after the
@@ -628,7 +649,10 @@ export default function AppShell() {
 
     // Check immediately on resume and every 60s while open. authFetch dispatches the
     // logout event itself on SESSION_REPLACED, so other errors are ignored here.
-    const check = () => api.get('/auth/session-check').catch(() => {});
+    const check = () => {
+      api.get('/auth/session-check').catch(() => {});
+      loadSubscriptionStatus();
+    };
     const interval = setInterval(check, 60000);
     const listenerPromise = App.addListener('appStateChange', ({ isActive }) => { if (isActive) check(); });
 
@@ -889,11 +913,13 @@ export default function AppShell() {
   return (
     <AppShellContext.Provider value={shellValue}>
       {isUserAuthenticated && loggedInUser ? (
-        <>
-          <ModuleHome />
-          <EmployeeModule />
-          <DocumentsModule />
-        </>
+        subLocked ? <ModuleHome /> : (
+          <>
+            <ModuleHome />
+            <EmployeeModule />
+            <DocumentsModule />
+          </>
+        )
       ) : (
         <LoginScreen />
       )}

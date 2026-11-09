@@ -52,7 +52,7 @@ export default function ModuleHome() {
   // Search box on the main page filters the module cards by name / description.
   const [moduleSearch, setModuleSearch] = useState('');
 
-  if (activeModule !== null) return null;
+  if (activeModule !== null && !subLocked) return null;
 
   // Full name for the greeting (falls back to the first name / 'there').
   const homeFullName = loggedInUser?.fullName?.trim() || homeDisplayName;
@@ -201,7 +201,7 @@ export default function ModuleHome() {
           </button>
         </div>
 
-        {isSubscribePageOpen && (() => {
+        {(isSubscribePageOpen || subLocked) && (() => {
           const s = subStatus;
           const state = s?.state; // 'trial' | 'trial_expired' | 'active' | 'expired'
           const needsPayment = state === 'trial_expired' || state === 'expired';

@@ -78,6 +78,13 @@ namespace LMPTS.Controllers
             var st = await _svc.GetStatusAsync(userId);
             if (st.State == "trial") return BadRequest(new { message = "Your free trial is still active." });
 
+            if (string.IsNullOrWhiteSpace(_cfg["Razorpay:KeyId"])
+                || string.IsNullOrWhiteSpace(_cfg["Razorpay:KeySecret"]))
+            {
+                _log.LogError("Cannot create subscription QR: Razorpay:KeyId or Razorpay:KeySecret is not configured");
+                return StatusCode(503, new { message = "Payment provider is not configured. Please contact support." });
+            }
+
             // Re-use a QR that is still payable instead of creating a new one on every tap.
             var now = DateTime.UtcNow;
             var existing = await _db.SubscriptionPayments
@@ -285,19 +292,50 @@ namespace LMPTS.Controllers
     }
 
     // Server-side gate: once trial/subscription is over, data endpoints return 402.
-    // IMPORTANT: it identifies the caller from the authenticated user's NameIdentifier claim. The API does not
-    // issue authenticated sessions yet (login only returns userId), so until it does, requests have no claim
-    // and this filter lets them through. See SETUP.md, "Make the backend gate real".
+    // The app authenticates API requests with its current-session headers rather than claims.
     public class SubscriptionRequiredFilter : IAsyncActionFilter
     {
+        private readonly ApplicationDbContext _db;
         private readonly SubscriptionService _svc;
-        public SubscriptionRequiredFilter(SubscriptionService svc) => _svc = svc;
+        public SubscriptionRequiredFilter(ApplicationDbContext db, SubscriptionService svc)
+        {
+            _db = db;
+            _svc = svc;
+        }
+
         public async Task OnActionExecutionAsync(ActionExecutingContext ctx, ActionExecutionDelegate next)
         {
             var ctrl = ctx.RouteData.Values["controller"]?.ToString();
-            if (ctrl is "Auth" or "Subscription") { await next(); return; }   // login, status, payment stay reachable
-            if (!int.TryParse(ctx.HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
-            { await next(); return; }                                          // unauthenticated: your existing auth handles it
+            var action = ctx.RouteData.Values["action"]?.ToString();
+            if (ctrl == "Subscription"
+                || (ctrl == "Auth" && action is "SendOtp" or "Register" or "Login" or "SessionCheck"))
+            {
+                await next();
+                return;
+            }
+
+            var request = ctx.HttpContext.Request;
+            var sessionToken = request.Headers["X-Session-Token"].ToString();
+            var userIdHeader = request.Headers["X-User-Id"].ToString();
+            if (string.IsNullOrWhiteSpace(sessionToken)
+                || !int.TryParse(userIdHeader, out var userId))
+            {
+                ctx.Result = new UnauthorizedObjectResult(new { code = "NO_SESSION", message = "Not signed in." });
+                return;
+            }
+
+            var storedSessionToken = await _db.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .Select(user => user.CurrentSessionToken)
+                .FirstOrDefaultAsync();
+            if (string.IsNullOrWhiteSpace(storedSessionToken)
+                || !string.Equals(storedSessionToken, sessionToken, StringComparison.Ordinal))
+            {
+                ctx.Result = new UnauthorizedObjectResult(new { code = "NO_SESSION", message = "Not signed in." });
+                return;
+            }
+
             if (!await _svc.HasAccessAsync(userId))
             { ctx.Result = new ObjectResult(new { code = "SUBSCRIPTION_REQUIRED", message = "Your trial has ended. Please subscribe." }) { StatusCode = 402 }; return; }
             await next();
