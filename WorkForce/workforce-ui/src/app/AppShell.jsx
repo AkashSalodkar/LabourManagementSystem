@@ -576,6 +576,7 @@ export default function AppShell() {
   const closeAppPopup = () => setAppPopup(null);
 
   const showAlert = (message, tone = 'warning', title) => {
+    if (isSubscribePageOpen && message === 'Watch an ad or subscribe to make changes.') return;
     setAppPopup({ open: true, tone, title, message, confirmLabel: t('ok') });
   };
 
@@ -740,17 +741,27 @@ export default function AppShell() {
       failedListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (error) => {
         rejectDismissal(new Error(error?.message || 'The rewarded ad could not be displayed.'));
       });
+      let rewardItem;
       try {
-        await Promise.all([AdMob.showRewardVideoAd(), dismissal]);
+        [rewardItem] = await Promise.all([AdMob.showRewardVideoAd(), dismissal]);
       } finally {
         await dismissListener?.remove();
         await failedListener?.remove();
       }
       if (useTestAds) {
-        throw new Error('AdMob test ads cannot verify rewards. Configure production rewarded-ad IDs and set VITE_ADMOB_TESTING=false.');
+        if (rewardItem?.amount !== 1 || !rewardItem?.type) {
+          throw new Error('The test ad did not return a valid reward. Please watch the ad to completion and try again.');
+        }
+        await api.post('/subscription/rewarded-access/test-confirm', {
+          challengeToken: challenge.challengeToken,
+          rewardAmount: rewardItem.amount,
+          rewardItem: rewardItem.type,
+        });
+        resolveRewardPrompt('retry');
+        return;
       }
 
-      setRewardPrompt({ message: 'Verifying your completed ad...' });
+      setRewardPrompt({ message: 'Reward granted. Verifying your completed ad...' });
       let verified = false;
       for (let attempt = 0; attempt < 30; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -774,7 +785,7 @@ export default function AppShell() {
       if (!verified) {
         throw new Error('The ad reward is still being verified. Please try again in a moment.');
       }
-      setRewardPrompt({ message: 'Ad complete. Continue to perform one action.', verified: true });
+      resolveRewardPrompt('retry');
     } catch (error) {
       setRewardPromptError(error?.message || 'Could not complete the rewarded ad. Please try again.');
     } finally {
@@ -1223,36 +1234,37 @@ export default function AppShell() {
           aria-labelledby="reward-prompt-title"
           style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(15, 23, 42, 0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
         >
-          <div style={{ width: '100%', maxWidth: '380px', borderRadius: '18px', background: '#ffffff', padding: '22px', boxShadow: '0 20px 60px rgba(0,0,0,0.24)' }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '380px', borderRadius: '18px', background: '#ffffff', padding: '22px', boxShadow: '0 20px 60px rgba(0,0,0,0.24)' }}>
+            <button
+              type="button"
+              onClick={() => resolveRewardPrompt('cancel')}
+              aria-label="Close and continue in read-only mode"
+              title="Continue in read-only mode"
+              style={{ position: 'absolute', top: '12px', right: '12px', width: '34px', height: '34px', border: 'none', borderRadius: '50%', background: '#F1F5F9', color: '#475569', fontSize: '24px', lineHeight: 1, cursor: 'pointer' }}
+            >
+              &times;
+            </button>
             <h2 id="reward-prompt-title" style={{ margin: '0 0 8px', fontSize: '19px', color: '#1E293B' }}>Continue using SmartManage</h2>
             <p style={{ margin: '0 0 16px', fontSize: '14px', lineHeight: 1.5, color: '#64748B' }}>
               {rewardPrompt.message || 'Your subscription has ended. Watch a complete ad to unlock one action, or subscribe for ad-free access.'}
             </p>
             {rewardPromptError && <p role="alert" style={{ margin: '0 0 12px', fontSize: '13px', color: '#B91C1C' }}>{rewardPromptError}</p>}
-            {rewardPrompt.verified ? (
-              <button type="button" onClick={() => resolveRewardPrompt('retry')} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#0B3C9B', color: '#fff', fontSize: '14px', fontWeight: 700 }}>
-                Close &amp; Continue
-              </button>
-            ) : (
-              <>
-                <button type="button" disabled={rewardPromptBusy} onClick={watchRewardedAd} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#0B3C9B', color: '#fff', fontSize: '14px', fontWeight: 700, opacity: rewardPromptBusy ? 0.65 : 1 }}>
-                  {rewardPromptBusy ? 'Please wait...' : 'Watch Ads'}
-                </button>
-                <button
-                  type="button"
-                  disabled={rewardPromptBusy}
-                  onClick={() => {
-                    setActiveModule(null);
-                    setIsSubscribePageOpen(true);
-                    setIsHelpPageOpen(false);
-                    resolveRewardPrompt('cancel');
-                  }}
-                  style={{ width: '100%', marginTop: '10px', padding: '13px', border: '1px solid #CBD5E1', borderRadius: '11px', background: '#fff', color: '#334155', fontSize: '14px', fontWeight: 700 }}
-                >
-                  Subscribe to continue Ads free
-                </button>
-              </>
-            )}
+            <button type="button" disabled={rewardPromptBusy} onClick={watchRewardedAd} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#0B3C9B', color: '#fff', fontSize: '14px', fontWeight: 700, opacity: rewardPromptBusy ? 0.65 : 1 }}>
+              {rewardPromptBusy ? 'Please wait...' : 'Watch Ads'}
+            </button>
+            <button
+              type="button"
+              disabled={rewardPromptBusy}
+              onClick={() => {
+                setActiveModule(null);
+                setIsSubscribePageOpen(true);
+                setIsHelpPageOpen(false);
+                resolveRewardPrompt('cancel');
+              }}
+              style={{ width: '100%', marginTop: '10px', padding: '13px', border: '1px solid #CBD5E1', borderRadius: '11px', background: '#fff', color: '#334155', fontSize: '14px', fontWeight: 700 }}
+            >
+              Subscribe to continue Ads free
+            </button>
           </div>
         </div>
       )}

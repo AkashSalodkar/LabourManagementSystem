@@ -19,6 +19,8 @@ For production, replace the Android and iOS test AdMob application IDs in `andro
 
 After changing native AdMob settings or dependencies, run `npm run cap:sync` from this directory and rebuild the native app.
 
+For local development only, set `AdMob:AllowTestRewards=true` in the API's untracked `appsettings.Development.json` to let a completed Google test rewarded ad unlock one write. This endpoint is disabled outside the ASP.NET Development environment, and production access continues to require Google's SSV callback.
+
 ## Razorpay checkout
 
 Subscription payments use Razorpay Standard Checkout so mobile users can select an installed UPI app. Configure `Razorpay:KeyId` and `Razorpay:KeySecret` on the API, and enable the signed `payment.captured` webhook using `Razorpay:WebhookSecret`. Apply the `RazorpayCheckoutOrders` database migration before deploying the API.

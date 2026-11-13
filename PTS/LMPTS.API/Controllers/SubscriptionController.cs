@@ -32,8 +32,9 @@ namespace LMPTS.Controllers
         private readonly ApplicationDbContext _db; private readonly SubscriptionService _svc;
         private readonly IConfiguration _cfg; private readonly IHttpClientFactory _http;
         private readonly ILogger<SubscriptionController> _log;
-        public SubscriptionController(ApplicationDbContext db, SubscriptionService svc, IConfiguration cfg, IHttpClientFactory http, ILogger<SubscriptionController> log)
-        { _db = db; _svc = svc; _cfg = cfg; _http = http; _log = log; }
+        private readonly IWebHostEnvironment _environment;
+        public SubscriptionController(ApplicationDbContext db, SubscriptionService svc, IConfiguration cfg, IHttpClientFactory http, ILogger<SubscriptionController> log, IWebHostEnvironment environment)
+        { _db = db; _svc = svc; _cfg = cfg; _http = http; _log = log; _environment = environment; }
 
         private static readonly ConcurrentDictionary<int, (string Pem, DateTime ExpiresAt)> AdMobPublicKeys = new();
 
@@ -160,6 +161,37 @@ namespace LMPTS.Controllers
                 return NotFound(new { message = "Rewarded ad verification expired. Please watch another ad." });
 
             return Ok(new { verified = challenge.TransactionId != null });
+        }
+
+        [HttpPost("rewarded-access/test-confirm")]
+        public async Task<IActionResult> ConfirmDevelopmentTestReward([FromBody] DevelopmentTestRewardRequest request)
+        {
+            if (!_environment.IsDevelopment() || !_cfg.GetValue<bool>("AdMob:AllowTestRewards"))
+                return NotFound();
+
+            if (!int.TryParse(Request.Headers["X-User-Id"], out var userId)
+                || !await HasCurrentSessionAsync(userId))
+                return Unauthorized(new { code = "NO_SESSION", message = "Not signed in." });
+
+            if (request.RewardAmount != 1 || string.IsNullOrWhiteSpace(request.RewardItem))
+                return BadRequest(new { message = "The rewarded ad did not return a valid reward." });
+
+            var status = await _svc.GetStatusAsync(userId);
+            if (status.State != "expired")
+                return Conflict(new { message = "Test rewarded access is only available after subscription expiry." });
+
+            var challenge = await _db.RewardedAdAccesses
+                .FirstOrDefaultAsync(access => access.ChallengeToken == request.ChallengeToken
+                    && access.UserId == userId
+                    && access.TransactionId == null
+                    && access.ExpiresAt > DateTime.UtcNow);
+            if (challenge == null)
+                return NotFound(new { message = "Rewarded ad verification expired. Please watch another ad." });
+
+            challenge.TransactionId = $"dev-test-{challenge.ChallengeToken}";
+            await _db.SaveChangesAsync();
+            _log.LogInformation("Granted development-only test ad credit to user {UserId}", userId);
+            return Ok(new { verified = true });
         }
 
         [AllowAnonymous]
@@ -553,6 +585,13 @@ namespace LMPTS.Controllers
     public sealed class SetExpiredAccessModeRequest
     {
         public string? Mode { get; set; }
+    }
+
+    public sealed class DevelopmentTestRewardRequest
+    {
+        public string ChallengeToken { get; set; } = "";
+        public int RewardAmount { get; set; }
+        public string RewardItem { get; set; } = "";
     }
 
     // Keep expired accounts read-only; non-GET requests require a one-use rewarded-ad credit.
