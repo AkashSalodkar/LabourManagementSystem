@@ -1,5 +1,28 @@
 import { API_ROOT } from './constants';
-import { authFetch } from './http';
+import { authFetch, fetchWithTimeout } from './http';
+
+let wakeRequest = null;
+let lastSuccessfulWakeAt = 0;
+
+export const wakeApi = () => {
+  if (wakeRequest) return wakeRequest;
+  if (Date.now() - lastSuccessfulWakeAt < 60000) return Promise.resolve();
+
+  const healthUrl = new URL(API_ROOT);
+  healthUrl.pathname = '/healthz';
+  healthUrl.search = '';
+
+  wakeRequest = fetchWithTimeout(healthUrl.toString(), { cache: 'no-store' })
+    .then((response) => {
+      if (!response.ok) throw new Error(`API health check failed: ${response.status}`);
+      lastSuccessfulWakeAt = Date.now();
+    })
+    .finally(() => {
+      wakeRequest = null;
+    });
+
+  return wakeRequest;
+};
 
 // ===== API SERVICES =====
 export const api = {

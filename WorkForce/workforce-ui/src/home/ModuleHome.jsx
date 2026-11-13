@@ -20,7 +20,9 @@ import { useAppShell } from '../app/AppShellContext';
 export default function ModuleHome() {
   const {
     activeModule,
+    accessModeSaving,
     appPopup,
+    chooseExpiredAccessMode,
     closeAppPopup,
     homeDisplayName,
     isHelpPageOpen,
@@ -41,6 +43,7 @@ export default function ModuleHome() {
     setSubOrderState,
     startUpiPayment,
     subError,
+    readOnlyAccess,
     subLoading,
     subLocked,
     subOrder,
@@ -288,6 +291,48 @@ export default function ModuleHome() {
                         {row('Remaining days', `${s.daysRemaining} ${s.daysRemaining === 1 ? 'day' : 'days'}`)}
                         {s.paymentReference && row('Payment reference', s.paymentReference)}
                       </div>
+                    </div>
+                  )}
+
+                  {s && state === 'expired' && (
+                    <div style={{ ...card, border: '2px solid #0B3C9B' }}>
+                      <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>Choose how to continue</h3>
+                      <p style={{ margin: '6px 0 14px', fontSize: '13px', lineHeight: '1.45', color: '#64748B' }}>
+                        You can switch these options at any time. Subscribe for uninterrupted full access.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={accessModeSaving || s.expiredAccessMode === 'ads' || !Capacitor.isNativePlatform()}
+                        onClick={() => chooseExpiredAccessMode('ads')}
+                        style={{ width: '100%', padding: '12px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '700', fontSize: '14px', cursor: accessModeSaving ? 'default' : 'pointer', opacity: accessModeSaving || s.expiredAccessMode === 'ads' || !Capacitor.isNativePlatform() ? 0.65 : 1 }}
+                      >
+                        {!Capacitor.isNativePlatform()
+                          ? 'Continue with ads - mobile app only'
+                          : accessModeSaving
+                            ? 'Updating...'
+                            : s.expiredAccessMode === 'ads'
+                              ? 'Continue with ads - selected'
+                              : 'Continue with ads - full access'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={accessModeSaving || s.expiredAccessMode === 'readOnly'}
+                        onClick={() => chooseExpiredAccessMode('readOnly')}
+                        style={{ width: '100%', marginTop: '9px', padding: '12px', borderRadius: '12px', border: '1px solid #CBD5E1', backgroundColor: '#ffffff', color: '#334155', fontWeight: '700', fontSize: '14px', cursor: accessModeSaving ? 'default' : 'pointer', opacity: accessModeSaving || s.expiredAccessMode === 'readOnly' ? 0.65 : 1 }}
+                      >
+                        {s.expiredAccessMode === 'readOnly' ? 'Ad-free read-only - selected' : 'Continue ad-free - view old entries only'}
+                      </button>
+                      {readOnlyAccess && (
+                        <p style={{ margin: '10px 0 0', fontSize: '12px', lineHeight: '1.4', color: '#92400E' }}>
+                          Read-only access is active. The server blocks creating, editing, and deleting entries.
+                        </p>
+                      )}
+                      {s.expiredAccessMode === 'ads' && !Capacitor.isNativePlatform() && (
+                        <p style={{ margin: '10px 0 0', fontSize: '12px', lineHeight: '1.4', color: '#92400E' }}>
+                          This account's ads-supported mode is available in the Android and iOS apps only.
+                        </p>
+                      )}
+                      {subError && <p role="alert" style={{ margin: '10px 0 0', fontSize: '12px', color: '#B91C1C' }}>{subError}</p>}
                     </div>
                   )}
 

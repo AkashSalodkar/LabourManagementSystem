@@ -71,6 +71,45 @@ namespace LMPTS.Controllers
             return Ok(await _svc.GetStatusAsync(userId));
         }
 
+        [HttpPost("access-mode")]
+        public async Task<IActionResult> SetAccessMode([FromBody] SetExpiredAccessModeRequest request)
+        {
+            var sessionToken = Request.Headers["X-Session-Token"].ToString();
+            var userIdHeader = Request.Headers["X-User-Id"].ToString();
+            if (string.IsNullOrWhiteSpace(sessionToken) || !int.TryParse(userIdHeader, out var userId))
+                return Unauthorized(new { code = "NO_SESSION", message = "Not signed in." });
+
+            var storedSessionToken = await _db.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .Select(user => user.CurrentSessionToken)
+                .FirstOrDefaultAsync();
+            if (string.IsNullOrWhiteSpace(storedSessionToken)
+                || !string.Equals(storedSessionToken, sessionToken, StringComparison.Ordinal))
+                return Unauthorized(new { code = "NO_SESSION", message = "Not signed in." });
+
+            var mode = request.Mode?.Trim();
+            if (!string.Equals(mode, SubscriptionService.AdsAccessMode, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(mode, SubscriptionService.ReadOnlyAccessMode, StringComparison.OrdinalIgnoreCase))
+                return BadRequest(new { message = "Choose either ads-supported access or ad-free read-only access." });
+
+            try
+            {
+                return Ok(await _svc.SetExpiredAccessModeAsync(userId,
+                    string.Equals(mode, SubscriptionService.AdsAccessMode, StringComparison.OrdinalIgnoreCase)
+                        ? SubscriptionService.AdsAccessMode
+                        : SubscriptionService.ReadOnlyAccessMode));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound(new { message = "User not found." });
+            }
+        }
+
         [HttpPost("orders")]
         public async Task<IActionResult> CreateOrder([FromQuery] int userId)
         {
@@ -291,6 +330,11 @@ namespace LMPTS.Controllers
         }
     }
 
+    public sealed class SetExpiredAccessModeRequest
+    {
+        public string? Mode { get; set; }
+    }
+
     // Server-side gate: once trial/subscription is over, data endpoints return 402.
     // The app authenticates API requests with its current-session headers rather than claims.
     public class SubscriptionRequiredFilter : IAsyncActionFilter
@@ -336,8 +380,20 @@ namespace LMPTS.Controllers
                 return;
             }
 
-            if (!await _svc.HasAccessAsync(userId))
-            { ctx.Result = new ObjectResult(new { code = "SUBSCRIPTION_REQUIRED", message = "Your trial has ended. Please subscribe." }) { StatusCode = 402 }; return; }
+            var status = await _svc.GetStatusAsync(userId);
+            if (!status.AccessAllowed)
+            {
+                ctx.Result = new ObjectResult(new { code = "SUBSCRIPTION_REQUIRED", message = "Your trial has ended. Choose an access option or subscribe." }) { StatusCode = 402 };
+                return;
+            }
+
+            if (status.ReadOnlyAccess && !HttpMethods.IsGet(request.Method))
+            {
+                ctx.Result = new ObjectResult(new { code = "READ_ONLY_ACCESS", message = "This account is in ad-free read-only mode. Choose ads-supported access or subscribe to make changes." })
+                { StatusCode = StatusCodes.Status403Forbidden };
+                return;
+            }
+
             await next();
         }
     }

@@ -40,5 +40,11 @@ export const authFetch = async (url, options = {}, timeoutMs) => {
       window.dispatchEvent(new Event('subscription-required'));
     }
   }
+  if (res.status === 403) {
+    const body = await res.clone().json().catch(() => ({}));
+    if (body.code === 'READ_ONLY_ACCESS') {
+      window.dispatchEvent(new CustomEvent('read-only-access-attempt', { detail: body.message }));
+    }
+  }
   return res;
 };

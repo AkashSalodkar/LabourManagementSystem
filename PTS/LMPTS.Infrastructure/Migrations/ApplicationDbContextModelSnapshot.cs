@@ -1946,6 +1946,10 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<string>("ExpiredAccessMode")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
                     b.Property<string>("FullName")
                         .IsRequired()
                         .HasMaxLength(100)

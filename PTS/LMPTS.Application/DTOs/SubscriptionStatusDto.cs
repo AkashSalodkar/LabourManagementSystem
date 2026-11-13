@@ -4,6 +4,9 @@
     {
         public string State { get; set; } = "trial";  // trial | trial_expired | active | expired
         public bool AccessAllowed { get; set; }
+        public string? ExpiredAccessMode { get; set; }
+        public bool ReadOnlyAccess { get; set; }
+        public bool AdsEnabled { get; set; }
         public int DaysRemaining { get; set; }
         public DateTime? TrialStartAt { get; set; }
         public DateTime? TrialEndsAt { get; set; }

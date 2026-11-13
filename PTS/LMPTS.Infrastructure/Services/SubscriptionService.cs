@@ -9,6 +9,8 @@ namespace LMPTS.Infrastructure.Services
         public const decimal Price = 99m;      // ₹99
         public const int TrialDays = 30;
         public const int MonthlyDays = 30;
+        public const string AdsAccessMode = "ads";
+        public const string ReadOnlyAccessMode = "readOnly";
 
         private readonly ApplicationDbContext _db;
         public SubscriptionService(ApplicationDbContext db) => _db = db;
@@ -85,8 +87,15 @@ namespace LMPTS.Infrastructure.Services
             else
             {
                 dto.State = "expired";
-                dto.AccessAllowed = false;
                 dto.DaysRemaining = 0;
+                dto.ExpiredAccessMode = await _db.Users
+                    .AsNoTracking()
+                    .Where(user => user.Id == userId)
+                    .Select(user => user.ExpiredAccessMode)
+                    .FirstOrDefaultAsync();
+                dto.AdsEnabled = dto.ExpiredAccessMode == AdsAccessMode;
+                dto.ReadOnlyAccess = dto.ExpiredAccessMode == ReadOnlyAccessMode;
+                dto.AccessAllowed = dto.AdsEnabled || dto.ReadOnlyAccess;
                 if (latestPaid != null)
                 {
                     dto.SubscriptionStartAt = AsUtc(latestPaid.StartDate);
@@ -97,6 +106,25 @@ namespace LMPTS.Infrastructure.Services
                 }
             }
             return dto;
+        }
+
+        public async Task<SubscriptionStatusDto> SetExpiredAccessModeAsync(int userId, string mode)
+        {
+            if (mode != AdsAccessMode && mode != ReadOnlyAccessMode)
+                throw new ArgumentOutOfRangeException(nameof(mode), "Unsupported expired access mode.");
+
+            var status = await GetStatusAsync(userId);
+            if (status.State != "expired")
+                throw new InvalidOperationException("Free access modes are only available after the trial or subscription expires.");
+
+            var user = await _db.Users.FirstOrDefaultAsync(user => user.Id == userId);
+            if (user == null) throw new KeyNotFoundException("User not found.");
+
+            user.ExpiredAccessMode = mode;
+            user.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            return await GetStatusAsync(userId);
         }
 
         public async Task<bool> HasAccessAsync(int userId)

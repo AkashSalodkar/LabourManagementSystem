@@ -6,6 +6,7 @@
 
 import { API_BASE_URL, DEV_SKIP_LOGIN, LANGUAGE_STORAGE_KEY } from '../shared/constants';
 import { App } from '@capacitor/app';
+import { AdMob, AdmobConsentStatus, BannerAdPosition, BannerAdSize } from '@capacitor-community/admob';
 import { AppPopup } from '../shared/components';
 import { AppShellContext } from './AppShellContext';
 import { AppUpdate, AppUpdateAvailability } from '@capawesome/capacitor-app-update';
@@ -16,7 +17,7 @@ import EmployeeModule from '../modules/employee/EmployeeModule';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import LoginScreen from '../auth/LoginScreen';
 import ModuleHome from '../home/ModuleHome';
-import { api } from '../shared/services';
+import { api, wakeApi } from '../shared/services';
 import { authFetch } from '../shared/http';
 import { businessInfoStyles, customerModuleStyles } from '../shared/styles';
 import { clampCropBox, computeContainedLayout, getPersistedSession, handleConfirmExitApp } from './helpers';
@@ -397,6 +398,7 @@ export default function AppShell() {
       // response of GET /subscription/status
   const [subStatusUserId, setSubStatusUserId] = useState(null);
   const [subLoading, setSubLoading] = useState(false);
+  const [accessModeSaving, setAccessModeSaving] = useState(false);
 
   const [subError, setSubError] = useState('');
 
@@ -411,7 +413,9 @@ export default function AppShell() {
   const subLocked = !!(
     isUserAuthenticated &&
     loggedInUser?.userId &&
-    (!hasCurrentSubscriptionStatus || subStatus.accessAllowed !== true)
+    (!hasCurrentSubscriptionStatus ||
+      subStatus.accessAllowed !== true ||
+      (subStatus.adsEnabled && !Capacitor.isNativePlatform()))
   );
 
 
@@ -433,6 +437,29 @@ export default function AppShell() {
       setSubError('Could not load subscription status. Check your connection and try again.');
       return null;
     } finally { setSubLoading(false); }
+  };
+
+  const chooseExpiredAccessMode = async (mode) => {
+    if (!loggedInUser?.userId || !['ads', 'readOnly'].includes(mode)) return;
+    if (mode === 'ads' && !Capacitor.isNativePlatform()) {
+      setSubError('Ad-supported access is available in the Android and iOS apps.');
+      return;
+    }
+    try {
+      setAccessModeSaving(true);
+      setSubError('');
+      const status = await api.post('/subscription/access-mode', { mode });
+      if (typeof status?.accessAllowed !== 'boolean') {
+        throw new Error('Access mode response is invalid.');
+      }
+      setSubStatus(status);
+      setSubStatusUserId(String(loggedInUser.userId));
+      setIsSubscribePageOpen(false);
+    } catch (e) {
+      setSubError(e?.message || 'Could not change your access option. Please try again.');
+    } finally {
+      setAccessModeSaving(false);
+    }
   };
 
 
@@ -508,6 +535,19 @@ export default function AppShell() {
     setAppPopup({ open: true, tone, title, message, confirmLabel: t('ok') });
   };
 
+  useEffect(() => {
+    const handleReadOnlyAttempt = (event) => {
+      showAlert(
+        event.detail || 'This account is in ad-free read-only mode. Choose ads-supported access or subscribe to make changes.',
+        'warning',
+        'Read-only access'
+      );
+    };
+    window.addEventListener('read-only-access-attempt', handleReadOnlyAttempt);
+    return () => window.removeEventListener('read-only-access-attempt', handleReadOnlyAttempt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const showSuccess = (message, title) => {
     setAppPopup({ open: true, tone: 'success', title, message, confirmLabel: t('ok') });
   };
@@ -532,6 +572,11 @@ export default function AppShell() {
   // Only works on the installed Android app (Play Store build) - on web / debug builds the
   // plugin throws or reports nothing, which is silently ignored.
   const updatePromptShownRef = useRef(false);
+  const lastUserActivityAtRef = useRef(0);
+
+  const wakeApiInBackground = () => {
+    wakeApi().catch((error) => console.warn('API wake-up request failed:', error));
+  };
 
   const checkForAppUpdate = async () => {
     if (updatePromptShownRef.current || !Capacitor.isNativePlatform()) return;
@@ -566,11 +611,92 @@ export default function AppShell() {
   };
 
   useEffect(() => {
+    wakeApiInBackground();
     checkForAppUpdate();
-    const listenerPromise = App.addListener('appStateChange', ({ isActive }) => { if (isActive) checkForAppUpdate(); });
-    return () => { listenerPromise.then((h) => h.remove()); };
+    const listenerPromise = App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) {
+        wakeApiInBackground();
+        checkForAppUpdate();
+      }
+    });
+    const handleVisibilityChange = () => {
+      if (!document.hidden) wakeApiInBackground();
+    };
+    const handleUserActivity = () => {
+      const now = Date.now();
+      if (!lastUserActivityAtRef.current || now - lastUserActivityAtRef.current >= 60000) wakeApiInBackground();
+      lastUserActivityAtRef.current = now;
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', wakeApiInBackground);
+    window.addEventListener('pointerdown', handleUserActivity, true);
+    window.addEventListener('keydown', handleUserActivity, true);
+    return () => {
+      listenerPromise.then((h) => h.remove());
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', wakeApiInBackground);
+      window.removeEventListener('pointerdown', handleUserActivity, true);
+      window.removeEventListener('keydown', handleUserActivity, true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const showAds = isUserAuthenticated && subStatus?.state === 'expired' && subStatus.adsEnabled;
+    if (!Capacitor.isNativePlatform() || !showAds) {
+      document.body.style.paddingTop = '';
+      if (Capacitor.isNativePlatform()) {
+        AdMob.removeBanner().catch((error) => console.warn('Could not remove the AdMob banner:', error));
+      }
+      return undefined;
+    }
+
+    let cancelled = false;
+    const showBanner = async () => {
+      try {
+        let consent = await AdMob.requestConsentInfo();
+        if (consent.status === AdmobConsentStatus.REQUIRED && consent.isConsentFormAvailable) {
+          consent = await AdMob.showConsentForm();
+        }
+        if (!consent.canRequestAds) return;
+
+        const platform = Capacitor.getPlatform();
+        const useTestAds = import.meta.env.VITE_ADMOB_TESTING !== 'false';
+        const configuredAdId = platform === 'ios'
+          ? import.meta.env.VITE_ADMOB_IOS_BANNER_ID
+          : import.meta.env.VITE_ADMOB_ANDROID_BANNER_ID;
+        if (!useTestAds && !configuredAdId) {
+          throw new Error(`Set VITE_ADMOB_${platform === 'ios' ? 'IOS' : 'ANDROID'}_BANNER_ID before disabling test ads.`);
+        }
+
+        await AdMob.initialize({ initializeForTesting: useTestAds });
+        if (cancelled) return;
+
+        const adId = useTestAds
+          ? (platform === 'ios' ? 'ca-app-pub-3940256099942544/2934735716' : 'ca-app-pub-3940256099942544/6300978111')
+          : configuredAdId;
+        await AdMob.showBanner({
+          adId,
+          adSize: BannerAdSize.BANNER,
+          position: BannerAdPosition.TOP_CENTER,
+        });
+        if (cancelled) {
+          await AdMob.removeBanner();
+          return;
+        }
+        document.body.style.paddingTop = '50px';
+      } catch (error) {
+        console.error('Could not display the AdMob banner:', error);
+      }
+    };
+    showBanner();
+
+    return () => {
+      cancelled = true;
+      document.body.style.paddingTop = '';
+      AdMob.removeBanner().catch((error) => console.warn('Could not remove the AdMob banner:', error));
+    };
+  }, [isUserAuthenticated, subStatus?.state, subStatus?.adsEnabled]);
 
 
   // Ask before throwing away work the user is in the middle of. Returns true so the back
@@ -850,7 +976,9 @@ export default function AppShell() {
   // Everything the other screens/modules read from the shell (state, helpers, popups, profile...).
   const shellValue = {
     activeModule,
+    accessModeSaving,
     appPopup,
+    chooseExpiredAccessMode,
     closeAppPopup,
     closeProfileModalIfOpen,
     closeSubscribeOrHelpIfOpen,
@@ -871,6 +999,7 @@ export default function AppShell() {
     openImageCropper,
     persistedUser,
     profileImg,
+    readOnlyAccess: !!subStatus?.readOnlyAccess,
     renderExitConfirmPopup,
     renderImageCropperModal,
     renderProfileModal,
