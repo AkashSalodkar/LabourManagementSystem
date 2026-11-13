@@ -25,6 +25,7 @@ namespace LMPTS.Infrastructure.Data
         public DbSet<WorkerInactivePeriod> WorkerInactivePeriods { get; set; }
         public DbSet<Subscription> Subscriptions { get; set; }
         public DbSet<SubscriptionPayment> SubscriptionPayments { get; set; }
+        public DbSet<RewardedAdAccess> RewardedAdAccesses { get; set; }
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
         public DbSet<DashboardStats> DashboardStats { get; set; }
@@ -67,9 +68,23 @@ namespace LMPTS.Infrastructure.Data
                 entity.Property(e => e.FullName).IsRequired().HasMaxLength(100);
                 entity.Property(e => e.MobileNumber).IsRequired().HasMaxLength(10);
                 entity.Property(e => e.Industry).HasMaxLength(50);
+                entity.Property(e => e.ExpiredWriteActionCount).HasDefaultValue(0);
                 entity.Property(e => e.CreatedAt).HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.UpdatedAt).HasDefaultValueSql("GETDATE()");
                 entity.HasIndex(e => e.MobileNumber).IsUnique();
+            });
+
+            modelBuilder.Entity<RewardedAdAccess>(entity =>
+            {
+                entity.HasKey(e => e.RewardedAdAccessId);
+                entity.Property(e => e.ChallengeToken).IsRequired().HasMaxLength(64);
+                entity.Property(e => e.TransactionId).HasMaxLength(128);
+                entity.Property(e => e.CreatedAt).HasColumnType("datetime2");
+                entity.Property(e => e.ExpiresAt).HasColumnType("datetime2");
+                entity.Property(e => e.UsedAt).HasColumnType("datetime2");
+                entity.HasIndex(e => e.ChallengeToken).IsUnique();
+                entity.HasIndex(e => e.TransactionId).IsUnique().HasFilter("[TransactionId] IS NOT NULL");
+                entity.HasIndex(e => new { e.UserId, e.UsedAt, e.ExpiresAt });
             });
 
             // UserOtp Configuration
@@ -245,6 +260,7 @@ namespace LMPTS.Infrastructure.Data
                 entity.HasKey(e => e.SubscriptionPaymentId);
                 entity.Property(e => e.OrderRef).IsRequired().HasMaxLength(64);
                 entity.Property(e => e.ProviderQrId).IsRequired().HasMaxLength(64);
+                entity.Property(e => e.ProviderOrderId).HasMaxLength(64);
                 // FIX: bumped 400 -> 1000 to accommodate signed CDN / gateway URLs
                 entity.Property(e => e.QrImageUrl).IsRequired().HasMaxLength(1000);
                 entity.Property(e => e.Amount).HasColumnType("decimal(10,2)");
@@ -262,6 +278,7 @@ namespace LMPTS.Infrastructure.Data
 
                 entity.HasIndex(e => e.OrderRef).IsUnique();
                 entity.HasIndex(e => e.ProviderQrId);
+                entity.HasIndex(e => e.ProviderOrderId);
                 entity.HasIndex(e => new { e.UserId, e.CreatedAt });
             });
 

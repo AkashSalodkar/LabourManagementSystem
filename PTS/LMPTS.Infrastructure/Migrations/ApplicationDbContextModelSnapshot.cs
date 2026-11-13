@@ -1791,6 +1791,49 @@ namespace LMPTS.Infrastructure.Migrations
                     b.ToTable("ReceiptSettings");
                 });
 
+            modelBuilder.Entity("LMPTS.Domain.Entities.RewardedAdAccess", b =>
+                {
+                    b.Property<int>("RewardedAdAccessId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("RewardedAdAccessId"));
+
+                    b.Property<string>("ChallengeToken")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("TransactionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("RewardedAdAccessId");
+
+                    b.HasIndex("ChallengeToken")
+                        .IsUnique();
+
+                    b.HasIndex("TransactionId")
+                        .IsUnique()
+                        .HasFilter("[TransactionId] IS NOT NULL");
+
+                    b.HasIndex("UserId", "UsedAt", "ExpiresAt");
+
+                    b.ToTable("RewardedAdAccess");
+                });
+
             modelBuilder.Entity("LMPTS.Domain.Entities.Subscription", b =>
                 {
                     b.Property<int>("SubscriptionId")
@@ -1890,6 +1933,10 @@ namespace LMPTS.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<string>("ProviderOrderId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("ProviderQrId")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1917,6 +1964,8 @@ namespace LMPTS.Infrastructure.Migrations
 
                     b.HasIndex("OrderRef")
                         .IsUnique();
+
+                    b.HasIndex("ProviderOrderId");
 
                     b.HasIndex("ProviderQrId");
 
@@ -1949,6 +1998,11 @@ namespace LMPTS.Infrastructure.Migrations
                     b.Property<string>("ExpiredAccessMode")
                         .HasMaxLength(16)
                         .HasColumnType("nvarchar(16)");
+
+                    b.Property<int>("ExpiredWriteActionCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
 
                     b.Property<string>("FullName")
                         .IsRequired()

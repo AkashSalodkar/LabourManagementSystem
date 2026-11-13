@@ -13,11 +13,17 @@ The React Compiler is not enabled on this template because of its impact on dev 
 
 ## Expired subscription access
 
-After a trial or paid subscription expires, users can choose full access with AdMob banner ads or ad-free read-only access. The API persists the choice and enforces read-only access by rejecting non-GET data requests. The API applies the database migration at startup in production.
+After a trial or paid subscription expires, both modules remain available for read-only browsing. A write request prompts the user to watch a rewarded ad or subscribe. A successfully verified ad grants one write action; the server consumes that credit once and requires another ad for the next action. After every two successful writes, a separate full-screen interstitial ad is shown and the app remains blocked for at least 10 seconds and until the interstitial closes. Ad duration and availability are controlled by Google; on load/show errors the app displays an error and still pauses for 10 seconds. Reward verification uses AdMob server-side verification (SSV); a client-side ad callback alone never grants access.
 
-The Android and iOS projects currently use Google's official test AdMob application IDs and test banner units. Before release, replace the application IDs in `android/app/src/main/res/values/strings.xml` and `ios/App/App/Info.plist`, then set `VITE_ADMOB_TESTING=false` and the platform banner unit variable (`VITE_ADMOB_ANDROID_BANNER_ID` or `VITE_ADMOB_IOS_BANNER_ID`) when building. Leave test mode enabled during development. Configure AdMob consent messaging in the AdMob account for production.
+For production, replace the Android and iOS test AdMob application IDs in `android/app/src/main/res/values/strings.xml` and `ios/App/App/Info.plist`. Set `VITE_ADMOB_TESTING=false` and configure `VITE_ADMOB_ANDROID_REWARDED_ID` / `VITE_ADMOB_IOS_REWARDED_ID` with the production rewarded-ad unit IDs, plus `VITE_ADMOB_ANDROID_INTERSTITIAL_ID` / `VITE_ADMOB_IOS_INTERSTITIAL_ID` with the production interstitial unit IDs, when building. Test rewarded ads do not invoke SSV and therefore cannot grant write credits. Configure the API allowlist with the rewarded unit IDs using `AdMob__RewardedAdUnitIds__0` and `AdMob__RewardedAdUnitIds__1`, as applicable, and set AdMob's SSV callback URL to `https://<api-host>/api/subscription/rewarded-access/ssv`. The callback verifies Google's signed request and accepts only one reward for each server-issued challenge. Configure AdMob consent messaging for production.
 
-After changing native AdMob settings or dependencies, run `npx cap sync` from this directory and rebuild the native app.
+After changing native AdMob settings or dependencies, run `npm run cap:sync` from this directory and rebuild the native app.
+
+## Razorpay checkout
+
+Subscription payments use Razorpay Standard Checkout so mobile users can select an installed UPI app. Configure `Razorpay:KeyId` and `Razorpay:KeySecret` on the API, and enable the signed `payment.captured` webhook using `Razorpay:WebhookSecret`. Apply the `RazorpayCheckoutOrders` database migration before deploying the API.
+
+After changing Capacitor plugins, run `npm run cap:sync` from this directory and rebuild the native apps. The sync script also adds Razorpay's iOS Swift Package dependency to the generated Cordova plugin package. Use Razorpay test credentials during testing and live credentials only for release builds.
 
 ## Expanding the ESLint configuration
 

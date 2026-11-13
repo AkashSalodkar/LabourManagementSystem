@@ -4,7 +4,6 @@
 
 import { ATTENDANCE_TUTORIAL_VIDEO_URL, DOCUMENTS_TUTORIAL_VIDEO_URL } from './constants';
 import { AppPopup } from '../shared/components';
-import { Capacitor } from '@capacitor/core';
 import { FaWhatsapp } from 'react-icons/fa';
 import { FiArrowLeft, FiChevronRight, FiEdit2, FiFileText, FiPhone, FiPlayCircle, FiPlus, FiSearch } from 'react-icons/fi';
 import { Fragment, useState } from 'react';
@@ -20,15 +19,14 @@ import { useAppShell } from '../app/AppShellContext';
 export default function ModuleHome() {
   const {
     activeModule,
-    accessModeSaving,
     appPopup,
-    chooseExpiredAccessMode,
     closeAppPopup,
     homeDisplayName,
     isHelpPageOpen,
     isSubscribePageOpen,
     loadSubscriptionStatus,
     loggedInUser,
+    openSubscriptionCheckout,
     profileImg,
     renderExitConfirmPopup,
     renderImageCropperModal,
@@ -43,7 +41,6 @@ export default function ModuleHome() {
     setSubOrderState,
     startUpiPayment,
     subError,
-    readOnlyAccess,
     subLoading,
     subLocked,
     subOrder,
@@ -55,7 +52,7 @@ export default function ModuleHome() {
   // Search box on the main page filters the module cards by name / description.
   const [moduleSearch, setModuleSearch] = useState('');
 
-  if (activeModule !== null && !subLocked) return null;
+  if (activeModule !== null) return null;
 
   // Full name for the greeting (falls back to the first name / 'there').
   const homeFullName = loggedInUser?.fullName?.trim() || homeDisplayName;
@@ -294,55 +291,13 @@ export default function ModuleHome() {
                     </div>
                   )}
 
-                  {s && state === 'expired' && (
-                    <div style={{ ...card, border: '2px solid #0B3C9B' }}>
-                      <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>Choose how to continue</h3>
-                      <p style={{ margin: '6px 0 14px', fontSize: '13px', lineHeight: '1.45', color: '#64748B' }}>
-                        You can switch these options at any time. Subscribe for uninterrupted full access.
-                      </p>
-                      <button
-                        type="button"
-                        disabled={accessModeSaving || s.expiredAccessMode === 'ads' || !Capacitor.isNativePlatform()}
-                        onClick={() => chooseExpiredAccessMode('ads')}
-                        style={{ width: '100%', padding: '12px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '700', fontSize: '14px', cursor: accessModeSaving ? 'default' : 'pointer', opacity: accessModeSaving || s.expiredAccessMode === 'ads' || !Capacitor.isNativePlatform() ? 0.65 : 1 }}
-                      >
-                        {!Capacitor.isNativePlatform()
-                          ? 'Continue with ads - mobile app only'
-                          : accessModeSaving
-                            ? 'Updating...'
-                            : s.expiredAccessMode === 'ads'
-                              ? 'Continue with ads - selected'
-                              : 'Continue with ads - full access'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={accessModeSaving || s.expiredAccessMode === 'readOnly'}
-                        onClick={() => chooseExpiredAccessMode('readOnly')}
-                        style={{ width: '100%', marginTop: '9px', padding: '12px', borderRadius: '12px', border: '1px solid #CBD5E1', backgroundColor: '#ffffff', color: '#334155', fontWeight: '700', fontSize: '14px', cursor: accessModeSaving ? 'default' : 'pointer', opacity: accessModeSaving || s.expiredAccessMode === 'readOnly' ? 0.65 : 1 }}
-                      >
-                        {s.expiredAccessMode === 'readOnly' ? 'Ad-free read-only - selected' : 'Continue ad-free - view old entries only'}
-                      </button>
-                      {readOnlyAccess && (
-                        <p style={{ margin: '10px 0 0', fontSize: '12px', lineHeight: '1.4', color: '#92400E' }}>
-                          Read-only access is active. The server blocks creating, editing, and deleting entries.
-                        </p>
-                      )}
-                      {s.expiredAccessMode === 'ads' && !Capacitor.isNativePlatform() && (
-                        <p style={{ margin: '10px 0 0', fontSize: '12px', lineHeight: '1.4', color: '#92400E' }}>
-                          This account's ads-supported mode is available in the Android and iOS apps only.
-                        </p>
-                      )}
-                      {subError && <p role="alert" style={{ margin: '10px 0 0', fontSize: '12px', color: '#B91C1C' }}>{subError}</p>}
-                    </div>
-                  )}
-
                   {/* ---- MONTHLY SUBSCRIPTION / UPI PAYMENT ---- */}
                   {s && (
                     <div style={{ ...card, border: needsPayment ? '2px solid #0B3C9B' : '1px solid #F1F5F9', boxShadow: needsPayment ? '0 4px 16px rgba(11,60,155,0.12)' : card.boxShadow }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
                           <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>{state === 'active' ? 'Renew early' : 'Monthly Subscription'}</h3>
-                          <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>UPI payment only</p>
+                          <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>Pay securely with UPI apps or other available payment methods</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0B3C9B' }}>{'\u20B9'}99</p>
@@ -358,33 +313,28 @@ export default function ModuleHome() {
 
                       {(needsPayment || state === 'active') && subOrderState === 'idle' && (
                         <button onClick={startUpiPayment} style={{ width: '100%', marginTop: '14px', padding: '13px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
-                          {state === 'active' ? 'Renew for \u20B999 via UPI' : 'Pay \u20B999 via UPI'}
+                          {state === 'active' ? 'Renew for \u20B999' : 'Pay \u20B999'}
                         </button>
                       )}
 
                       {subOrderState === 'creating' && (
-                        <p style={{ textAlign: 'center', fontSize: '13px', color: '#64748B', margin: '16px 0 0 0' }}>Generating your payment QR...</p>
+                        <p style={{ textAlign: 'center', fontSize: '13px', color: '#64748B', margin: '16px 0 0 0' }}>Preparing secure payment options...</p>
                       )}
 
                       {(subOrderState === 'waiting' || subOrderState === 'paid') && subOrder && (
                         <div style={{ marginTop: '14px', textAlign: 'center' }}>
                           {subOrderState === 'waiting' && (
                             <Fragment>
-                              <div style={{ display: 'inline-block', padding: '10px', backgroundColor: '#ffffff', border: '1px solid #E2E8F0', borderRadius: '14px' }}>
-                                <img src={subOrder.qrImage} alt="UPI QR code to pay ₹99" style={{ width: '210px', height: '210px', display: 'block' }} />
-                              </div>
-                              <p style={{ margin: '10px 0 0 0', fontSize: '15px', fontWeight: '700', color: '#1E293B' }}>Scan &amp; pay exactly {'\u20B9'}{subOrder.amount}</p>
-                              {subOrder.upiUri && Capacitor.isNativePlatform() && (
-                                <button onClick={() => { window.location.href = subOrder.upiUri; }} style={{ marginTop: '10px', padding: '10px 18px', borderRadius: '12px', border: '1px solid #0B3C9B', backgroundColor: '#ffffff', color: '#0B3C9B', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
-                                  Open UPI app on this phone
-                                </button>
-                              )}
+                              <p style={{ margin: '10px 0 0 0', fontSize: '15px', fontWeight: '700', color: '#1E293B' }}>Complete your payment of {'\u20B9'}{subOrder.amount}</p>
+                              <button onClick={() => openSubscriptionCheckout(subOrder).catch((error) => setSubError(error?.message || 'Could not open payment options. Please try again.'))} style={{ marginTop: '10px', padding: '12px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                                Choose a UPI app or payment method
+                              </button>
                             </Fragment>
                           )}
 
                           <div style={{ textAlign: 'left', marginTop: '14px', backgroundColor: '#F8FAFC', borderRadius: '12px', padding: '12px 14px' }}>
                             <p style={{ margin: '0 0 6px 0', fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>How to pay</p>
-                            {['Open any UPI app (Google Pay, PhonePe, Paytm, BHIM...)', `Scan this QR code and pay exactly \u20B9${subOrder.amount}`, 'Keep this screen open - your payment is verified automatically', 'Your subscription activates for 30 days as soon as the bank confirms it'].map((t, i) => (
+                            {['Choose an installed UPI app in Razorpay Checkout (Google Pay, PhonePe, Paytm, BHIM, and others)', `Approve the payment of \u20B9${subOrder.amount} in your UPI app`, 'Return to this screen; payment is verified automatically', 'Your subscription activates for 30 days after the bank confirms payment'].map((t, i) => (
                               <p key={i} style={{ margin: '0 0 4px 0', fontSize: '12.5px', color: '#475569' }}>{i + 1}. {t}</p>
                             ))}
                           </div>
@@ -404,9 +354,10 @@ export default function ModuleHome() {
                           </div>
                           {subOrderState === 'waiting' && (
                             <p style={{ fontSize: '11.5px', color: '#94A3B8', margin: '6px 0 0 0' }}>
-                              Only a bank-confirmed payment activates the plan. Screenshots are not accepted.
+                              Only a bank-confirmed payment activates the plan.
                             </p>
                           )}
+                          {subError && <p role="alert" style={{ fontSize: '12px', color: '#B91C1C', margin: '8px 0 0' }}>{subError}</p>}
                         </div>
                       )}
 

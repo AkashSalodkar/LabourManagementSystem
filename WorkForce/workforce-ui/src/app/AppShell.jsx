@@ -4,9 +4,9 @@
 // connectivity, pull-to-refresh, Android back button and the "which screen is open" switch.
 // It exposes that shared state to every screen through AppShellContext (see useAppShell()).
 
-import { API_BASE_URL, DEV_SKIP_LOGIN, LANGUAGE_STORAGE_KEY } from '../shared/constants';
+import { API_BASE_URL, API_ROOT, DEV_SKIP_LOGIN, LANGUAGE_STORAGE_KEY } from '../shared/constants';
 import { App } from '@capacitor/app';
-import { AdMob, AdmobConsentStatus, BannerAdPosition, BannerAdSize } from '@capacitor-community/admob';
+import { AdMob, AdmobConsentStatus, InterstitialAdPluginEvents, RewardAdPluginEvents } from '@capacitor-community/admob';
 import { AppPopup } from '../shared/components';
 import { AppShellContext } from './AppShellContext';
 import { AppUpdate, AppUpdateAvailability } from '@capawesome/capacitor-app-update';
@@ -25,6 +25,19 @@ import { getInitials } from '../shared/helpers';
 import smartpayLogo from '../assets/icon.png';
 import { translations } from './translations';
 import { useEffect, useRef, useState } from 'react';
+
+const loadRazorpayCheckout = () => new Promise((resolve, reject) => {
+  if (window.Razorpay) {
+    resolve();
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.onload = resolve;
+  script.onerror = () => reject(new Error('Could not load Razorpay Checkout. Check your connection and try again.'));
+  document.head.appendChild(script);
+});
 
 export default function AppShell() {
   const persistedUser = DEV_SKIP_LOGIN ? DEV_MOCK_USER : getPersistedSession();
@@ -398,12 +411,11 @@ export default function AppShell() {
       // response of GET /subscription/status
   const [subStatusUserId, setSubStatusUserId] = useState(null);
   const [subLoading, setSubLoading] = useState(false);
-  const [accessModeSaving, setAccessModeSaving] = useState(false);
 
   const [subError, setSubError] = useState('');
 
   const [subOrder, setSubOrder] = useState(null);
-        // { orderId, qrImage, upiUri, amount, expiresAt }
+        // Razorpay checkout order plus the app-facing status reference.
   const [subOrderState, setSubOrderState] = useState('idle');
  // idle | creating | waiting | paid | failed | expired
   const hasCurrentSubscriptionStatus =
@@ -414,9 +426,14 @@ export default function AppShell() {
     isUserAuthenticated &&
     loggedInUser?.userId &&
     (!hasCurrentSubscriptionStatus ||
-      subStatus.accessAllowed !== true ||
-      (subStatus.adsEnabled && !Capacitor.isNativePlatform()))
+      subStatus.accessAllowed !== true)
   );
+  const [rewardPrompt, setRewardPrompt] = useState(null);
+  const [rewardPromptBusy, setRewardPromptBusy] = useState(false);
+  const [rewardPromptError, setRewardPromptError] = useState('');
+  const rewardPromptResolverRef = useRef(null);
+  const [interstitialSecondsLeft, setInterstitialSecondsLeft] = useState(0);
+  const [interstitialError, setInterstitialError] = useState('');
 
 
   const loadSubscriptionStatus = async () => {
@@ -439,29 +456,52 @@ export default function AppShell() {
     } finally { setSubLoading(false); }
   };
 
-  const chooseExpiredAccessMode = async (mode) => {
-    if (!loggedInUser?.userId || !['ads', 'readOnly'].includes(mode)) return;
-    if (mode === 'ads' && !Capacitor.isNativePlatform()) {
-      setSubError('Ad-supported access is available in the Android and iOS apps.');
+  const openSubscriptionCheckout = async (order) => {
+    const options = {
+      key: order.razorpayKeyId,
+      amount: String(order.amountSubunits),
+      currency: order.currency,
+      name: 'SmartManage',
+      description: '30-day subscription',
+      order_id: order.razorpayOrderId,
+      theme: { color: '#0B3C9B' },
+    };
+
+    const handlePaymentSuccess = () => setSubError('');
+    const handlePaymentFailure = (error) => {
+      setSubError(error?.description || error?.error?.description || 'Payment was not completed. You can try again.');
+    };
+
+    if (Capacitor.isNativePlatform()) {
+      const checkout = window.RazorpayCheckout;
+      if (!checkout?.open || !checkout?.on) {
+        throw new Error('Razorpay mobile checkout is not installed in this app build. Rebuild the Android/iOS app after syncing native plugins.');
+      }
+
+      checkout.on('payment.success', handlePaymentSuccess);
+      checkout.on('payment.cancel', handlePaymentFailure);
+      checkout.open(options);
       return;
     }
-    try {
-      setAccessModeSaving(true);
-      setSubError('');
-      const status = await api.post('/subscription/access-mode', { mode });
-      if (typeof status?.accessAllowed !== 'boolean') {
-        throw new Error('Access mode response is invalid.');
-      }
-      setSubStatus(status);
-      setSubStatusUserId(String(loggedInUser.userId));
-      setIsSubscribePageOpen(false);
-    } catch (e) {
-      setSubError(e?.message || 'Could not change your access option. Please try again.');
-    } finally {
-      setAccessModeSaving(false);
+
+    await loadRazorpayCheckout();
+    if (!window.Razorpay) {
+      throw new Error('Razorpay Checkout did not initialize. Please try again.');
     }
+    const checkout = new window.Razorpay({
+      ...options,
+      handler: handlePaymentSuccess,
+      modal: { ondismiss: () => setSubError('Payment was not completed. You can reopen checkout to try again.') },
+    });
+    checkout.on('payment.failed', handlePaymentFailure);
+    checkout.open();
   };
 
+  useEffect(() => {
+    const handleRazorpayResume = (event) => window.RazorpayCheckout?.onResume?.(event);
+    document.addEventListener('resume', handleRazorpayResume, false);
+    return () => document.removeEventListener('resume', handleRazorpayResume, false);
+  }, []);
 
   const startUpiPayment = async () => {
     if (!loggedInUser?.userId) return;
@@ -469,8 +509,12 @@ export default function AppShell() {
       setSubOrderState('creating');
       setSubError('');
       const order = await api.post(`/subscription/orders?userId=${loggedInUser.userId}`, {});
+      if (!order?.razorpayOrderId || !order?.razorpayKeyId || !order?.amountSubunits) {
+        throw new Error('Payment provider returned an invalid checkout order.');
+      }
       setSubOrder(order);
       setSubOrderState('waiting');
+      await openSubscriptionCheckout(order);
     } catch (e) {
       setSubOrderState('failed');
       setSubError(e?.message || 'Could not start the payment. Please try again.');
@@ -536,17 +580,207 @@ export default function AppShell() {
   };
 
   useEffect(() => {
-    const handleReadOnlyAttempt = (event) => {
-      showAlert(
-        event.detail || 'This account is in ad-free read-only mode. Choose ads-supported access or subscribe to make changes.',
-        'warning',
-        'Read-only access'
-      );
+    const handleRewardedAccessAttempt = (event) => {
+      rewardPromptResolverRef.current?.('cancel');
+      rewardPromptResolverRef.current = event.detail.resolve;
+      setRewardPrompt({ message: event.detail.message });
+      setRewardPromptError('');
+      setRewardPromptBusy(false);
     };
-    window.addEventListener('read-only-access-attempt', handleReadOnlyAttempt);
-    return () => window.removeEventListener('read-only-access-attempt', handleReadOnlyAttempt);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    window.addEventListener('rewarded-access-attempt', handleRewardedAccessAttempt);
+    return () => {
+      window.removeEventListener('rewarded-access-attempt', handleRewardedAccessAttempt);
+    };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let pendingBreaks = 0;
+    let isShowingBreak = false;
+    const showOneInterstitialBreak = async () => {
+      const durationMs = 10000;
+      const startedAt = Date.now();
+      setInterstitialSecondsLeft(10);
+      setInterstitialError('');
+      const countdown = setInterval(() => {
+        if (active) setInterstitialSecondsLeft(Math.max(0, Math.ceil((durationMs - (Date.now() - startedAt)) / 1000)));
+      }, 250);
+      const minimumDisplayTime = new Promise((resolve) => setTimeout(resolve, durationMs));
+      let dismissListener;
+      let failListener;
+      let resolveAdClosed;
+      const adClosed = new Promise((resolve) => {
+        resolveAdClosed = resolve;
+      });
+
+      const showInterstitial = async () => {
+        try {
+          if (!Capacitor.isNativePlatform()) {
+            throw new Error('Interstitial ads are available in the Android and iOS apps.');
+          }
+          let consent = await AdMob.requestConsentInfo();
+          if (consent.status === AdmobConsentStatus.REQUIRED && consent.isConsentFormAvailable) {
+            consent = await AdMob.showConsentForm();
+          }
+          if (!consent.canRequestAds) {
+            throw new Error('Ad consent is required before an interstitial ad can be shown.');
+          }
+
+          const platform = Capacitor.getPlatform();
+          const useTestAds = import.meta.env.VITE_ADMOB_TESTING !== 'false';
+          const configuredAdId = platform === 'ios'
+            ? import.meta.env.VITE_ADMOB_IOS_INTERSTITIAL_ID
+            : import.meta.env.VITE_ADMOB_ANDROID_INTERSTITIAL_ID;
+          if (!useTestAds && !configuredAdId) {
+            throw new Error(`Set VITE_ADMOB_${platform === 'ios' ? 'IOS' : 'ANDROID'}_INTERSTITIAL_ID before disabling test ads.`);
+          }
+          const adId = useTestAds
+            ? (platform === 'ios' ? 'ca-app-pub-3940256099942544/4411468910' : 'ca-app-pub-3940256099942544/1033173712')
+            : configuredAdId;
+          await AdMob.initialize({ initializeForTesting: useTestAds });
+          dismissListener = await AdMob.addListener(InterstitialAdPluginEvents.Dismissed, resolveAdClosed);
+          failListener = await AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, (error) => {
+            setInterstitialError(error?.message || 'The interstitial ad could not be displayed.');
+            resolveAdClosed();
+          });
+          const { adUnitId } = await AdMob.prepareInterstitial({ adId });
+          await AdMob.showInterstitial({ adId: adUnitId });
+          await adClosed;
+        } catch (error) {
+          if (active) setInterstitialError(error?.message || 'The interstitial ad could not be shown.');
+        } finally {
+          await dismissListener?.remove();
+          await failListener?.remove();
+        }
+      };
+
+      await Promise.all([minimumDisplayTime, showInterstitial()]);
+      clearInterval(countdown);
+      if (active) setInterstitialSecondsLeft(0);
+    };
+
+    const handleInterstitialDue = async () => {
+      pendingBreaks += 1;
+      if (isShowingBreak) return;
+      isShowingBreak = true;
+      try {
+        while (active && pendingBreaks > 0) {
+          pendingBreaks -= 1;
+          await showOneInterstitialBreak();
+        }
+      } finally {
+        isShowingBreak = false;
+      }
+    };
+    window.addEventListener('expired-write-interstitial-due', handleInterstitialDue);
+    return () => {
+      active = false;
+      window.removeEventListener('expired-write-interstitial-due', handleInterstitialDue);
+    };
+  }, []);
+
+  const resolveRewardPrompt = (decision) => {
+    const resolve = rewardPromptResolverRef.current;
+    rewardPromptResolverRef.current = null;
+    setRewardPrompt(null);
+    setRewardPromptBusy(false);
+    setRewardPromptError('');
+    resolve?.(decision);
+  };
+
+  const watchRewardedAd = async () => {
+    if (!loggedInUser?.userId || !Capacitor.isNativePlatform()) {
+      setRewardPromptError('Rewarded ads are available in the Android and iOS apps.');
+      return;
+    }
+
+    setRewardPromptBusy(true);
+    setRewardPromptError('');
+    try {
+      const consent = await AdMob.requestConsentInfo();
+      const finalConsent = consent.status === AdmobConsentStatus.REQUIRED && consent.isConsentFormAvailable
+        ? await AdMob.showConsentForm()
+        : consent;
+      if (!finalConsent.canRequestAds) {
+        throw new Error('Ad consent is required before a rewarded ad can be shown.');
+      }
+
+      const platform = Capacitor.getPlatform();
+      const useTestAds = import.meta.env.VITE_ADMOB_TESTING !== 'false';
+      const configuredAdId = platform === 'ios'
+        ? import.meta.env.VITE_ADMOB_IOS_REWARDED_ID
+        : import.meta.env.VITE_ADMOB_ANDROID_REWARDED_ID;
+      if (!useTestAds && !configuredAdId) {
+        throw new Error(`Set VITE_ADMOB_${platform === 'ios' ? 'IOS' : 'ANDROID'}_REWARDED_ID before disabling test ads.`);
+      }
+      const adId = useTestAds
+        ? (platform === 'ios' ? 'ca-app-pub-3940256099942544/1712485313' : 'ca-app-pub-3940256099942544/5224354917')
+        : configuredAdId;
+
+      await AdMob.initialize({ initializeForTesting: useTestAds });
+      const challenge = await api.post('/subscription/rewarded-access/challenge', {});
+      if (!challenge?.challengeToken) {
+        throw new Error('The server could not prepare ad verification. Please try again.');
+      }
+
+      await AdMob.prepareRewardVideoAd({
+        adId,
+        ssv: { userId: String(loggedInUser.userId), customData: challenge.challengeToken },
+      });
+
+      let dismissListener;
+      let failedListener;
+      let resolveDismissal;
+      let rejectDismissal;
+      const dismissal = new Promise((resolve, reject) => {
+        resolveDismissal = resolve;
+        rejectDismissal = reject;
+      });
+      dismissListener = await AdMob.addListener(RewardAdPluginEvents.Dismissed, resolveDismissal);
+      failedListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (error) => {
+        rejectDismissal(new Error(error?.message || 'The rewarded ad could not be displayed.'));
+      });
+      try {
+        await Promise.all([AdMob.showRewardVideoAd(), dismissal]);
+      } finally {
+        await dismissListener?.remove();
+        await failedListener?.remove();
+      }
+      if (useTestAds) {
+        throw new Error('AdMob test ads cannot verify rewards. Configure production rewarded-ad IDs and set VITE_ADMOB_TESTING=false.');
+      }
+
+      setRewardPrompt({ message: 'Verifying your completed ad...' });
+      let verified = false;
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const response = await authFetch(
+          `${API_ROOT}/subscription/rewarded-access/status?challengeToken=${encodeURIComponent(challenge.challengeToken)}`,
+          { credentials: 'include' }
+        );
+        if (response.status === 404) {
+          throw new Error('Ad verification expired. Please watch another ad.');
+        }
+        if (!response.ok) {
+          throw new Error(`Could not verify the ad reward (HTTP ${response.status}). Please try again.`);
+        }
+        const result = await response.json();
+        if (result.verified) {
+          verified = true;
+          break;
+        }
+      }
+
+      if (!verified) {
+        throw new Error('The ad reward is still being verified. Please try again in a moment.');
+      }
+      setRewardPrompt({ message: 'Ad complete. Continue to perform one action.', verified: true });
+    } catch (error) {
+      setRewardPromptError(error?.message || 'Could not complete the rewarded ad. Please try again.');
+    } finally {
+      setRewardPromptBusy(false);
+    }
+  };
 
   const showSuccess = (message, title) => {
     setAppPopup({ open: true, tone: 'success', title, message, confirmLabel: t('ok') });
@@ -640,64 +874,6 @@ export default function AppShell() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const showAds = isUserAuthenticated && subStatus?.state === 'expired' && subStatus.adsEnabled;
-    if (!Capacitor.isNativePlatform() || !showAds) {
-      document.body.style.paddingTop = '';
-      if (Capacitor.isNativePlatform()) {
-        AdMob.removeBanner().catch((error) => console.warn('Could not remove the AdMob banner:', error));
-      }
-      return undefined;
-    }
-
-    let cancelled = false;
-    const showBanner = async () => {
-      try {
-        let consent = await AdMob.requestConsentInfo();
-        if (consent.status === AdmobConsentStatus.REQUIRED && consent.isConsentFormAvailable) {
-          consent = await AdMob.showConsentForm();
-        }
-        if (!consent.canRequestAds) return;
-
-        const platform = Capacitor.getPlatform();
-        const useTestAds = import.meta.env.VITE_ADMOB_TESTING !== 'false';
-        const configuredAdId = platform === 'ios'
-          ? import.meta.env.VITE_ADMOB_IOS_BANNER_ID
-          : import.meta.env.VITE_ADMOB_ANDROID_BANNER_ID;
-        if (!useTestAds && !configuredAdId) {
-          throw new Error(`Set VITE_ADMOB_${platform === 'ios' ? 'IOS' : 'ANDROID'}_BANNER_ID before disabling test ads.`);
-        }
-
-        await AdMob.initialize({ initializeForTesting: useTestAds });
-        if (cancelled) return;
-
-        const adId = useTestAds
-          ? (platform === 'ios' ? 'ca-app-pub-3940256099942544/2934735716' : 'ca-app-pub-3940256099942544/6300978111')
-          : configuredAdId;
-        await AdMob.showBanner({
-          adId,
-          adSize: BannerAdSize.BANNER,
-          position: BannerAdPosition.TOP_CENTER,
-        });
-        if (cancelled) {
-          await AdMob.removeBanner();
-          return;
-        }
-        document.body.style.paddingTop = '50px';
-      } catch (error) {
-        console.error('Could not display the AdMob banner:', error);
-      }
-    };
-    showBanner();
-
-    return () => {
-      cancelled = true;
-      document.body.style.paddingTop = '';
-      AdMob.removeBanner().catch((error) => console.warn('Could not remove the AdMob banner:', error));
-    };
-  }, [isUserAuthenticated, subStatus?.state, subStatus?.adsEnabled]);
-
 
   // Ask before throwing away work the user is in the middle of. Returns true so the back
   // press is consumed; the screen only closes if the user answers Yes.
@@ -976,9 +1152,7 @@ export default function AppShell() {
   // Everything the other screens/modules read from the shell (state, helpers, popups, profile...).
   const shellValue = {
     activeModule,
-    accessModeSaving,
     appPopup,
-    chooseExpiredAccessMode,
     closeAppPopup,
     closeProfileModalIfOpen,
     closeSubscribeOrHelpIfOpen,
@@ -996,6 +1170,7 @@ export default function AppShell() {
     loading,
     loggedInUser,
     moduleRegistryRef,
+    openSubscriptionCheckout,
     openImageCropper,
     persistedUser,
     profileImg,
@@ -1041,14 +1216,71 @@ export default function AppShell() {
   // add its tile in src/home/ModuleHome.jsx and add <YourModule /> next to the others below.
   return (
     <AppShellContext.Provider value={shellValue}>
+      {rewardPrompt && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reward-prompt-title"
+          style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(15, 23, 42, 0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+        >
+          <div style={{ width: '100%', maxWidth: '380px', borderRadius: '18px', background: '#ffffff', padding: '22px', boxShadow: '0 20px 60px rgba(0,0,0,0.24)' }}>
+            <h2 id="reward-prompt-title" style={{ margin: '0 0 8px', fontSize: '19px', color: '#1E293B' }}>Continue using SmartManage</h2>
+            <p style={{ margin: '0 0 16px', fontSize: '14px', lineHeight: 1.5, color: '#64748B' }}>
+              {rewardPrompt.message || 'Your subscription has ended. Watch a complete ad to unlock one action, or subscribe for ad-free access.'}
+            </p>
+            {rewardPromptError && <p role="alert" style={{ margin: '0 0 12px', fontSize: '13px', color: '#B91C1C' }}>{rewardPromptError}</p>}
+            {rewardPrompt.verified ? (
+              <button type="button" onClick={() => resolveRewardPrompt('retry')} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#0B3C9B', color: '#fff', fontSize: '14px', fontWeight: 700 }}>
+                Close &amp; Continue
+              </button>
+            ) : (
+              <>
+                <button type="button" disabled={rewardPromptBusy} onClick={watchRewardedAd} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#0B3C9B', color: '#fff', fontSize: '14px', fontWeight: 700, opacity: rewardPromptBusy ? 0.65 : 1 }}>
+                  {rewardPromptBusy ? 'Please wait...' : 'Watch Ads'}
+                </button>
+                <button
+                  type="button"
+                  disabled={rewardPromptBusy}
+                  onClick={() => {
+                    setActiveModule(null);
+                    setIsSubscribePageOpen(true);
+                    setIsHelpPageOpen(false);
+                    resolveRewardPrompt('cancel');
+                  }}
+                  style={{ width: '100%', marginTop: '10px', padding: '13px', border: '1px solid #CBD5E1', borderRadius: '11px', background: '#fff', color: '#334155', fontSize: '14px', fontWeight: 700 }}
+                >
+                  Subscribe to continue Ads free
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {interstitialSecondsLeft > 0 && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="interstitial-break-title"
+          style={{ position: 'fixed', inset: 0, zIndex: 4000, background: 'rgba(15, 23, 42, 0.94)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', textAlign: 'center' }}
+        >
+          <div style={{ width: '100%', maxWidth: '380px', borderRadius: '18px', background: '#ffffff', padding: '26px 22px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <h2 id="interstitial-break-title" style={{ margin: '0 0 10px', fontSize: '19px', color: '#1E293B' }}>Ad break</h2>
+            <p style={{ margin: '0 0 12px', fontSize: '14px', lineHeight: 1.5, color: '#64748B' }}>
+              The app is paused while this ad break finishes.
+            </p>
+            <p aria-live="polite" style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#0B3C9B' }}>
+              {interstitialSecondsLeft} sec
+            </p>
+            {interstitialError && <p role="status" style={{ margin: '12px 0 0', fontSize: '12px', lineHeight: 1.4, color: '#B91C1C' }}>{interstitialError}</p>}
+          </div>
+        </div>
+      )}
       {isUserAuthenticated && loggedInUser ? (
-        subLocked ? <ModuleHome /> : (
-          <>
-            <ModuleHome />
-            <EmployeeModule />
-            <DocumentsModule />
-          </>
-        )
+        <>
+          <ModuleHome />
+          <EmployeeModule />
+          <DocumentsModule />
+        </>
       ) : (
         <LoginScreen />
       )}

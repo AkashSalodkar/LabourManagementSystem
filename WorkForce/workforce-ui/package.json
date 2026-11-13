@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "cap:sync": "node scripts/sync-capacitor.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -25,6 +26,8 @@
     "@capawesome/capacitor-android-sms-retriever": "^0.1.2",
     "@capawesome/capacitor-app-update": "^8.1.1",
     "@tailwindcss/vite": "^4.3.1",
+    "com.razorpay.cordova": "^1.4.15",
+    "cordova-plugin-cocoapod-support": "^1.6.2",
     "firebase": "^12.17.0",
     "jspdf": "^4.2.1",
     "react": "^19.2.7",

@@ -21,7 +21,8 @@ let package = Package(
         .package(name: "CapacitorNetwork", path: "..\..\..\node_modules\@capacitor\network"),
         .package(name: "CapacitorShare", path: "..\..\..\node_modules\@capacitor\share"),
         .package(name: "CapawesomeCapacitorAndroidSmsRetriever", path: "..\..\..\node_modules\@capawesome\capacitor-android-sms-retriever"),
-        .package(name: "CapawesomeCapacitorAppUpdate", path: "..\..\..\node_modules\@capawesome\capacitor-app-update")
+        .package(name: "CapawesomeCapacitorAppUpdate", path: "..\..\..\node_modules\@capawesome\capacitor-app-update"),
+        .package(name: "Com.razorpay.cordova", path: "../../capacitor-cordova-ios-plugins/sources/Com.razorpay.cordova")
     ],
     targets: [
         .target(
@@ -38,7 +39,8 @@ let package = Package(
                 .product(name: "CapacitorNetwork", package: "CapacitorNetwork"),
                 .product(name: "CapacitorShare", package: "CapacitorShare"),
                 .product(name: "CapawesomeCapacitorAndroidSmsRetriever", package: "CapawesomeCapacitorAndroidSmsRetriever"),
-                .product(name: "CapawesomeCapacitorAppUpdate", package: "CapawesomeCapacitorAppUpdate")
+                .product(name: "CapawesomeCapacitorAppUpdate", package: "CapawesomeCapacitorAppUpdate"),
+                .product(name: "Com.razorpay.cordova", package: "Com.razorpay.cordova")
             ]
         )
     ]

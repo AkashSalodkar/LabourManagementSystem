@@ -31,6 +31,8 @@ namespace LMPTS.Domain.Entities
         [MaxLength(16)]
         public string? ExpiredAccessMode { get; set; }
 
+        public int ExpiredWriteActionCount { get; set; }
+
         // When the currently-active session token was issued (audit / support).
         [Column(TypeName = "datetime2")]
         public DateTime? SessionTokenCreatedAt { get; set; }

@@ -14,8 +14,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LMPTS.Controllers
 {
-    // Provider: Razorpay "UPI QR Codes" (single-use, fixed-amount QR + signed webhook).
-    // Verify the endpoints/payload against Razorpay's current docs before going live.
+    // Provider: Razorpay Orders API + Standard Checkout, with signed webhook verification.
     //
     // Only SERVER-side, gateway-verified payments can activate a subscription:
     //   1. the signed webhook (qr_code.credited or payment.captured), and
@@ -36,6 +35,8 @@ namespace LMPTS.Controllers
         public SubscriptionController(ApplicationDbContext db, SubscriptionService svc, IConfiguration cfg, IHttpClientFactory http, ILogger<SubscriptionController> log)
         { _db = db; _svc = svc; _cfg = cfg; _http = http; _log = log; }
 
+        private static readonly ConcurrentDictionary<int, (string Pem, DateTime ExpiresAt)> AdMobPublicKeys = new();
+
         // Take the caller from the authenticated session. Adjust the claim to match your /auth/login cookie/JWT.
         // NOTE: the API does not issue authenticated sessions yet, so CallerId is null and Forbidden() lets
         // every request through. Once login issues a cookie/JWT this becomes a real ownership check.
@@ -46,6 +47,59 @@ namespace LMPTS.Controllers
 
         private static int ExpectedPaise => (int)Math.Round(SubscriptionService.Price * 100m);
 
+        private async Task<bool> HasCurrentSessionAsync(int userId)
+        {
+            var sessionToken = Request.Headers["X-Session-Token"].ToString();
+            if (string.IsNullOrWhiteSpace(sessionToken)
+                || !string.Equals(Request.Headers["X-User-Id"].ToString(), userId.ToString(), StringComparison.Ordinal))
+                return false;
+
+            var storedSessionToken = await _db.Users
+                .AsNoTracking()
+                .Where(user => user.Id == userId)
+                .Select(user => user.CurrentSessionToken)
+                .FirstOrDefaultAsync();
+            return !string.IsNullOrWhiteSpace(storedSessionToken)
+                && string.Equals(storedSessionToken, sessionToken, StringComparison.Ordinal);
+        }
+
+        private async Task<string?> GetAdMobPublicKeyAsync(int keyId)
+        {
+            if (AdMobPublicKeys.TryGetValue(keyId, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+                return cached.Pem;
+
+            var response = await _http.CreateClient().GetAsync("https://www.gstatic.com/admob/reward/verifier-keys.json");
+            if (!response.IsSuccessStatusCode)
+            {
+                _log.LogError("AdMob verifier keys request failed with status {StatusCode}", (int)response.StatusCode);
+                return null;
+            }
+
+            using var keysDocument = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            if (!keysDocument.RootElement.TryGetProperty("keys", out var keys))
+                throw new InvalidOperationException("AdMob verifier keys response does not contain keys.");
+
+            var expiresAt = DateTime.UtcNow.AddHours(24);
+            foreach (var key in keys.EnumerateArray())
+            {
+                if (!key.TryGetProperty("keyId", out var id)
+                    || !id.TryGetInt32(out var currentKeyId)
+                    || !key.TryGetProperty("pem", out var pemElement)
+                    || pemElement.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var pem = pemElement.GetString();
+                if (string.IsNullOrWhiteSpace(pem))
+                    continue;
+
+                AdMobPublicKeys[currentKeyId] = (pem, expiresAt);
+                if (currentKeyId == keyId)
+                    return pem;
+            }
+
+            return null;
+        }
+
         private HttpClient GatewayClient()
         {
             var c = _http.CreateClient();
@@ -55,14 +109,158 @@ namespace LMPTS.Controllers
             return c;
         }
 
-        private static object OrderDto(SubscriptionPayment p) => new
+        private object OrderDto(SubscriptionPayment p) => new
         {
             orderId = p.OrderRef,
-            qrImage = p.QrImageUrl,
-            upiUri = (string?)null,
+            razorpayOrderId = p.ProviderOrderId,
+            razorpayKeyId = _cfg["Razorpay:KeyId"],
+            amountSubunits = ExpectedPaise,
+            currency = "INR",
             amount = p.Amount,
             expiresAt = DateTime.SpecifyKind(p.ExpiresAt, DateTimeKind.Utc)
         };
+
+        [HttpPost("rewarded-access/challenge")]
+        public async Task<IActionResult> CreateRewardedAccessChallenge()
+        {
+            if (!int.TryParse(Request.Headers["X-User-Id"], out var userId)
+                || !await HasCurrentSessionAsync(userId))
+                return Unauthorized(new { code = "NO_SESSION", message = "Not signed in." });
+
+            var status = await _svc.GetStatusAsync(userId);
+            if (status.State != "expired")
+                return Conflict(new { message = "Rewarded ad access is only needed after your subscription expires." });
+
+            var now = DateTime.UtcNow;
+            var challenge = new RewardedAdAccess
+            {
+                UserId = userId,
+                ChallengeToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant(),
+                CreatedAt = now,
+                ExpiresAt = now.AddMinutes(15),
+            };
+            _db.RewardedAdAccesses.Add(challenge);
+            await _db.SaveChangesAsync();
+            return Ok(new { challengeToken = challenge.ChallengeToken });
+        }
+
+        [HttpGet("rewarded-access/status")]
+        public async Task<IActionResult> RewardedAccessStatus([FromQuery] string challengeToken)
+        {
+            if (!int.TryParse(Request.Headers["X-User-Id"], out var userId)
+                || !await HasCurrentSessionAsync(userId))
+                return Unauthorized(new { code = "NO_SESSION", message = "Not signed in." });
+
+            var challenge = await _db.RewardedAdAccesses
+                .AsNoTracking()
+                .FirstOrDefaultAsync(access => access.ChallengeToken == challengeToken
+                    && access.UserId == userId
+                    && access.ExpiresAt > DateTime.UtcNow);
+            if (challenge == null)
+                return NotFound(new { message = "Rewarded ad verification expired. Please watch another ad." });
+
+            return Ok(new { verified = challenge.TransactionId != null });
+        }
+
+        [AllowAnonymous]
+        [HttpGet("rewarded-access/ssv")]
+        public async Task<IActionResult> RewardedAccessSsv()
+        {
+            var rawQuery = Request.QueryString.Value?.TrimStart('?') ?? "";
+            var signatureMarker = rawQuery.LastIndexOf("&signature=", StringComparison.Ordinal);
+            if (signatureMarker <= 0 || !rawQuery.EndsWith("&key_id=" + Request.Query["key_id"], StringComparison.Ordinal))
+                return BadRequest();
+
+            var queryToVerify = Encoding.UTF8.GetBytes(rawQuery[..signatureMarker]);
+            if (!int.TryParse(Request.Query["key_id"], out var keyId))
+                return BadRequest();
+
+            string signatureText;
+            try
+            {
+                var signatureStart = signatureMarker + "&signature=".Length;
+                var signatureEnd = rawQuery.IndexOf("&key_id=", signatureStart, StringComparison.Ordinal);
+                if (signatureEnd < 0)
+                    return BadRequest();
+                signatureText = Uri.UnescapeDataString(rawQuery[signatureStart..signatureEnd]);
+            }
+            catch (UriFormatException)
+            {
+                return BadRequest();
+            }
+
+            byte[] signature;
+            try
+            {
+                var base64 = signatureText.Replace('-', '+').Replace('_', '/');
+                base64 = base64.PadRight(base64.Length + ((4 - base64.Length % 4) % 4), '=');
+                signature = Convert.FromBase64String(base64);
+            }
+            catch (FormatException)
+            {
+                return BadRequest();
+            }
+
+            var publicKeyPem = await GetAdMobPublicKeyAsync(keyId);
+            if (publicKeyPem == null)
+            {
+                _log.LogError("No current AdMob verifier key found for key ID {KeyId}", keyId);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            bool signatureValid;
+            try
+            {
+                using var verifier = ECDsa.Create();
+                verifier.ImportFromPem(publicKeyPem);
+                signatureValid = verifier.VerifyData(queryToVerify, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+            }
+            catch (CryptographicException ex)
+            {
+                _log.LogWarning(ex, "Could not verify AdMob rewarded-ad callback signature");
+                return Unauthorized();
+            }
+            if (!signatureValid)
+                return Unauthorized();
+
+            var expectedAdUnits = _cfg.GetSection("AdMob:RewardedAdUnitIds").Get<string[]>() ?? [];
+            var adUnit = Request.Query["ad_unit"].ToString();
+            if (expectedAdUnits.Length == 0)
+            {
+                _log.LogError("AdMob:RewardedAdUnitIds is not configured");
+                return StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+            if (!expectedAdUnits.Any(configured => configured.EndsWith("/" + adUnit, StringComparison.Ordinal)))
+                return Unauthorized();
+
+            var expectedRewardItem = _cfg["AdMob:RewardItem"] ?? "write";
+            if (Request.Query["reward_item"] != expectedRewardItem
+                || !int.TryParse(Request.Query["reward_amount"], out var rewardAmount)
+                || rewardAmount != 1
+                || !int.TryParse(Request.Query["user_id"], out var userId)
+                || string.IsNullOrWhiteSpace(Request.Query["custom_data"])
+                || string.IsNullOrWhiteSpace(Request.Query["transaction_id"]))
+                return BadRequest();
+
+            var challengeToken = Request.Query["custom_data"].ToString();
+            var transactionId = Request.Query["transaction_id"].ToString();
+            var priorReward = await _db.RewardedAdAccesses
+                .FirstOrDefaultAsync(access => access.TransactionId == transactionId);
+            if (priorReward != null)
+                return Ok();
+
+            var challenge = await _db.RewardedAdAccesses
+                .FirstOrDefaultAsync(access => access.ChallengeToken == challengeToken
+                    && access.UserId == userId
+                    && access.TransactionId == null
+                    && access.ExpiresAt > DateTime.UtcNow);
+            if (challenge == null)
+                return Unauthorized();
+
+            challenge.TransactionId = transactionId;
+            await _db.SaveChangesAsync();
+            return Ok();
+        }
 
         [HttpGet("status")]
         public async Task<IActionResult> Status([FromQuery] int userId)
@@ -120,14 +318,15 @@ namespace LMPTS.Controllers
             if (string.IsNullOrWhiteSpace(_cfg["Razorpay:KeyId"])
                 || string.IsNullOrWhiteSpace(_cfg["Razorpay:KeySecret"]))
             {
-                _log.LogError("Cannot create subscription QR: Razorpay:KeyId or Razorpay:KeySecret is not configured");
+                _log.LogError("Cannot create subscription order: Razorpay:KeyId or Razorpay:KeySecret is not configured");
                 return StatusCode(503, new { message = "Payment provider is not configured. Please contact support." });
             }
 
-            // Re-use a QR that is still payable instead of creating a new one on every tap.
+            // Re-use a checkout order that is still payable instead of creating one on every tap.
             var now = DateTime.UtcNow;
             var existing = await _db.SubscriptionPayments
-                .Where(x => x.UserId == userId && x.Status == "pending" && x.ExpiresAt > now.AddMinutes(2))
+                .Where(x => x.UserId == userId && x.Status == "pending"
+                         && x.ProviderOrderId != null && x.ExpiresAt > now.AddMinutes(2))
                 .OrderByDescending(x => x.CreatedAt)
                 .FirstOrDefaultAsync();
             if (existing != null) return Ok(OrderDto(existing));
@@ -136,35 +335,38 @@ namespace LMPTS.Controllers
             var expires = DateTime.UtcNow.AddMinutes(15);
             var body = JsonSerializer.Serialize(new
             {
-                type = "upi_qr", name = "Monthly Subscription", usage = "single_use",
-                fixed_amount = true, payment_amount = ExpectedPaise,
-                description = "30-day subscription",
-                close_by = new DateTimeOffset(expires).ToUnixTimeSeconds(),
-                notes = new { orderRef, userId = userId.ToString() }
+                amount = ExpectedPaise,
+                currency = "INR",
+                receipt = orderRef,
+                partial_payment = false,
+                notes = new { orderRef, userId = userId.ToString(), purpose = "monthly_subscription" }
             });
 
             HttpResponseMessage res; string txt;
             try
             {
-                res = await GatewayClient().PostAsync($"{RazorpayApi}/payments/qr_codes", new StringContent(body, Encoding.UTF8, "application/json"));
+                res = await GatewayClient().PostAsync($"{RazorpayApi}/orders", new StringContent(body, Encoding.UTF8, "application/json"));
                 txt = await res.Content.ReadAsStringAsync();
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
-                _log.LogError(ex, "QR create request failed");
+                _log.LogError(ex, "Razorpay order create request failed");
                 return StatusCode(502, new { message = "Payment service unavailable. Try again shortly." });
             }
-            if (!res.IsSuccessStatusCode) { _log.LogError("QR create failed ({S}): {T}", (int)res.StatusCode, txt); return StatusCode(502, new { message = "Payment service unavailable. Try again shortly." }); }
+            if (!res.IsSuccessStatusCode) { _log.LogError("Razorpay order create failed ({S}): {T}", (int)res.StatusCode, txt); return StatusCode(502, new { message = "Payment service unavailable. Try again shortly." }); }
 
             using var doc = JsonDocument.Parse(txt);
-            var qr = doc.RootElement;
-            if (!qr.TryGetProperty("id", out var qrIdEl) || !qr.TryGetProperty("image_url", out var qrImgEl))
-            { _log.LogError("QR create response missing id/image_url: {T}", txt); return StatusCode(502, new { message = "Payment service unavailable. Try again shortly." }); }
+            var razorpayOrder = doc.RootElement;
+            if (!razorpayOrder.TryGetProperty("id", out var providerOrderIdEl)
+                || providerOrderIdEl.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(providerOrderIdEl.GetString()))
+            { _log.LogError("Razorpay order response missing id: {T}", txt); return StatusCode(502, new { message = "Payment service unavailable. Try again shortly." }); }
 
             var p = new SubscriptionPayment
             {
-                UserId = userId, OrderRef = orderRef, ProviderQrId = qrIdEl.GetString()!,
-                QrImageUrl = qrImgEl.GetString()!, Amount = SubscriptionService.Price,
+                UserId = userId, OrderRef = orderRef, ProviderQrId = "",
+                ProviderOrderId = providerOrderIdEl.GetString(),
+                QrImageUrl = "", Amount = SubscriptionService.Price,
                 Status = "pending", CreatedAt = DateTime.UtcNow, ExpiresAt = expires
             };
             _db.SubscriptionPayments.Add(p); await _db.SaveChangesAsync();
@@ -229,7 +431,7 @@ namespace LMPTS.Controllers
             if (!r.IsSuccessStatusCode) return StatusCode(500);   // gateway retries the webhook
             using var payDoc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
             var v = payDoc.RootElement;
-            if (!IsValidSubscriptionPayment(v)) { _log.LogInformation("Ignored payment {P} (not a captured UPI payment of the plan amount)", paymentId); return Ok(); }
+            if (!IsValidSubscriptionPayment(v)) { _log.LogInformation("Ignored payment {P} (not a captured INR payment of the plan amount)", paymentId); return Ok(); }
 
             // 3. Match our order (one QR = one order = one user), activate exactly once
             var order = await FindOrderAsync(qrId, v, paymentId);
@@ -249,14 +451,20 @@ namespace LMPTS.Controllers
         private static bool IsValidSubscriptionPayment(JsonElement v) =>
             v.TryGetProperty("status", out var s) && s.GetString() == "captured"
             && v.TryGetProperty("amount", out var a) && a.TryGetInt32(out var amt) && amt == ExpectedPaise
-            && v.TryGetProperty("currency", out var c) && c.GetString() == "INR"
-            && v.TryGetProperty("method", out var m) && m.GetString() == "upi";
+            && v.TryGetProperty("currency", out var c) && c.GetString() == "INR";
 
         // Activate once; the unique index on Subscriptions.ProviderPaymentId is the final guard against duplicates.
         private async Task<bool> ActivateFromPaymentAsync(SubscriptionPayment order, JsonElement pay)
         {
             if (order.Status == "paid") return true;
             if (!IsValidSubscriptionPayment(pay)) return false;
+            if (string.IsNullOrEmpty(order.ProviderOrderId)
+                && (!pay.TryGetProperty("method", out var method) || method.GetString() != "upi"))
+                return false;
+            if (!string.IsNullOrEmpty(order.ProviderOrderId)
+                && (!pay.TryGetProperty("order_id", out var orderId)
+                    || !string.Equals(orderId.GetString(), order.ProviderOrderId, StringComparison.Ordinal)))
+                return false;
             var paymentId = pay.GetProperty("id").GetString()!;
             string? rrn = pay.TryGetProperty("acquirer_data", out var aq) && aq.TryGetProperty("rrn", out var rr) ? rr.GetString() : null;
             try { await _svc.ActivateAsync(order, paymentId, rrn); }
@@ -272,6 +480,15 @@ namespace LMPTS.Controllers
         // payment's notes, then to asking the gateway which recent pending QR the payment belongs to.
         private async Task<SubscriptionPayment?> FindOrderAsync(string? qrId, JsonElement pay, string paymentId)
         {
+            if (pay.TryGetProperty("order_id", out var orderIdEl)
+                && orderIdEl.ValueKind == JsonValueKind.String
+                && !string.IsNullOrEmpty(orderIdEl.GetString()))
+            {
+                var byProviderOrder = await _db.SubscriptionPayments
+                    .FirstOrDefaultAsync(x => x.ProviderOrderId == orderIdEl.GetString());
+                return byProviderOrder;
+            }
+
             if (!string.IsNullOrEmpty(qrId))
                 return await _db.SubscriptionPayments.FirstOrDefaultAsync(x => x.ProviderQrId == qrId);
 
@@ -311,7 +528,7 @@ namespace LMPTS.Controllers
             return false;
         }
 
-        // Ask the gateway (server-to-server, with our secret key) for payments made against this order's QR.
+        // Ask the gateway (server-to-server, with our secret key) for payments against this order or a legacy QR.
         private async Task TryReconcileAsync(SubscriptionPayment order)
         {
             var now = DateTime.UtcNow;
@@ -319,8 +536,11 @@ namespace LMPTS.Controllers
             LastGatewayCheck[order.OrderRef] = now;
             try
             {
-                var res = await GatewayClient().GetAsync($"{RazorpayApi}/payments/qr_codes/{order.ProviderQrId}/payments");
-                if (!res.IsSuccessStatusCode) { _log.LogWarning("QR payments lookup returned {S} for {Q}", (int)res.StatusCode, order.ProviderQrId); return; }
+                var path = string.IsNullOrEmpty(order.ProviderOrderId)
+                    ? $"{RazorpayApi}/payments/qr_codes/{order.ProviderQrId}/payments"
+                    : $"{RazorpayApi}/orders/{order.ProviderOrderId}/payments";
+                var res = await GatewayClient().GetAsync(path);
+                if (!res.IsSuccessStatusCode) { _log.LogWarning("Razorpay payments lookup returned {S} for order {O}", (int)res.StatusCode, order.OrderRef); return; }
                 using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
                 if (!doc.RootElement.TryGetProperty("items", out var items)) return;
                 foreach (var it in items.EnumerateArray())
@@ -335,7 +555,7 @@ namespace LMPTS.Controllers
         public string? Mode { get; set; }
     }
 
-    // Server-side gate: once trial/subscription is over, data endpoints return 402.
+    // Keep expired accounts read-only; non-GET requests require a one-use rewarded-ad credit.
     // The app authenticates API requests with its current-session headers rather than claims.
     public class SubscriptionRequiredFilter : IAsyncActionFilter
     {
@@ -383,14 +603,37 @@ namespace LMPTS.Controllers
             var status = await _svc.GetStatusAsync(userId);
             if (!status.AccessAllowed)
             {
-                ctx.Result = new ObjectResult(new { code = "SUBSCRIPTION_REQUIRED", message = "Your trial has ended. Choose an access option or subscribe." }) { StatusCode = 402 };
+                ctx.Result = new ObjectResult(new { code = "SUBSCRIPTION_REQUIRED", message = "Your subscription is required to access this feature. Subscribe to continue." }) { StatusCode = 402 };
                 return;
             }
 
-            if (status.ReadOnlyAccess && !HttpMethods.IsGet(request.Method))
+            if (status.State == "expired" && !HttpMethods.IsGet(request.Method))
             {
-                ctx.Result = new ObjectResult(new { code = "READ_ONLY_ACCESS", message = "This account is in ad-free read-only mode. Choose ads-supported access or subscribe to make changes." })
-                { StatusCode = StatusCodes.Status403Forbidden };
+                var credit = await _svc.ConsumeRewardedWriteCreditAsync(userId);
+                if (credit == null)
+                {
+                    ctx.Result = new ObjectResult(new { code = "REWARDED_AD_REQUIRED", message = "Watch an ad or subscribe to make changes." })
+                    { StatusCode = StatusCodes.Status403Forbidden };
+                    return;
+                }
+
+                var executed = await next();
+                var statusCode = executed.Result switch
+                {
+                    ObjectResult result => result.StatusCode ?? StatusCodes.Status200OK,
+                    StatusCodeResult result => result.StatusCode,
+                    _ => StatusCodes.Status200OK,
+                };
+                if (statusCode >= StatusCodes.Status400BadRequest
+                    || (executed.Exception != null && !executed.ExceptionHandled))
+                {
+                    await _svc.ReleaseRewardedWriteCreditAsync(credit.RewardedAdAccessId);
+                    return;
+                }
+
+                if (statusCode >= StatusCodes.Status200OK && statusCode < StatusCodes.Status300MultipleChoices
+                    && await _svc.RecordExpiredWriteActionAsync(userId))
+                    ctx.HttpContext.Response.Headers["X-Ad-Interstitial-Due"] = "true";
                 return;
             }
 

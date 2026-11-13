@@ -19,7 +19,7 @@ dependencies {
     implementation project(':capacitor-share')
     implementation project(':capawesome-capacitor-android-sms-retriever')
     implementation project(':capawesome-capacitor-app-update')
-
+    implementation "com.razorpay:checkout:1.6.19"
 }
 
 

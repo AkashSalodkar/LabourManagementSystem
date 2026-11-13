@@ -70,7 +70,7 @@ namespace LMPTS.Domain.Entities
         public virtual User User { get; set; } = null!;
     }
 
-    /// <summary>A UPI QR payment attempt. Starts "pending"; becomes "paid" only via the verified gateway webhook.</summary>
+    /// <summary>A subscription checkout attempt. Starts "pending"; becomes "paid" only after gateway verification.</summary>
     [Table("SubscriptionPayments")]
     public class SubscriptionPayment
     {
@@ -85,11 +85,15 @@ namespace LMPTS.Domain.Entities
         [Required, MaxLength(64)]
         public string OrderRef { get; set; } = "";
 
-        // Gateway id of the single-use QR for this order.
+        // Gateway QR id retained for legacy QR payment attempts.
         [Required, MaxLength(64)]
         public string ProviderQrId { get; set; } = "";
 
-        // FIXED: Increased from 400 to 1000 for long gateway/CDN URLs
+        // Razorpay Order API id used by Standard Checkout.
+        [MaxLength(64)]
+        public string? ProviderOrderId { get; set; }
+
+        // Legacy QR image URL; checkout orders leave this empty.
         [Required, MaxLength(1000)]
         public string QrImageUrl { get; set; } = "";
 

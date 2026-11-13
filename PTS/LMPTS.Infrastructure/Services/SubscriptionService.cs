@@ -1,6 +1,7 @@
 using LMPTS.Domain.Entities;
 using LMPTS.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace LMPTS.Infrastructure.Services
 {
@@ -93,9 +94,9 @@ namespace LMPTS.Infrastructure.Services
                     .Where(user => user.Id == userId)
                     .Select(user => user.ExpiredAccessMode)
                     .FirstOrDefaultAsync();
-                dto.AdsEnabled = dto.ExpiredAccessMode == AdsAccessMode;
-                dto.ReadOnlyAccess = dto.ExpiredAccessMode == ReadOnlyAccessMode;
-                dto.AccessAllowed = dto.AdsEnabled || dto.ReadOnlyAccess;
+                dto.AdsEnabled = false;
+                dto.ReadOnlyAccess = true;
+                dto.AccessAllowed = true;
                 if (latestPaid != null)
                 {
                     dto.SubscriptionStartAt = AsUtc(latestPaid.StartDate);
@@ -130,6 +131,63 @@ namespace LMPTS.Infrastructure.Services
         public async Task<bool> HasAccessAsync(int userId)
             => (await GetStatusAsync(userId)).AccessAllowed;
 
+        public async Task<RewardedAdAccess?> ConsumeRewardedWriteCreditAsync(int userId)
+        {
+            var strategy = _db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                var now = DateTime.UtcNow;
+                var credit = await _db.RewardedAdAccesses
+                    .Where(access => access.UserId == userId
+                        && access.TransactionId != null
+                        && access.UsedAt == null
+                        && access.ExpiresAt > now)
+                    .OrderBy(access => access.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (credit == null)
+                {
+                    await transaction.CommitAsync();
+                    return null;
+                }
+
+                credit.UsedAt = now;
+                await _db.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return credit;
+            });
+        }
+
+        public async Task ReleaseRewardedWriteCreditAsync(int accessId)
+        {
+            var credit = await _db.RewardedAdAccesses
+                .FirstOrDefaultAsync(access => access.RewardedAdAccessId == accessId);
+            if (credit == null)
+                throw new InvalidOperationException($"Rewarded access credit {accessId} was not found.");
+
+            credit.UsedAt = null;
+            await _db.SaveChangesAsync();
+        }
+
+        public async Task<bool> RecordExpiredWriteActionAsync(int userId)
+        {
+            var strategy = _db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                var user = await _db.Users.FirstOrDefaultAsync(candidate => candidate.Id == userId);
+                if (user == null)
+                    throw new KeyNotFoundException($"User {userId} was not found while recording an expired-account action.");
+
+                user.ExpiredWriteActionCount = (user.ExpiredWriteActionCount + 1) % 2;
+                var interstitialDue = user.ExpiredWriteActionCount == 0;
+                await _db.SaveChangesAsync();
+                await transaction.CommitAsync();
+                return interstitialDue;
+            });
+        }
+
         public async Task ActivateAsync(SubscriptionPayment order, string providerPaymentId, string? paymentReference)
         {
             if (order.Status == "paid") return;
@@ -154,7 +212,7 @@ namespace LMPTS.Infrastructure.Services
                 PricePaid = order.Amount,
                 PaymentMethod = "UPI",
                 IsActive = true,
-                Note = "Paid subscription via Razorpay UPI QR",
+                Note = "Paid subscription via Razorpay Checkout",
                 ProviderPaymentId = providerPaymentId,
                 PaymentReference = paymentReference,
                 PaidAt = now,
@@ -163,6 +221,10 @@ namespace LMPTS.Infrastructure.Services
             });
 
             order.Status = "paid";
+            var user = await _db.Users.FirstOrDefaultAsync(candidate => candidate.Id == order.UserId);
+            if (user == null)
+                throw new KeyNotFoundException($"User {order.UserId} was not found while activating a subscription.");
+            user.ExpiredWriteActionCount = 0;
             await _db.SaveChangesAsync();
         }
 

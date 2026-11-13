@@ -13,7 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Cleaned up Controller registration
 builder.Services.AddControllers(options =>
 {
-    // Blocks data endpoints with HTTP 402 once the free trial / paid period is over.
+    // Enforces subscription access and one-write rewarded-ad credits for expired accounts.
     options.Filters.AddService<SubscriptionRequiredFilter>();
 });
 builder.Services.AddEndpointsApiExplorer();
@@ -25,7 +25,7 @@ builder.Services.AddControllers(options =>
     // been superseded by a newer login on another device (single-device login).
     options.Filters.AddService<SessionValidationFilter>();
 
-    // Existing 402 gate when the trial / paid period has ended.
+    // Subscription access and rewarded-write enforcement after expiry.
     options.Filters.AddService<SubscriptionRequiredFilter>();
 });
 
@@ -109,6 +109,7 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(allowedOrigins)
               .AllowAnyMethod()
               .AllowAnyHeader()
+              .WithExposedHeaders("X-Ad-Interstitial-Due")
               .AllowCredentials();
     });
 });

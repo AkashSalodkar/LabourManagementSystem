@@ -42,9 +42,33 @@ export const authFetch = async (url, options = {}, timeoutMs) => {
   }
   if (res.status === 403) {
     const body = await res.clone().json().catch(() => ({}));
+    if (body.code === 'REWARDED_AD_REQUIRED') {
+      const decision = await new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve('cancel'), 5 * 60 * 1000);
+        window.dispatchEvent(new CustomEvent('rewarded-access-attempt', {
+          detail: {
+            message: body.message,
+            resolve: (value) => {
+              clearTimeout(timeout);
+              resolve(value);
+            },
+          },
+        }));
+      });
+      if (decision === 'retry') {
+        const retryResponse = await fetchWithTimeout(url, { ...options, headers }, timeoutMs);
+        if (retryResponse.headers.get('X-Ad-Interstitial-Due') === 'true') {
+          window.dispatchEvent(new Event('expired-write-interstitial-due'));
+        }
+        return retryResponse;
+      }
+    }
     if (body.code === 'READ_ONLY_ACCESS') {
       window.dispatchEvent(new CustomEvent('read-only-access-attempt', { detail: body.message }));
     }
+  }
+  if (res.headers.get('X-Ad-Interstitial-Due') === 'true') {
+    window.dispatchEvent(new Event('expired-write-interstitial-due'));
   }
   return res;
 };
