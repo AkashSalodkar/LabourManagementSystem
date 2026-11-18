@@ -156,8 +156,15 @@ namespace LMPTS.API.Controllers
 
                 if (existingUser != null)
                 {
-                    return BadRequest(new { message = "This mobile number is already registered." });
+                    return BadRequest(new { code = "ALREADY_REGISTERED", message = "This mobile number is already registered." });
                 }
+
+                var fullName = request.FullName?.Trim();
+                if (string.IsNullOrWhiteSpace(fullName))
+                {
+                    return BadRequest(new { message = "Name is required." });
+                }
+                if (fullName.Length > 100) fullName = fullName.Substring(0, 100); // Users.FullName is MaxLength(100)
 
                 // Verify the Firebase ID token instead of matching a stored OTP.
                 var verificationError = await VerifyFirebasePhoneAsync(request.IdToken, mobileNumber);
@@ -169,7 +176,7 @@ namespace LMPTS.API.Controllers
                 // Create user
                 var user = new User
                 {
-                    FullName = request.FullName,
+                    FullName = fullName,
                     MobileNumber = mobileNumber,
                     Industry = request.Industry,
                     Role = UserRole.Supervisor,
@@ -235,7 +242,9 @@ namespace LMPTS.API.Controllers
 
                 if (user == null)
                 {
-                    return Unauthorized(new { message = "Account not found. Please register first." });
+                    // The app treats this "NOT_REGISTERED" code as "new user": it asks for the name and
+                    // calls /register with the SAME verified Firebase token (no second OTP).
+                    return Unauthorized(new { code = "NOT_REGISTERED", message = "Account not found. Please register first." });
                 }
                 var sessionToken = GenerateSessionToken();
                 user.CurrentSessionToken = sessionToken;

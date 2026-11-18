@@ -191,6 +191,11 @@ export const translations = {
     cancelProcessConfirm: 'Do you want to cancel the process? Your unsaved details will be lost.',
     yes: 'Yes',
     no: 'No',
+    resumeTitle: 'Resume SmartManage?',
+    resumeMessage: 'You have been away for a while. Do you want to resume?',
+    resumeConnecting: 'Connecting to the server...',
+    resumeFailed: 'Could not connect to the server. Please check your internet and try again.',
+    resumeRetry: 'Try again',
     
     // Project Picker
     enterProjectName: 'Enter Project Name',
@@ -422,6 +427,11 @@ export const translations = {
     cancelProcessConfirm: 'क्या आप प्रक्रिया रद्द करना चाहते हैं? आपकी बिना सहेजी गई जानकारी हट जाएगी।',
     yes: 'हाँ',
     no: 'नहीं',
+    resumeTitle: 'SmartManage फिर से शुरू करें?',
+    resumeMessage: 'आप कुछ समय के लिए दूर थे। क्या आप जारी रखना चाहते हैं?',
+    resumeConnecting: 'सर्वर से जुड़ रहे हैं...',
+    resumeFailed: 'सर्वर से जुड़ नहीं सके। कृपया अपना इंटरनेट जांचें और पुनः प्रयास करें।',
+    resumeRetry: 'पुनः प्रयास करें',
     
     // Project Picker
     enterProjectName: 'प्रोजेक्ट का नाम दर्ज करें',

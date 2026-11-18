@@ -47,7 +47,7 @@ export const moduleHomeStyles = {
   },
   moduleBadge: { width: '56px', height: '56px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   moduleText: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '3px' },
-  moduleTitle: { fontSize: '17px', fontWeight: '600', color: '#101828', lineHeight: '1.25', overflowWrap: 'break-word' },
+  moduleTitle: { fontSize: '15px', fontWeight: '600', color: '#101828', lineHeight: '1.25', overflowWrap: 'break-word' },
   moduleSubtitle: { fontSize: '13px', fontWeight: '400', color: '#475569', lineHeight: '1.35' },
   modulePlayBtn: {
     width: '40px', height: '40px', background: 'transparent', border: 'none', cursor: 'pointer',

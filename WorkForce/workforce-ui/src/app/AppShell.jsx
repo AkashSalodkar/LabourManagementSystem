@@ -402,6 +402,10 @@ export default function AppShell() {
   const [customWeekStartDay, setCustomWeekStartDay] = useState(2);
 
   const [isSubscribePageOpen, setIsSubscribePageOpen] = useState(false);
+  // Refs always hold the latest value, so alerts raised by an in-flight request (which captured an
+  // older render's showAlert) can still tell that the user has just been sent to the Subscribe page.
+  const isSubscribePageOpenRef = useRef(false);
+  const suppressRewardAlertUntilRef = useRef(0);
 
   // ===== Subscription (trial / ₹99 UPI) =====
   // The server is the single source of truth: it stores the trial start (first login), the
@@ -434,6 +438,19 @@ export default function AppShell() {
   const rewardPromptResolverRef = useRef(null);
   const [interstitialSecondsLeft, setInterstitialSecondsLeft] = useState(0);
   const [interstitialError, setInterstitialError] = useState('');
+
+  // ===== "Do you want to resume?" prompt =====
+  // When the app comes back to the foreground after being away for RESUME_PROMPT_AFTER_MS or longer,
+  // the old server connection is usually dead, so a Save would just hang. Instead we ask first and
+  // reconnect on "Yes". null | 'ask' | 'connecting' | 'error'
+  const RESUME_PROMPT_AFTER_MS = 30000;
+  const [resumePrompt, setResumePrompt] = useState(null);
+  const backgroundedAtRef = useRef(0);
+  const resumeBlockedRef = useRef(false);
+  const resumeAuthRef = useRef(false);
+  // Don't interrupt flows that legitimately leave the app: a rewarded/interstitial ad, or a UPI payment in progress.
+  resumeBlockedRef.current = !!rewardPrompt || rewardPromptBusy || interstitialSecondsLeft > 0 || subOrderState === 'creating' || subOrderState === 'waiting';
+  resumeAuthRef.current = !!(isUserAuthenticated && loggedInUser?.userId);
 
 
   const loadSubscriptionStatus = async () => {
@@ -575,8 +592,15 @@ export default function AppShell() {
 
   const closeAppPopup = () => setAppPopup(null);
 
+  useEffect(() => {
+    isSubscribePageOpenRef.current = isSubscribePageOpen;
+  }, [isSubscribePageOpen]);
+
   const showAlert = (message, tone = 'warning', title) => {
-    if (isSubscribePageOpen && message === 'Watch an ad or subscribe to make changes.') return;
+    if (
+      message === 'Watch an ad or subscribe to make changes.' &&
+      (isSubscribePageOpen || isSubscribePageOpenRef.current || Date.now() < suppressRewardAlertUntilRef.current)
+    ) return;
     setAppPopup({ open: true, tone, title, message, confirmLabel: t('ok') });
   };
 
@@ -731,8 +755,10 @@ export default function AppShell() {
 
       let dismissListener;
       let failedListener;
+      let rewardedListener;
       let resolveDismissal;
       let rejectDismissal;
+      let earnedReward = null;
       const dismissal = new Promise((resolve, reject) => {
         resolveDismissal = resolve;
         rejectDismissal = reject;
@@ -741,16 +767,27 @@ export default function AppShell() {
       failedListener = await AdMob.addListener(RewardAdPluginEvents.FailedToShow, (error) => {
         rejectDismissal(new Error(error?.message || 'The rewarded ad could not be displayed.'));
       });
-      let rewardItem;
+      rewardedListener = await AdMob.addListener(RewardAdPluginEvents.Rewarded, (item) => {
+        earnedReward = item || earnedReward;
+      });
       try {
-        [rewardItem] = await Promise.all([AdMob.showRewardVideoAd(), dismissal]);
+        const showPromise = AdMob.showRewardVideoAd()
+          .then((item) => { if (item) earnedReward = item; })
+          .catch((error) => rejectDismissal(error instanceof Error ? error : new Error(error?.message || 'The rewarded ad could not be displayed.')));
+        // Wait for the user to close the ad, then give the reward callback a moment to arrive.
+        await dismissal;
+        await Promise.race([showPromise, new Promise((resolve) => setTimeout(resolve, 1500))]);
       } finally {
         await dismissListener?.remove();
         await failedListener?.remove();
+        await rewardedListener?.remove();
       }
+      const rewardItem = earnedReward;
       if (useTestAds) {
-        if (rewardItem?.amount !== 1 || !rewardItem?.type) {
-          throw new Error('The test ad did not return a valid reward. Please watch the ad to completion and try again.');
+        // Google's test ads return their own reward values (not necessarily amount 1), so only
+        // require that a reward was actually earned before the ad was closed.
+        if (!rewardItem || !(Number(rewardItem.amount) > 0)) {
+          throw new Error('The ad was closed before the reward was earned. Please watch the ad to completion and try again.');
         }
         await api.post('/subscription/rewarded-access/test-confirm', {
           challengeToken: challenge.challengeToken,
@@ -885,6 +922,45 @@ export default function AppShell() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const markBackgrounded = () => {
+      if (!backgroundedAtRef.current) backgroundedAtRef.current = Date.now();
+    };
+    const handleReturn = () => {
+      const leftAt = backgroundedAtRef.current;
+      backgroundedAtRef.current = 0;
+      if (!leftAt || Date.now() - leftAt < RESUME_PROMPT_AFTER_MS) return;
+      if (!resumeAuthRef.current || resumeBlockedRef.current) return;
+      setResumePrompt((current) => current || 'ask');
+    };
+    // appStateChange covers the Android app; visibilitychange covers the browser. On a device both
+    // may fire, which is harmless because the first one clears backgroundedAtRef.
+    const listenerPromise = App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) handleReturn(); else markBackgrounded();
+    });
+    const handleVisibility = () => { if (document.hidden) markBackgrounded(); else handleReturn(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      listenerPromise.then((h) => h.remove());
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const resumeApp = async () => {
+    setResumePrompt('connecting');
+    try {
+      // 1) Fresh health check = wakes the server / opens a new connection (throws if unreachable).
+      await wakeApi({ force: true });
+      // 2) Re-validate the session and refresh subscription status so the next Save goes straight through.
+      await api.get('/auth/session-check').catch(() => {});
+      await loadSubscriptionStatus();
+      setResumePrompt(null);
+    } catch (error) {
+      setResumePrompt('error');
+    }
+  };
 
   // Ask before throwing away work the user is in the middle of. Returns true so the back
   // press is consumed; the screen only closes if the user answers Yes.
@@ -1256,6 +1332,10 @@ export default function AppShell() {
               type="button"
               disabled={rewardPromptBusy}
               onClick={() => {
+                // Set these first: resolving the prompt makes the blocked request fail, and its
+                // caller would otherwise show a second "Watch an ad or subscribe" popup.
+                isSubscribePageOpenRef.current = true;
+                suppressRewardAlertUntilRef.current = Date.now() + 3000;
                 setActiveModule(null);
                 setIsSubscribePageOpen(true);
                 setIsHelpPageOpen(false);
@@ -1265,6 +1345,28 @@ export default function AppShell() {
             >
               Subscribe to continue Ads free
             </button>
+          </div>
+        </div>
+      )}
+      {resumePrompt && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="resume-prompt-title"
+          style={{ position: 'fixed', inset: 0, zIndex: 3500, background: 'rgba(15, 23, 42, 0.62)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+        >
+          <div style={{ width: '100%', maxWidth: '380px', borderRadius: '18px', background: '#ffffff', padding: '22px', boxShadow: '0 20px 60px rgba(0,0,0,0.24)', textAlign: 'center' }}>
+            <h2 id="resume-prompt-title" style={{ margin: '0 0 8px', fontSize: '19px', color: '#1E293B' }}>{t('resumeTitle')}</h2>
+            <p style={{ margin: '0 0 16px', fontSize: '14px', lineHeight: 1.5, color: resumePrompt === 'error' ? '#B91C1C' : '#64748B' }}>
+              {resumePrompt === 'ask' && t('resumeMessage')}
+              {resumePrompt === 'connecting' && t('resumeConnecting')}
+              {resumePrompt === 'error' && t('resumeFailed')}
+            </p>
+            {resumePrompt !== 'connecting' && (
+              <button type="button" onClick={resumeApp} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#0B3C9B', color: '#fff', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
+                {resumePrompt === 'error' ? t('resumeRetry') : t('yes')}
+              </button>
+            )}
           </div>
         </div>
       )}

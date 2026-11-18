@@ -327,17 +327,10 @@ export default function ModuleHome() {
                             <Fragment>
                               <p style={{ margin: '10px 0 0 0', fontSize: '15px', fontWeight: '700', color: '#1E293B' }}>Complete your payment of {'\u20B9'}{subOrder.amount}</p>
                               <button onClick={() => openSubscriptionCheckout(subOrder).catch((error) => setSubError(error?.message || 'Could not open payment options. Please try again.'))} style={{ marginTop: '10px', padding: '12px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
-                                Choose a UPI app or payment method
+                                Choose a UPI app for making payment
                               </button>
                             </Fragment>
                           )}
-
-                          <div style={{ textAlign: 'left', marginTop: '14px', backgroundColor: '#F8FAFC', borderRadius: '12px', padding: '12px 14px' }}>
-                            <p style={{ margin: '0 0 6px 0', fontSize: '13px', fontWeight: '700', color: '#1E293B' }}>How to pay</p>
-                            {['Choose an installed UPI app in Razorpay Checkout (Google Pay, PhonePe, Paytm, BHIM, and others)', `Approve the payment of \u20B9${subOrder.amount} in your UPI app`, 'Return to this screen; payment is verified automatically', 'Your subscription activates for 30 days after the bank confirms payment'].map((t, i) => (
-                              <p key={i} style={{ margin: '0 0 4px 0', fontSize: '12.5px', color: '#475569' }}>{i + 1}. {t}</p>
-                            ))}
-                          </div>
 
                           <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                             {subOrderState === 'waiting' ? (
@@ -364,7 +357,7 @@ export default function ModuleHome() {
                       {(subOrderState === 'failed' || subOrderState === 'expired') && (
                         <div style={{ marginTop: '14px', textAlign: 'center' }}>
                           <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', color: '#B91C1C' }}>
-                            {subOrderState === 'expired' ? 'This payment QR expired.' : 'Payment was not completed.'}
+                            {subOrderState === 'expired' ? 'This payment session expired.' : 'Payment was not completed.'}
                           </p>
                           {subError && <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#64748B' }}>{subError}</p>}
                           <button onClick={() => { setSubOrder(null); setSubOrderState('idle'); setSubError(''); }} style={{ marginTop: '10px', padding: '11px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Try again</button>

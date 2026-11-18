@@ -173,7 +173,10 @@ namespace LMPTS.Controllers
                 || !await HasCurrentSessionAsync(userId))
                 return Unauthorized(new { code = "NO_SESSION", message = "Not signed in." });
 
-            if (request.RewardAmount != 1 || string.IsNullOrWhiteSpace(request.RewardItem))
+            // Development-only endpoint. Google's test ads return their own reward values (not
+            // necessarily amount 1 / the configured item), so only require that a reward was earned.
+            // Production credits are granted only through the signed AdMob SSV callback below.
+            if (request.RewardAmount < 1)
                 return BadRequest(new { message = "The rewarded ad did not return a valid reward." });
 
             var status = await _svc.GetStatusAsync(userId);

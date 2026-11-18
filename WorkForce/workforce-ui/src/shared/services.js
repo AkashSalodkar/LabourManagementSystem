@@ -4,9 +4,11 @@ import { authFetch, fetchWithTimeout } from './http';
 let wakeRequest = null;
 let lastSuccessfulWakeAt = 0;
 
-export const wakeApi = () => {
+// { force: true } skips the 60s "recently woken" shortcut - used when the user resumes the app
+// after it sat in the background, where the old connection may be dead.
+export const wakeApi = ({ force = false } = {}) => {
   if (wakeRequest) return wakeRequest;
-  if (Date.now() - lastSuccessfulWakeAt < 60000) return Promise.resolve();
+  if (!force && Date.now() - lastSuccessfulWakeAt < 60000) return Promise.resolve();
 
   const healthUrl = new URL(API_ROOT);
   healthUrl.pathname = '/healthz';

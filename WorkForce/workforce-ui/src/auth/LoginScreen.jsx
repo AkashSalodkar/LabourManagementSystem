@@ -1,8 +1,11 @@
 // ===== Login / Registration (OTP) screen =====
+// ONE flow for everybody: mobile number -> OTP -> signed in.
+// A number that has no account yet is detected after the OTP is verified; the user is then asked for
+// their name only (no second OTP) and is registered and signed in with the SAME verified Firebase token.
 // Shown whenever nobody is signed in. Owns all of the login-form state; everything shared with the
 // rest of the app (signed-in user, language, popups ...) comes from the AppShell context.
 
-import { API_BASE_URL, DEV_SKIP_LOGIN, SESSION_TOKEN_KEY } from '../shared/constants';
+import { API_BASE_URL, SESSION_TOKEN_KEY } from '../shared/constants';
 import { AppPopup } from '../shared/components';
 import { Capacitor } from '@capacitor/core';
 import { FiArrowRight, FiChevronDown, FiFileText, FiPhone, FiUser } from 'react-icons/fi';
@@ -17,23 +20,49 @@ import smartpayLogo from '../assets/icon.png';
 import { useAppShell } from '../app/AppShellContext';
 import { useEffect, useRef, useState } from 'react';
 
+// POSTs JSON to an auth endpoint and returns { response, data } without throwing on HTTP errors.
+const postAuth = async (path, payload) => {
+  const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+  const responseText = await response.text();
+  let data = {};
+  if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
+  return { response, data };
+};
+
+// After a verified OTP, /login rejects a number that has no account yet. That is the signal to ask
+// for the user's name and register. If the backend ever changes its "not registered" reply, this is
+// the one place to adjust (it checks an error code first, then the message text).
+const isNotRegisteredResponse = (response, data) => {
+  if (response.ok) return false;
+  const code = String(data?.code || data?.errorCode || data?.error || '').toUpperCase();
+  if (/NOT_?REGISTERED|USER_?NOT_?FOUND|ACCOUNT_?NOT_?FOUND|NO_?ACCOUNT|NEW_?USER|REGISTRATION_?REQUIRED/.test(code)) return true;
+  const message = String(data?.message || data?.title || '');
+  return /not\s+(yet\s+)?(registered|found)|no\s+(such\s+)?(user|account)|(please|need\s+to|must)\s+register|register\s+first|registration\s+(is\s+)?required|sign\s*up/i.test(message);
+};
+
+const isAlreadyRegisteredResponse = (response, data) => {
+  if (response.ok) return false;
+  if (response.status === 409) return true;
+  return /already\s+(registered|exists?)/i.test(String(data?.message || ''));
+};
+
 export default function LoginScreen() {
   const {
     appPopup,
     closeAppPopup,
     loading,
-    persistedUser,
     setIsUserAuthenticated,
     setLoading,
     setLoggedInUser,
     setProfileImg,
     setUserName,
     showAlert,
-    showSuccess,
   } = useAppShell();
-
-
-  const [isLoginView, setIsLoginView] = useState(!DEV_SKIP_LOGIN && !persistedUser);
 
 
   const [fullName, setFullName] = useState('');
@@ -44,13 +73,19 @@ export default function LoginScreen() {
 
   const [firebaseVerificationId, setFirebaseVerificationId] = useState(null);
 
-  const [industry, setIndustry] = useState('General');
+  const [industry] = useState('General');
 
   const [activePage, setActivePage] = useState('dashboard');
 
   const [otpSent, setOtpSent] = useState(false);
 
   const [sendingOtp, setSendingOtp] = useState(false);
+
+  // true once the OTP is verified but the number has no account yet -> only the name is asked next.
+  const [needsName, setNeedsName] = useState(false);
+
+  // The verified Firebase ID token, kept in memory only (never stored) until registration finishes.
+  const verifiedIdTokenRef = useRef(null);
 
 
   // UI-only state for the 6-box OTP input & resend countdown (does not change auth logic)
@@ -93,20 +128,6 @@ export default function LoginScreen() {
     const wakingTimer = setTimeout(() => setShowWakingMessage(true), 4000);
     return () => clearTimeout(wakingTimer);
   }, [sendingOtp, loading]);
-
-
-  const toggleView = () => {
-    setIsLoginView(!isLoginView);
-    setOtp('');
-    setOtpSent(false);
-    setFullName('');
-    setIndustry('General');
-    setOtpDigits(['', '', '', '', '', '']);
-    setResendSeconds(0);
-  };
-
-
-  const isRegistrationFormValid = () => fullName.trim() !== '' && isValidMobileNumber(mobileNumber);
 
 
   // Firebase phone-auth listeners: 'phoneCodeSent' fires once the SMS is dispatched and
@@ -173,11 +194,9 @@ export default function LoginScreen() {
   };
 
 
-  // Registration-status ("already registered" / "not registered") is now enforced
-  // by the backend's register/login endpoints themselves after OTP verification,
-  // rather than via a separate pre-check call before sending the OTP.
+  // Whether the number already has an account is decided by the backend AFTER the OTP is verified
+  // (see submitToBackend), so the user never has to pick between "Login" and "Register".
   const handleSendOtp = async () => {
-    if (!isLoginView && !isRegistrationFormValid()) { showAlert('Please fill all registration details accurately.'); return; }
     if (!mobileNumber || !isValidMobileNumber(mobileNumber)) { showAlert('Please enter a valid 10-digit mobile number.'); return; }
     setSendingOtp(true);
     try {
@@ -228,48 +247,52 @@ export default function LoginScreen() {
   };
 
 
-  // Sends the verified Firebase ID token to our backend and applies the login / registration result.
+  // Stores the session returned by the backend and opens the app.
+  const applyLoginResult = (data) => {
+    localStorage.setItem('workforce_soft_token', 'true');
+    if (data.sessionToken) localStorage.setItem(SESSION_TOKEN_KEY, data.sessionToken);
+    const sessionUser = {
+      userId: data.userId,
+      fullName: data.fullName,
+      industry: data.industry || industry,
+      profileImg: data.profileImage || null,
+    };
+    localStorage.setItem('workforce_user', JSON.stringify(sessionUser));
+    verifiedIdTokenRef.current = null;
+    setNeedsName(false);
+    setLoggedInUser(sessionUser);
+    setUserName(sessionUser.fullName || '');
+    setProfileImg(sessionUser.profileImg);
+    setIsUserAuthenticated(true);
+    setActivePage('dashboard');
+    // (Projects are loaded by the attendance module as soon as the user is signed in.)
+  };
+
+  // A fresh ID token for the number that is currently verified (used only as a fallback below).
+  const getFreshIdToken = async () => {
+    if (Capacitor.getPlatform() === 'web') {
+      try { return (await getAuth().currentUser?.getIdToken(true)) || null; } catch { return null; }
+    }
+    return getAutoVerifiedIdToken();
+  };
+
+  // Sends the verified Firebase ID token to our backend. Existing users are signed in; a number with
+  // no account yet switches the screen to the "enter your name" step (needsName) - no second OTP.
   // Shared by manual OTP entry (handleSubmit) and Firebase auto-verification.
   const submitToBackend = async (idToken) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setLoading(true);
     try {
-      const endpoint = isLoginView ? `${API_BASE_URL}/login` : `${API_BASE_URL}/register`;
-      const payload = isLoginView
-        ? { mobileNumber: mobileNumber.trim(), idToken }
-        : { mobileNumber: mobileNumber.trim(), idToken, fullName, industry };
-
-      const response = await fetchWithTimeout(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) });
-      const responseText = await response.text();
-      let data = {};
-      if (responseText) { try { data = JSON.parse(responseText); } catch { data = { message: responseText }; } }
+      const { response, data } = await postAuth('/login', { mobileNumber: mobileNumberRef.current.trim(), idToken });
       if (response.ok) {
-        if (isLoginView) {
-          localStorage.setItem('workforce_soft_token', 'true');
-          if (data.sessionToken) localStorage.setItem(SESSION_TOKEN_KEY, data.sessionToken);
-          const sessionUser = { 
-            userId: data.userId, 
-            fullName: data.fullName, 
-            industry: data.industry || industry,
-            profileImg: data.profileImage || null
-          };
-          localStorage.setItem('workforce_user', JSON.stringify(sessionUser));
-          setLoggedInUser(sessionUser);
-          setUserName(sessionUser.fullName || '');
-          setProfileImg(sessionUser.profileImg);
-          setIsUserAuthenticated(true);
-          setActivePage('dashboard');
-          // (Projects are loaded by the attendance module as soon as the user is signed in.)
-        } else {
-          showSuccess(data.message || 'Registration completed successfully! Proceeding to login view.');
-          setIsLoginView(true);
-          setOtp('');
-          setOtpSent(false);
-          setFirebaseVerificationId(null);
-          window.confirmationResult = null;
-        }
-      } else { showAlert(data.message || 'Validation failed down at backend services.'); }
+        applyLoginResult(data);
+      } else if (isNotRegisteredResponse(response, data)) {
+        verifiedIdTokenRef.current = idToken;
+        setNeedsName(true);
+      } else {
+        showAlert(data.message || 'Validation failed down at backend services.');
+      }
     } catch (error) {
       console.error('Backend submit error:', error);
       showAlert(error?.message || 'Something went wrong. Please try again.');
@@ -279,13 +302,59 @@ export default function LoginScreen() {
     }
   };
 
-  // Keep the ref pointing at the latest closure (isLoginView, mobileNumber, fullName... may change).
+  // Step for NEW users only: register with the name they typed, reusing the token that the single
+  // OTP already produced, then sign them straight in.
+  const registerNewUser = async () => {
+    if (submittingRef.current) return;
+    const name = fullName.trim();
+    if (!name) { showAlert('Please enter your name to continue.'); return; }
+    const idToken = verifiedIdTokenRef.current;
+    if (!idToken) {
+      showAlert('Your verification has expired. Please verify your mobile number again.');
+      handleChangeNumber();
+      return;
+    }
+    const mobile = mobileNumberRef.current.trim();
+    submittingRef.current = true;
+    setLoading(true);
+    try {
+      const register = await postAuth('/register', { mobileNumber: mobile, idToken, fullName: name, industry });
+      if (!register.response.ok && !isAlreadyRegisteredResponse(register.response, register.data)) {
+        showAlert(register.data.message || 'Registration failed. Please try again.');
+        return;
+      }
+      // If the backend already returns a session on /register, use it; otherwise sign in right away.
+      if (register.response.ok && register.data?.sessionToken && register.data?.userId) {
+        applyLoginResult({ ...register.data, fullName: register.data.fullName || name });
+        return;
+      }
+      let login = await postAuth('/login', { mobileNumber: mobile, idToken });
+      if (!login.response.ok) {
+        const freshToken = await getFreshIdToken();
+        if (freshToken && freshToken !== idToken) login = await postAuth('/login', { mobileNumber: mobile, idToken: freshToken });
+      }
+      if (login.response.ok) {
+        applyLoginResult(login.data);
+      } else {
+        showAlert(login.data.message || 'Your account is ready, but we could not sign you in. Please tap Continue again.');
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      showAlert(error?.message || 'Something went wrong. Please try again.');
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
+    }
+  };
+
+  // Keep the ref pointing at the latest closure (mobileNumber, fullName, needsName... may change).
   submitRef.current = submitToBackend;
 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submittingRef.current) return; // login already in progress (e.g. auto-verification)
+    if (needsName) { await registerNewUser(); return; }
     const isWeb = Capacitor.getPlatform() === 'web';
 
     // Native: if Firebase already auto-verified this number, the SMS code is spent - do NOT try to
@@ -376,6 +445,9 @@ export default function LoginScreen() {
   // number - without this they'd be stuck staring at an uneditable field waiting for an OTP
   // that will never arrive at their own phone.
   const handleChangeNumber = () => {
+    verifiedIdTokenRef.current = null;
+    setNeedsName(false);
+    setFullName('');
     setOtpSent(false);
     setOtp('');
     setOtpDigits(['', '', '', '', '', '']);
@@ -388,8 +460,8 @@ export default function LoginScreen() {
     }
   };
 
-const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!isLoginView && !isRegistrationFormValid());
-  const canVerify = otpSent && otp.length === 6 && !loading;
+  const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber);
+  const canVerify = needsName ? (fullName.trim() !== '' && !loading) : (otpSent && otp.length === 6 && !loading);
 
   return (
     <div style={authStyles.page}>
@@ -409,13 +481,13 @@ const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!
         <div style={authStyles.card}>
           <div style={authStyles.welcomeBlock}>
             <h2 style={authStyles.welcomeTitle}>Welcome</h2>
-            <p style={authStyles.welcomeSubtitle}>Login to continue</p>
+            <p style={authStyles.welcomeSubtitle}>{needsName ? 'Almost done! Tell us your name to create your account.' : 'Enter your mobile number to login or sign up'}</p>
           </div>
 
           <form onSubmit={handleSubmit} style={authStyles.form}>
 
-            {/* ---- Name (mandatory only for new users / register view) ---- */}
-            {!isLoginView && (
+            {/* ---- Name (asked ONLY when the verified number has no account yet) ---- */}
+            {needsName && (
               <div style={authStyles.fieldGroup}>
                 <label style={authStyles.fieldLabel}>Name <span style={authStyles.requiredMark}>*</span></label>
                 <div style={authStyles.inputShell}>
@@ -423,6 +495,7 @@ const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!
                   <input
                     type="text"
                     required
+                    autoFocus
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="Enter your full name"
@@ -452,10 +525,26 @@ const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!
             </div>
 
             {/* ---- OTP info card (always visible once the form is in play) ---- */}
-            <div style={authStyles.otpInfoCard}>
-              <span style={authStyles.otpInfoIcon}><HiOutlineShieldCheck size={22} color="#2563EB" /></span>
-              <p style={authStyles.otpInfoText}>Enter the OTP sent to your mobile</p>
-            </div>
+            {!needsName && (
+              <div style={authStyles.otpInfoCard}>
+                <span style={authStyles.otpInfoIcon}><HiOutlineShieldCheck size={22} color="#2563EB" /></span>
+                <p style={authStyles.otpInfoText}>Enter the OTP sent to your mobile</p>
+              </div>
+            )}
+            {needsName && (
+              <div style={{ marginBottom: '10px' }}>
+                <span style={{ fontSize: '13px', color: '#6B7280' }}>
+                  <b style={{ color: '#15803D' }}>&#10003; +91 {mobileNumber} verified.</b>{' '}
+                  <button
+                    type="button"
+                    onClick={handleChangeNumber}
+                    style={{ background: 'none', border: 'none', padding: 0, color: '#0B3C9B', fontWeight: '700', fontSize: '13px', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Wrong number? Change it
+                  </button>
+                </span>
+              </div>
+            )}
 
             {/* ---- Slow-request notice: shown once a send-otp/verify call has been ---- */}
             {/* running for a few seconds, most likely an Azure SQL Serverless cold start ---- */}
@@ -470,7 +559,7 @@ const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!
             <div id="recaptcha-container"></div>
 
             {/* ---- Send OTP button (only before the first send) ---- */}
-            {!otpSent && (
+            {!otpSent && !needsName && (
               <button
                 type="button"
                 onClick={handleOtpButtonClick}
@@ -482,7 +571,7 @@ const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!
             )}
 
             {/* ---- 6-box OTP entry ---- */}
-            {otpSent && (
+            {otpSent && !needsName && (
               <div style={authStyles.fieldGroup}>
                 <div style={authStyles.otpHeaderRow}>
                   <label style={authStyles.fieldLabel}>Enter OTP <span style={authStyles.requiredMark}>*</span></label>
@@ -547,21 +636,19 @@ const otpButtonDisabled = sendingOtp || !isValidMobileNumber(mobileNumber) || (!
 
             {/* ---- Primary CTA ---- */}
             <button type="submit" disabled={!canVerify} style={{ ...authStyles.primaryCta, opacity: canVerify ? 1 : 0.5 }}>
-              <span>{loading ? (showWakingMessage ? 'Waking up server...' : 'Verifying...') : 'Verify & Continue'}</span>
+              <span>{loading ? (showWakingMessage ? 'Waking up server...' : (needsName ? 'Creating your account...' : 'Verifying...')) : (needsName ? 'Continue' : 'Verify & Continue')}</span>
               {!loading && <FiArrowRight size={19} color="#ffffff" />}
             </button>
 
-            <p style={authStyles.switchViewText}>
-              {isLoginView ? "Don't have an account yet?" : 'Already registered on SmartManage?'}
-              <style>{'@keyframes registerHereBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }'}</style>
-              <button type="button" onClick={toggleView} style={{ ...authStyles.toggleLink, color: isLoginView ? '#DC2626' : '#0B3C9B', textDecoration: 'underline', animation: isLoginView ? 'registerHereBlink 1.2s ease-in-out infinite' : 'none' }}>{isLoginView ? 'Register here' : 'Login here'}</button>
-            </p>
+            {!otpSent && (
+              <p style={authStyles.switchViewText}>New to SmartManage? Just enter your number - we'll set you up automatically.</p>
+            )}
           </form>
         </div>
 
         {/* ---- Bottom feature highlights (informational only) - hidden once the form ---- */}
         {/* grows taller (register view or OTP entry) so the page always fits one screen ---- */}
-        {isLoginView && !otpSent && (
+        {!otpSent && (
         <div style={authStyles.featureRow}>
           <div style={authStyles.featureItem}>
             <span style={authStyles.featureIconWrap}><HiOutlineUserGroup size={20} color="#2563EB" /></span>
