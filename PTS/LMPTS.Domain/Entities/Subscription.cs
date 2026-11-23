@@ -5,7 +5,7 @@ namespace LMPTS.Domain.Entities
 {
     /// <summary>
     /// One row = one period of access for a user.
-    ///   - PlanType "trial"   : the 30-day free trial. Exactly ONE per user (unique index), created on first login.
+    ///   - PlanType "trial"   : the 45-day free trial. Exactly ONE per user (unique index), created on first login.
     ///   - PlanType "monthly" : a paid 30-day period, created only after a verified UPI payment.
     /// Access is decided from StartDate/EndDate against the SERVER clock (UTC), never from the device.
     /// </summary>

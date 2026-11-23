@@ -228,7 +228,7 @@ export default function ModuleHome() {
                 )}
                 <div>
                   <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B', margin: 0 }}>Subscription</h2>
-                  <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>30-day free trial, then ₹99 for 30 days</p>
+                  <p style={{ fontSize: '13px', color: '#64748B', margin: '2px 0 0 0' }}>45-day free trial, then ₹99 for 30 days</p>
                 </div>
               </div>
 
@@ -249,8 +249,8 @@ export default function ModuleHome() {
                     <div style={{ ...card, border: state === 'trial' ? '2px solid #0B3C9B' : '1px solid #F1F5F9', opacity: state === 'trial' ? 1 : 0.85 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
-                          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>30-Day Free Trial</h3>
-                          <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>Free for the first 30 days</p>
+                          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '700', color: '#1E293B' }}>45-Day Free Trial</h3>
+                          <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>Free for the first 45 days</p>
                         </div>
                         {state === 'trial'
                           ? daysBadge(s.daysRemaining)

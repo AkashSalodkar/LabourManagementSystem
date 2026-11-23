@@ -547,6 +547,9 @@ export default function AppShell() {
 
 
   const handleSubscriptionRequired = () => {
+    setActiveModule(null);
+    setIsSubscribePageOpen(true);
+    setIsHelpPageOpen(false);
     setSubStatus(null);
     setSubStatusUserId(null);
     loadSubscriptionStatus();

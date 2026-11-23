@@ -8,8 +8,11 @@ namespace LMPTS.Infrastructure.Services
     public class SubscriptionService
     {
         public const decimal Price = 99m;      // ₹99
-        public const int TrialDays = 30;
+        public const int TrialDays = 45;
         public const int MonthlyDays = 30;
+        // Keep rewarded/interstitial ad support dormant until the product is ready to show ads.
+        // Set to true to re-enable the existing ad-supported expired-access flow.
+        public const bool AdsEnabled = false;
         public const string AdsAccessMode = "ads";
         public const string ReadOnlyAccessMode = "readOnly";
 
@@ -32,7 +35,7 @@ namespace LMPTS.Infrastructure.Services
                 PricePaid = 0,
                 PaymentMethod = null,
                 IsActive = true,
-                Note = "30-day free trial",
+                Note = "45-day free trial",
                 CreatedAt = now,
                 UpdatedAt = now,
             };
@@ -94,7 +97,7 @@ namespace LMPTS.Infrastructure.Services
                     .Where(user => user.Id == userId)
                     .Select(user => user.ExpiredAccessMode)
                     .FirstOrDefaultAsync();
-                dto.AdsEnabled = false;
+                dto.AdsEnabled = AdsEnabled;
                 dto.ReadOnlyAccess = true;
                 dto.AccessAllowed = true;
                 if (latestPaid != null)

@@ -192,7 +192,7 @@ namespace LMPTS.API.Controllers
 
                 await _context.SaveChangesAsync();
 
-                // No subscription row is created here. The 30-day trial row is created by
+                // No subscription row is created here. The 45-day trial row is created by
                 // SubscriptionService on the user's first /subscription/status call, so a legacy
                 // open-ended "free" row can never grant permanent access.
 

@@ -597,7 +597,8 @@ namespace LMPTS.Controllers
         public string RewardItem { get; set; } = "";
     }
 
-    // Keep expired accounts read-only; non-GET requests require a one-use rewarded-ad credit.
+    // Keep expired accounts read-only while ads are disabled; the existing rewarded-ad
+    // write-credit and interstitial flow remains available for a future rollout.
     // The app authenticates API requests with its current-session headers rather than claims.
     public class SubscriptionRequiredFilter : IAsyncActionFilter
     {
@@ -651,6 +652,16 @@ namespace LMPTS.Controllers
 
             if (status.State == "expired" && !HttpMethods.IsGet(request.Method))
             {
+                if (!SubscriptionService.AdsEnabled)
+                {
+                    ctx.Result = new ObjectResult(new
+                    {
+                        code = "SUBSCRIPTION_REQUIRED",
+                        message = "Your free trial has ended. Subscribe to continue making changes."
+                    }) { StatusCode = StatusCodes.Status402PaymentRequired };
+                    return;
+                }
+
                 var credit = await _svc.ConsumeRewardedWriteCreditAsync(userId);
                 if (credit == null)
                 {
