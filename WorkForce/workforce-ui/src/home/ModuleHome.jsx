@@ -4,7 +4,7 @@
 
 import { ATTENDANCE_TUTORIAL_VIDEO_URL, DOCUMENTS_TUTORIAL_VIDEO_URL } from './constants';
 import { AppPopup } from '../shared/components';
-import { FaWhatsapp } from 'react-icons/fa';
+import { FaPhoneAlt, FaWhatsapp } from 'react-icons/fa';
 import { FiArrowLeft, FiChevronRight, FiEdit2, FiFileText, FiPhone, FiPlayCircle, FiPlus, FiSearch } from 'react-icons/fi';
 import { Fragment, useState } from 'react';
 import { HiOutlineMail } from 'react-icons/hi';
@@ -41,6 +41,7 @@ export default function ModuleHome() {
     setSubOrderState,
     startUpiPayment,
     subError,
+    subGatePending,
     subLoading,
     subLocked,
     subOrder,
@@ -87,7 +88,7 @@ export default function ModuleHome() {
     return (
       <div style={moduleHomeStyles.screen}>
         <div style={moduleHomeStyles.scrollArea}>
-          <div style={moduleHomeStyles.header}>
+          <div style={{ ...moduleHomeStyles.header, background: '#2554EB', backgroundColor: '#2554EB' }}>
             <div style={moduleHomeStyles.headerRow}>
               <div style={moduleHomeStyles.avatarWrap}>
                 <button
@@ -196,12 +197,12 @@ export default function ModuleHome() {
             onClick={() => { setIsHelpPageOpen(true); setIsSubscribePageOpen(false); }}
             style={isHelpPageOpen ? homeNavActive : themeStyles.navItemTab}
           >
-            <span style={themeStyles.navTabIcon}>&#128222;</span>
+            <span style={themeStyles.navTabIcon}><FaPhoneAlt color="#FDD734" /></span>
             <span style={themeStyles.navTabLabel}>{t('navHelp')}</span>
           </button>
         </div>
 
-        {(isSubscribePageOpen || subLocked) && (() => {
+        {(isSubscribePageOpen || (subLocked && !subGatePending)) && (() => {
           const s = subStatus;
           const state = s?.state; // 'trial' | 'trial_expired' | 'active' | 'expired'
           const needsPayment = state === 'trial_expired' || state === 'expired';
@@ -404,7 +405,7 @@ export default function ModuleHome() {
                       rel="noopener noreferrer"
                       style={{
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
-                        backgroundColor: '#1E293B', borderRadius: '16px', padding: '16px',
+                        backgroundColor: '#2554EB', borderRadius: '16px', padding: '16px',
                         boxShadow: '0 2px 8px rgba(15,23,42,0.12)',
                         textDecoration: 'none', cursor: 'pointer',
                       }}
@@ -420,7 +421,7 @@ export default function ModuleHome() {
                   backgroundColor: '#ffffff', borderRadius: '16px', padding: '18px',
                   border: '1px solid #F1F5F9', boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
                 }}>
-                  <h3 style={{ fontSize: '17px', fontWeight: '800', color: '#0F172A', margin: '0 0 14px 0' }}>{t('contactAppName')}</h3>
+                  <h3 style={{ fontSize: '17px', fontWeight: '800', color: '#2554EB', margin: '0 0 14px 0' }}>{t('contactAppName')}</h3>
 
                   {helpNumbers.map((number) => (
                     <a

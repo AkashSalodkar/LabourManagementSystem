@@ -21,6 +21,18 @@ import smartpayLogo from '../../assets/icon.png';
 import { useAppShell } from '../../app/AppShellContext';
 import { useEffect, useRef, useState } from 'react';
 
+
+// If the server rejected the request because the free trial / subscription has ended, show the
+// server's own message ("Your free trial has ended. Subscribe to continue making changes.") --
+// exactly like the Employee module does -- instead of a generic "Could not save ..." text.
+function getSaveErrorMessage(error, fallback) {
+  const msg = String(error?.message || error?.response?.data?.message || error?.data?.message || '');
+  if (/trial|subscri|read[- ]?only|watch an ad/i.test(msg)) {
+    return msg;
+  }
+  return fallback;
+}
+
 export default function DocumentsModule() {
   const {
     activeModule,
@@ -542,7 +554,7 @@ const loadUserCustomers = async (userId) => {
     setQuotationSubView(null);
   } catch (error) {
     console.error('Error updating business info:', error);
-    showAlert('Could not save business info. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save business info. Please try again.'));
   }
 };
 
@@ -711,7 +723,7 @@ const handleUpdateQuotationSettings = async () => {
     showSuccess('Quotation settings updated.');
   } catch (error) {
     console.error('Error updating quotation settings:', error);
-    showAlert('Could not save settings. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save settings. Please try again.'));
   }
 };
 
@@ -773,7 +785,7 @@ const handleUpdateQuotationSettings = async () => {
     setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating invoice settings:', error);
-    showAlert('Could not save settings. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save settings. Please try again.'));
   }
 };
 
@@ -835,7 +847,7 @@ const handleUpdateQuotationSettings = async () => {
     setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating purchase order settings:', error);
-    showAlert('Could not save settings. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save settings. Please try again.'));
   }
 };
 
@@ -897,7 +909,7 @@ const applyProformaInvoiceMessageMode = (kind, mode) => {
     setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating proforma invoice settings:', error);
-    showAlert('Could not save settings. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save settings. Please try again.'));
   }
 };
 
@@ -959,7 +971,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
     setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating delivery note settings:', error);
-    showAlert('Could not save settings. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save settings. Please try again.'));
   }
 };
 
@@ -979,7 +991,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
     setQuotationSubView(settingsReturnView);
   } catch (error) {
     console.error('Error updating receipt settings:', error);
-    showAlert('Could not save settings. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save settings. Please try again.'));
   }
 };
 
@@ -1155,7 +1167,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
       setQuotationSubView(customerFormReturnView);
     } catch (error) {
       console.error('Error saving customer:', error);
-      showAlert('Could not save the customer to the server. Please try again.');
+      showAlert(getSaveErrorMessage(error, 'Could not save the customer to the server. Please try again.'));
     } finally {
       setIsSavingCustomer(false);
     }
@@ -1175,7 +1187,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
         showSuccess('Customer deleted.');
       } catch (error) {
         console.error('Error deleting customer:', error);
-        showAlert('Could not delete the customer on the server. Please try again.');
+        showAlert(getSaveErrorMessage(error, 'Could not delete the customer on the server. Please try again.'));
       }
     });
   };
@@ -1283,7 +1295,7 @@ const applyDeliveryNoteMessageMode = (kind, mode) => {
     setQuotationSubView(productFormReturnView);
   } catch (error) {
     console.error('Error saving product:', error);
-    showAlert('Could not save the product. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save the product. Please try again.'));
   }
 };
 
@@ -1298,7 +1310,7 @@ const handleDeleteProduct = (product) => {
       showSuccess('Product deleted.');
     } catch (error) {
       console.error('Error deleting product:', error);
-      showAlert('Could not delete the product. Please try again.');
+      showAlert(getSaveErrorMessage(error, 'Could not delete the product. Please try again.'));
     }
   });
 };
@@ -1812,7 +1824,7 @@ const handleAddTerm = async () => {
     setIsAddTermsModalOpen(false);
   } catch (error) {
     console.error(editingTermId ? 'Error updating term:' : 'Error adding term:', error);
-    showAlert(editingTermId ? 'Could not update the term. Please try again.' : 'Could not save the term. Please try again.');
+    showAlert(getSaveErrorMessage(error, editingTermId ? 'Could not update the term. Please try again.' : 'Could not save the term. Please try again.'));
   }
 };
 
@@ -1845,7 +1857,7 @@ const handleAddTerm = async () => {
       showSuccess('Term deleted.');
     } catch (error) {
       console.error('Error deleting term:', error);
-      showAlert('Could not delete the term. Please try again.');
+      showAlert(getSaveErrorMessage(error, 'Could not delete the term. Please try again.'));
     }
   });
 };
@@ -1912,7 +1924,7 @@ const handleAddTerm = async () => {
     }
   } catch (error) {
     console.error('Error saving quotation:', error);
-    showAlert('Could not save the quotation. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save the quotation. Please try again.'));
   } finally {
     setIsSavingQuotation(false);
   }
@@ -2189,7 +2201,7 @@ const handleAddTerm = async () => {
     }
   } catch (error) {
     console.error('Error saving purchase order:', error);
-    showAlert('Could not save the purchase order. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save the purchase order. Please try again.'));
   } finally {
     setIsSavingPurchaseOrder(false);
   }
@@ -2546,7 +2558,7 @@ const handleAddTerm = async () => {
     }
   } catch (error) {
     console.error('Error saving proforma invoice:', error);
-    showAlert('Could not save the proforma invoice. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save the proforma invoice. Please try again.'));
   } finally {
     setIsSavingProformaInvoice(false);
   }
@@ -2768,7 +2780,7 @@ const handleAddTerm = async () => {
     }
   } catch (error) {
     console.error('Error saving delivery note:', error);
-    showAlert('Could not save the delivery note. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save the delivery note. Please try again.'));
   } finally {
     setIsSavingDeliveryNote(false);
   }
@@ -3128,7 +3140,7 @@ const handleAddTerm = async () => {
     }
   } catch (error) {
     console.error('Error saving invoice:', error);
-    showAlert('Could not save the invoice. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save the invoice. Please try again.'));
   } finally {
     setIsSavingInvoice(false);
   }
@@ -3273,7 +3285,7 @@ const handleAddTerm = async () => {
     }
   } catch (error) {
     console.error('Error saving receipt:', error);
-    showAlert('Could not save the receipt. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not save the receipt. Please try again.'));
   } finally {
     setIsSavingReceipt(false);
   }
@@ -3741,7 +3753,7 @@ const buildDeliveryNoteDocModel = (dn) => {
       await deliverGeneratedPdf(doc, sanitizedFileName);
     } catch (err) {
       console.error('PDF share failed:', err);
-      showAlert('Could not prepare the document for sharing. Please try again.');
+      showAlert(getSaveErrorMessage(err, 'Could not prepare the document for sharing. Please try again.'));
     }
   };
 
@@ -4193,7 +4205,7 @@ const buildDeliveryNoteDocModel = (dn) => {
       await deliverGeneratedPdf(doc, sanitizedFileName);
     } catch (err) {
       console.error('Quotation PDF share failed:', err);
-      showAlert('Could not prepare the document for sharing. Please try again.');
+      showAlert(getSaveErrorMessage(err, 'Could not prepare the document for sharing. Please try again.'));
     }
   };
 
@@ -4730,7 +4742,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     await deliverGeneratedPdf(doc, sanitizedFileName);
   } catch (err) {
     console.error('Document PDF share failed:', err);
-    showAlert('Could not prepare the document for sharing. Please try again.');
+    showAlert(getSaveErrorMessage(err, 'Could not prepare the document for sharing. Please try again.'));
   }
 };
 
@@ -4762,7 +4774,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
       setQuotationSubView('quotationList');
     } catch (error) {
       console.error('Error duplicating quotation:', error);
-      showAlert('Could not duplicate the quotation on the server. Please try again.');
+      showAlert(getSaveErrorMessage(error, 'Could not duplicate the quotation on the server. Please try again.'));
     }
   };
 
@@ -4776,7 +4788,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
   } catch (error) {
     console.error('Error updating quotation status:', error);
     persistQuotations(previous);
-    showAlert('Could not update the quotation status. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not update the quotation status. Please try again.'));
   }
 };
 
@@ -4826,7 +4838,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     setQuotationSubView('purchaseOrderList');
   } catch (error) {
     console.error('Error duplicating purchase order:', error);
-    showAlert('Could not duplicate the purchase order. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not duplicate the purchase order. Please try again.'));
   }
 };
 
@@ -4874,7 +4886,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     setQuotationSubView('proformaInvoiceList');
   } catch (error) {
     console.error('Error duplicating proforma invoice:', error);
-    showAlert('Could not duplicate the proforma invoice. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not duplicate the proforma invoice. Please try again.'));
   }
 };
 
@@ -4888,7 +4900,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
   } catch (error) {
     console.error('Error updating proforma invoice status:', error);
     persistProformaInvoices(previous);
-    showAlert('Could not update the proforma invoice status. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not update the proforma invoice status. Please try again.'));
   }
 };
 
@@ -4933,7 +4945,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     setQuotationSubView('deliveryNoteList');
   } catch (error) {
     console.error('Error duplicating delivery note:', error);
-    showAlert('Could not duplicate the delivery note. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not duplicate the delivery note. Please try again.'));
   }
 };
 
@@ -4974,7 +4986,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     setQuotationSubView('invoiceList');
   } catch (error) {
     console.error('Error duplicating invoice:', error);
-    showAlert('Could not duplicate the invoice. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not duplicate the invoice. Please try again.'));
   }
 };
 
@@ -4988,7 +5000,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
   } catch (error) {
     console.error('Error updating invoice status:', error);
     persistInvoices(previous);
-    showAlert('Could not update the invoice status. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not update the invoice status. Please try again.'));
   }
 };
 
@@ -5033,7 +5045,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
     setQuotationSubView('receiptList');
   } catch (error) {
     console.error('Error duplicating receipt:', error);
-    showAlert('Could not duplicate the receipt. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not duplicate the receipt. Please try again.'));
   }
 };
 
@@ -5207,7 +5219,7 @@ const shareStandardDocumentPdf = async (model, fileNameBase) => {
       await deliverGeneratedPdf(doc, sanitizedFileName);
     } catch (err) {
       console.error('Receipt PDF share failed:', err);
-      showAlert('Could not prepare the document for sharing. Please try again.');
+      showAlert(getSaveErrorMessage(err, 'Could not prepare the document for sharing. Please try again.'));
     }
   };
 
@@ -7772,7 +7784,7 @@ return (
                   } catch (error) {
                     console.error('Error deleting quotation:', error);
                     persistQuotations(previous); // restore on failure
-                    showAlert('Could not delete the quotation on the server. Reloading your quotations.');
+                    showAlert(getSaveErrorMessage(error, 'Could not delete the quotation on the server. Reloading your quotations.'));
                     if (loggedInUser?.userId) await loadUserQuotations(loggedInUser.userId);
                   }
                 });
@@ -7837,7 +7849,7 @@ return (
                       setQuotationSubView('proformaInvoiceDetail');
                     } catch (error) {
                       console.error('Error converting quotation to proforma invoice:', error);
-                      showAlert('Could not convert to Proforma Invoice. Please try again.');
+                      showAlert(getSaveErrorMessage(error, 'Could not convert to Proforma Invoice. Please try again.'));
                     }
                   }}
                   style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
@@ -7882,7 +7894,7 @@ return (
                       setQuotationSubView('invoiceDetail');
                     } catch (error) {
                       console.error('Error converting quotation to invoice:', error);
-                      showAlert('Could not convert to Invoice. Please try again.');
+                      showAlert(getSaveErrorMessage(error, 'Could not convert to Invoice. Please try again.'));
                     }
                   }}
                   style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
@@ -8648,7 +8660,7 @@ return (
                   } catch (error) {
                     console.error('Error deleting purchase order:', error);
                     persistPurchaseOrders(previous);
-                    showAlert('Could not delete the purchase order. Please try again.');
+                    showAlert(getSaveErrorMessage(error, 'Could not delete the purchase order. Please try again.'));
                   }
                 });
               }}
@@ -9647,7 +9659,7 @@ showConfirm('Delete this proforma invoice?', async () => {
   } catch (error) {
     console.error('Error deleting proforma invoice:', error);
     persistProformaInvoices(previous);
-    showAlert('Could not delete the proforma invoice. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not delete the proforma invoice. Please try again.'));
   }
 });
 }}
@@ -9703,7 +9715,7 @@ showConfirm('Delete this proforma invoice?', async () => {
                       setQuotationSubView('invoiceDetail');
                     } catch (error) {
                       console.error('Error converting proforma invoice to invoice:', error);
-                      showAlert('Could not convert to Invoice. Please try again.');
+                      showAlert(getSaveErrorMessage(error, 'Could not convert to Invoice. Please try again.'));
                     }
                   }}
                   style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
@@ -9748,7 +9760,7 @@ showConfirm('Delete this proforma invoice?', async () => {
                       setQuotationSubView('deliveryNoteDetail');
                     } catch (error) {
                       console.error('Error converting proforma invoice to delivery note:', error);
-                      showAlert('Could not convert to Delivery Note. Please try again.');
+                      showAlert(getSaveErrorMessage(error, 'Could not convert to Delivery Note. Please try again.'));
                     }
                   }}
                   style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
@@ -10386,7 +10398,7 @@ showConfirm('Delete this delivery note?', async () => {
   } catch (error) {
     console.error('Error deleting delivery note:', error);
     persistDeliveryNotes(previous);
-    showAlert('Could not delete the delivery note. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not delete the delivery note. Please try again.'));
   }
 });
 }}
@@ -11393,7 +11405,7 @@ showConfirm('Delete this delivery note?', async () => {
                   } catch (error) {
                     console.error('Error deleting invoice:', error);
                     persistInvoices(previous);
-                    showAlert('Could not delete the invoice. Please try again.');
+                    showAlert(getSaveErrorMessage(error, 'Could not delete the invoice. Please try again.'));
                   }
                 });
               }}
@@ -11457,7 +11469,7 @@ showConfirm('Delete this delivery note?', async () => {
                       setQuotationSubView('deliveryNoteDetail');
                     } catch (error) {
                       console.error('Error converting invoice to delivery note:', error);
-                      showAlert('Could not convert to Delivery Note. Please try again.');
+                      showAlert(getSaveErrorMessage(error, 'Could not convert to Delivery Note. Please try again.'));
                     }
                   }}
                   style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '14px 0', borderBottom: '1px solid #F1F5F9', fontSize: '17px', color: '#0F172A', cursor: 'pointer' }}
@@ -11936,7 +11948,7 @@ showConfirm('Delete this receipt?', async () => {
   } catch (error) {
     console.error('Error deleting receipt:', error);
     persistReceipts(previous);
-    showAlert('Could not delete the receipt. Please try again.');
+    showAlert(getSaveErrorMessage(error, 'Could not delete the receipt. Please try again.'));
   }
 });
 }}

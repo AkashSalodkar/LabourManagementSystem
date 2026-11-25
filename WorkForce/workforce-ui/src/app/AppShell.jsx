@@ -432,6 +432,16 @@ export default function AppShell() {
     (!hasCurrentSubscriptionStatus ||
       subStatus.accessAllowed !== true)
   );
+  // Last status we know for sure for THIS user. A failed/slow refresh (typical right after the app
+  // was in the background) must never wipe it, otherwise a trial user is thrown onto the Subscription page.
+  const subStatusRef = useRef(null);
+  subStatusRef.current = hasCurrentSubscriptionStatus ? subStatus : null;
+  // True only while we already KNOW the user's trial/subscription is over.
+  const subExpiredRef = useRef(false);
+  subExpiredRef.current = hasCurrentSubscriptionStatus && subStatus.accessAllowed === false;
+  // While true, the forced Subscription page stays hidden so the user first sees where they were,
+  // the "Resume?" prompt and then the "trial has ended" popup (OK opens the Subscription page).
+  const [subGatePending, setSubGatePending] = useState(false);
   const [rewardPrompt, setRewardPrompt] = useState(null);
   const [rewardPromptBusy, setRewardPromptBusy] = useState(false);
   const [rewardPromptError, setRewardPromptError] = useState('');
@@ -466,8 +476,12 @@ export default function AppShell() {
       setSubError('');
       return s;
     } catch (e) {
-      setSubStatus(null);
-      setSubStatusUserId(null);
+      // Keep the last known status if we have one (trial users keep their place in the app);
+      // only a first-ever load with nothing known stays "unknown" and shows the Retry screen.
+      if (!subStatusRef.current) {
+        setSubStatus(null);
+        setSubStatusUserId(null);
+      }
       setSubError('Could not load subscription status. Check your connection and try again.');
       return null;
     } finally { setSubLoading(false); }
@@ -935,6 +949,7 @@ export default function AppShell() {
       backgroundedAtRef.current = 0;
       if (!leftAt || Date.now() - leftAt < RESUME_PROMPT_AFTER_MS) return;
       if (!resumeAuthRef.current || resumeBlockedRef.current) return;
+      if (subExpiredRef.current) setSubGatePending(true);
       setResumePrompt((current) => current || 'ask');
     };
     // appStateChange covers the Android app; visibilitychange covers the browser. On a device both
@@ -958,8 +973,30 @@ export default function AppShell() {
       await wakeApi({ force: true });
       // 2) Re-validate the session and refresh subscription status so the next Save goes straight through.
       await api.get('/auth/session-check').catch(() => {});
-      await loadSubscriptionStatus();
+      const s = await loadSubscriptionStatus();
       setResumePrompt(null);
+      if (s && s.accessAllowed === false) {
+        // Trial / subscription is over: popup first, OK takes the user to the Subscription page.
+        setSubGatePending(true);
+        setAppPopup({
+          open: true,
+          tone: 'warning',
+          message: s.state === 'expired'
+            ? 'Your subscription has ended. Subscribe to continue making changes.'
+            : 'Your free trial has ended. Subscribe to continue making changes.',
+          confirmLabel: t('ok'),
+          onConfirm: () => {
+            closeAppPopup();
+            setSubGatePending(false);
+            setActiveModule(null);
+            setIsHelpPageOpen(false);
+            setIsSubscribePageOpen(true);
+          },
+        });
+      } else {
+        // Trial / subscription still valid (or status unreachable): carry on exactly where they were.
+        setSubGatePending(false);
+      }
     } catch (error) {
       setResumePrompt('error');
     }
@@ -1200,7 +1237,7 @@ export default function AppShell() {
                 setIsSavingProfile(false);
               }
             }}
-            style={{ width: '100%', padding: '15px', backgroundColor: '#0B3C9B', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(11, 60, 155, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
+            style={{ width: '100%', padding: '15px', backgroundColor: '#2554EB', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '14.5px', fontWeight: '700', cursor: isSavingProfile ? 'default' : 'pointer', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 6px 16px rgba(37, 84, 235, 0.25)', opacity: isSavingProfile ? 0.7 : 1 }}>
             <span>&#128190;</span>{isSavingProfile ? t('loading') || 'Saving...' : t('saveChanges')}
           </button>
 
@@ -1289,6 +1326,7 @@ export default function AppShell() {
     showSuccess,
     startUpiPayment,
     subError,
+    subGatePending,
     subLoading,
     subLocked,
     subOrder,
@@ -1366,7 +1404,7 @@ export default function AppShell() {
               {resumePrompt === 'error' && t('resumeFailed')}
             </p>
             {resumePrompt !== 'connecting' && (
-              <button type="button" onClick={resumeApp} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#0B3C9B', color: '#fff', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
+              <button type="button" onClick={resumeApp} style={{ width: '100%', padding: '13px', border: 0, borderRadius: '11px', background: '#2554EB', color: '#fff', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>
                 {resumePrompt === 'error' ? t('resumeRetry') : t('yes')}
               </button>
             )}
