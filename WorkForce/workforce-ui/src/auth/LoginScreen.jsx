@@ -466,7 +466,7 @@ export default function LoginScreen() {
   return (
     <div style={authStyles.page}>
       {/* ---- App version (hardcoded; update manually on each release) ---- */}
-      <span style={authStyles.versionBadge}>Version 1.2.2</span>
+      <span style={authStyles.versionBadge}>Version 1.3</span>
 
       <div style={authStyles.pageInner}>
 
