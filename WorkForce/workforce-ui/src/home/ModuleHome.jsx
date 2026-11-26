@@ -301,7 +301,7 @@ export default function ModuleHome() {
                           <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748B' }}>Pay securely with UPI apps or other available payment methods</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#0B3C9B' }}>{'\u20B9'}99</p>
+                          <p style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: '#2554EB' }}>{'\u20B9'}99</p>
                           <span style={{ fontSize: '11px', color: '#94A3B8' }}>/ 30 days</span>
                         </div>
                       </div>
@@ -313,7 +313,7 @@ export default function ModuleHome() {
                       )}
 
                       {(needsPayment || state === 'active') && subOrderState === 'idle' && (
-                        <button onClick={startUpiPayment} style={{ width: '100%', marginTop: '14px', padding: '13px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                        <button onClick={startUpiPayment} style={{ width: '100%', marginTop: '14px', padding: '13px', borderRadius: '12px', border: 'none', backgroundColor: '#2554EB', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
                           {state === 'active' ? 'Renew for \u20B999' : 'Pay \u20B999'}
                         </button>
                       )}
@@ -327,7 +327,7 @@ export default function ModuleHome() {
                           {subOrderState === 'waiting' && (
                             <Fragment>
                               <p style={{ margin: '10px 0 0 0', fontSize: '15px', fontWeight: '700', color: '#1E293B' }}>Complete your payment of {'\u20B9'}{subOrder.amount}</p>
-                              <button onClick={() => openSubscriptionCheckout(subOrder).catch((error) => setSubError(error?.message || 'Could not open payment options. Please try again.'))} style={{ marginTop: '10px', padding: '12px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#0B3C9B', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                              <button onClick={() => openSubscriptionCheckout(subOrder).catch((error) => setSubError(error?.message || 'Could not open payment options. Please try again.'))} style={{ marginTop: '10px', padding: '12px 20px', borderRadius: '12px', border: 'none', backgroundColor: '#2554EB', color: '#ffffff', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
                                 Choose a UPI app for making payment
                               </button>
                             </Fragment>
